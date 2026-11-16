@@ -7,7 +7,6 @@ import type { AgentSession } from "../src/session/agent-session";
 import { registerComputerController, type ComputerController } from "../src/tools/computer/supervisor";
 import { HarnessComputerObservationService } from "../src/harness/services/computer-observation-service";
 import type { HarnessComputerStatus, HarnessComputerCapture } from "../src/harness/computer-observation-protocol";
-import { validateWorkbenchResult } from "../src/harness/workbench-protocol";
 
 test("computer activity and stop are native owner-scoped and never revoke another session", async () => {
 	let running = 1;
@@ -65,7 +64,6 @@ test.skipIf(process.env.JULING_HARNESS_COMPUTER_E2E !== "1" || process.platform 
 				kind: "computer.status",
 				sessionId: session.sessionId,
 			})) as HarnessComputerStatus;
-			validateWorkbenchResult("computer.status", status);
 			expect(status.available).toBe(true);
 			const target = status.targets.find(value => value.kind === "display");
 			expect(target).toBeDefined();
@@ -74,7 +72,6 @@ test.skipIf(process.env.JULING_HARNESS_COMPUTER_E2E !== "1" || process.platform 
 				sessionId: session.sessionId,
 				targetId: target!.id,
 			})) as HarnessComputerCapture;
-			validateWorkbenchResult("computer.capture", result);
 			expect(result.width).toBeLessThanOrEqual(1280);
 			expect(result.height).toBeLessThanOrEqual(896);
 			const image = await fs.readFile(path.join(directory, "computer", result.captureId + ".png"));

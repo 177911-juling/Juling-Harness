@@ -15,12 +15,7 @@ import {
 } from "../../internal-urls";
 import type { AgentSession } from "../../session/agent-session";
 import { resizeImage } from "../../utils/image-resize";
-import {
-	validateResourceOperation,
-	validateResourcePage,
-	type ResourceOperation,
-	type ResourcePage,
-} from "../resources-protocol";
+import { type ResourceOperation, type ResourcePage } from "../resources-protocol";
 export class HarnessResourceService {
 	constructor(readonly session: AgentSession) {}
 	async local(operation: LocalResourceOperation): Promise<unknown> {
@@ -68,7 +63,6 @@ export class HarnessResourceService {
 	}
 
 	async read(operation: ResourceOperation): Promise<ResourcePage> {
-		validateResourceOperation(operation);
 		if (operation.sessionId !== this.session.sessionId || !this.session.harnessToolSession)
 			throw Error("Resource session is no longer active");
 		const handlers: Record<string, ProtocolHandler> = {
@@ -140,7 +134,6 @@ export class HarnessResourceService {
 			...(image ? { image } : {}),
 		};
 		if (operation.sessionId !== this.session.sessionId) throw Error("Resource session changed while reading");
-		validateResourcePage(result);
 		return result;
 	}
 }

@@ -4,6 +4,22 @@ import { DarwinPlatformPort } from "../src/darwin-platform-port.js";
 import type { DarwinPlatformServices } from "../src/darwin-services.js";
 
 describe("DarwinPlatformPort", () => {
+  it("Linux uses the POSIX endpoint and delegates external links through its injected services", async () => {
+    const opened: string[] = [];
+    const profile = "/home/test/.config/juling-harness";
+    const port = new DarwinPlatformPort({
+      appDataDirectory: () => profile,
+      createCurrentUserOnlyEndpoint: directory => { assert.equal(directory, profile); return "linux-authority"; },
+      revealInFinder() {}, openExternal: url => { opened.push(url); },
+      attachProcess() {}, requestProcessStop() {}, forceProcessStop() {}, releaseProcess() {},
+    }, "linux");
+    assert.equal(port.platform, "linux");
+    assert.equal(port.runtimeExecutableName(), "omp");
+    assert.deepEqual(await port.createPrivateEndpoint(await port.appDataDirectory()), { kind: "unix-socket", authority: "linux-authority" });
+    await port.openExternal("https://github.com/177911-juling/juling-harness");
+    assert.deepEqual(opened, ["https://github.com/177911-juling/juling-harness"]);
+  });
+
   it("should create a darwin platform port", () => {
     const services: DarwinPlatformServices = {
       appDataDirectory: () => "/Users/test/Library/Application Support/juling-harness",

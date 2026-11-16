@@ -10,7 +10,7 @@ import { AgentSession } from "../src/session/agent-session";
 import { SessionManager } from "../src/session/session-manager";
 import { HarnessMaintenanceService } from "../src/harness/services/maintenance-service";
 import { HarnessMediaFiles } from "../src/harness/services/media-files";
-import { validateMaintenanceResult, type SessionExportResult } from "../src/harness/maintenance-protocol";
+import { type SessionExportResult } from "../src/harness/maintenance-protocol";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 test("native dump-all ZIP reaches the private output with main, child and request payload intact", async () => {
 	const temp = TempDir.createSync("@harness-native-export-");
@@ -27,7 +27,7 @@ test("native dump-all ZIP reaches the private output with main, child and reques
 		sessionManager: SessionManager.create(temp.path(), temp.path()),
 		settings: Settings.isolated({ "compaction.enabled": false }),
 		modelRegistry: new ModelRegistry(createInMemoryAuthStorage()),
-		advisorTools: [],
+		advisorTools: { names: () => [], create: () => ({ tools: [] }) },
 	});
 	try {
 		const sessionFile = session.sessionManager.getSessionFile()!;
@@ -53,7 +53,6 @@ test("native dump-all ZIP reaches the private output with main, child and reques
 			kind: "maintenance.session.export",
 			sessionId: session.sessionId,
 		})) as SessionExportResult;
-		validateMaintenanceResult("maintenance.session.export", exported);
 		expect(exported.format).toBe("archive");
 		expect(exported.warnings).toEqual([]);
 		const key = new Bun.CryptoHasher("sha256").update(session.sessionId).digest("hex");

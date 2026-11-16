@@ -166,6 +166,23 @@ const context = {
 const WORKSPACE_A = { workspaceId: "workspace-a", cwd: "C:/workspace" };
 const WORKSPACE_B = { workspaceId: "workspace-b", cwd: "C:/other" };
 
+test("new conversation Workers receive the explicitly selected model at launch", async () => {
+  const h = createHarness();
+  const selected: Array<string | undefined> = [];
+  const factory = fakeWorkerFactory(h.state);
+  const port = createDesktopRuntimeSessionPort({
+    ownerId: "model-selection-test", sessionLeaseStore: new InMemorySessionLeaseStore(),
+    workerPortFactory: input => { selected.push(input.model); return factory(input); },
+  });
+  try {
+    await port.start(context);
+    await port.openContextSession!(WORKSPACE_B, { kind: "fresh", model: "test/chosen" });
+    await port.switchSession!({ kind: "fresh", model: "test/other" });
+    assert.deepEqual(selected, [undefined, "test/chosen", "test/other"]);
+    assert.equal(h.state.launchedIn[1]?.workspaceId, WORKSPACE_B.workspaceId);
+  } finally { await port.stop(); }
+});
+
 test("opening background conversation contexts preserves foreground and each worker workspace", async () => {
   const { port, state } = createHarness();
   try {
@@ -320,18 +337,18 @@ test("update restart postpones interactions, queued commands and background work
   const profileDirectory = await mkdtemp(join(tmpdir(), "omp-restart-blocked-"));
   const { port, state } = createHarness();
   const blockers: Array<[Partial<OperatorStateSnapshot>, RegExp]> = [
-    [{ isStreaming: true }, /任务/],
-    [{ isCompacting: true }, /压缩/],
-    [{ pendingInteraction: { interactionId: "approval" } as never }, /交互/],
-    [{ plan: { status: "review" } as never }, /计划审阅/],
-    [{ pendingMessages: 1 }, /排队消息/],
-    [{ activeCommandIds: ["command" as never] }, /命令/],
+    [{ isStreaming: true }, /Tasks are still running/],
+    [{ isCompacting: true }, /compacting/],
+    [{ pendingInteraction: { interactionId: "approval" } as never }, /interactions/],
+    [{ plan: { status: "review" } as never }, /plan review/],
+    [{ pendingMessages: 1 }, /Queued messages/],
+    [{ activeCommandIds: ["command" as never] }, /Commands/],
     ...["starting", "running", "reviving"].map(status => [
-      { agents: [{ status, activeJobIds: [] }] as never }, /后台任务/,
+      { agents: [{ status, activeJobIds: [] }] as never }, /Background tasks/,
     ] as [Partial<OperatorStateSnapshot>, RegExp]),
-    [{ agents: [{ status: "idle", activeJobIds: ["job"] }] as never }, /后台任务/],
+    [{ agents: [{ status: "idle", activeJobIds: ["job"] }] as never }, /Background tasks/],
     ...["queued", "running"].map(status => [
-      { jobs: [{ status }] as never }, /后台任务/,
+      { jobs: [{ status }] as never }, /Background tasks/,
     ] as [Partial<OperatorStateSnapshot>, RegExp]),
   ];
   try {

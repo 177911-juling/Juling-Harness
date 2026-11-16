@@ -606,6 +606,7 @@ describe("conversation events enter Harness Bridge", () => {
 			sessionManager: manager,
 			session,
 			services: {
+				workbench: { views: { cancelClose: () => {} } },
 				conversation,
 				transcript,
 				pause: new HarnessPauseService(new AgentPauseGate()),
@@ -616,7 +617,11 @@ describe("conversation events enter Harness Bridge", () => {
 					onChange: () => () => {},
 					dispose: () => {},
 				},
-				tree: { getTree: () => ({ leafId: null, roots: [] }), navigate: async () => ({}) },
+				tree: {
+					getTree: () => ({ leafId: null, roots: [] }),
+					navigate: async () => ({}),
+					cancelReanswer: () => {},
+				},
 				fork: { fork: async () => ({ forked: true, sessionId: manager.getSessionId() }) },
 				commands: new HarnessCommandManifestService(session as never),
 				agents: { list: () => [], onChange: () => () => {} },

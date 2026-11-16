@@ -1,4 +1,5 @@
 import type { QueryInput, QueryResult } from "@juling-harness/client-contract";
+import type { ModelServicesCommandResultMap } from "@juling-harness/harness-protocol";
 import type { ModelAdaptationInput, ModelAdaptationResult, ModelCatalogRefreshResult } from "@juling-harness/client-contract";
 /**
  * Injected service ports consumed by {@link HarnessHostClientFacade}.
@@ -331,7 +332,8 @@ export type HostInvokeOutcome =
   | BtwBranchOutcome
   | HarnessRuntimeSettingsGetResult
   | HarnessRuntimeSettingsSetResult
-  | HarnessPlanSaveAndQuitResult;
+  | HarnessPlanSaveAndQuitResult
+  | ModelServicesCommandResultMap[keyof ModelServicesCommandResultMap];
 
 /** One session-history row as supplied by the Host-side catalog provider. */
 export interface HostCatalogEntry {
@@ -564,6 +566,7 @@ export interface HostAgentDefinitionsService {
 export interface HostWorkspaceService {
   list(): WorkspaceListReadModel | Promise<WorkspaceListReadModel>;
   open(input: { readonly workspaceId: WorkspaceId }): Promise<WorkspaceListReadModel>;
+  openPath?(input: { readonly path: string }): Promise<WorkspaceListReadModel>;
   pick(input?: { readonly name?: string }): Promise<WorkspaceListReadModel>;
 }
 
@@ -576,6 +579,19 @@ export interface HostWorkspaceFileService {
   get(input: { readonly workspaceId: WorkspaceId; readonly path?: string }): WorkspaceFileTreeReadModel | Promise<WorkspaceFileTreeReadModel>;
   createFile(input: { readonly workspaceId: WorkspaceId; readonly path: string }): WorkspaceFileMutationResult | Promise<WorkspaceFileMutationResult>;
   createDirectory(input: { readonly workspaceId: WorkspaceId; readonly path: string }): WorkspaceFileMutationResult | Promise<WorkspaceFileMutationResult>;
+}
+
+/** Host-owned absolute-path file service, shared by Desktop and SSH Hosts. */
+export interface HostSystemFileService {
+  places(): Promise<import("@juling-harness/client-contract").SystemPlaces>;
+  list(input: import("@juling-harness/client-contract").SystemListInput): Promise<import("@juling-harness/client-contract").SystemDirectory>;
+  inspect(input: import("@juling-harness/client-contract").SystemFileTarget): Promise<import("@juling-harness/client-contract").SystemFileInfo>;
+  readText(input: import("@juling-harness/client-contract").SystemFileTarget): Promise<import("@juling-harness/client-contract").SystemFileText>;
+  readChunk(input: import("@juling-harness/client-contract").SystemFileChunkInput): Promise<import("@juling-harness/client-contract").WorkspaceFileChunk>;
+  writeText(input: import("@juling-harness/client-contract").SystemFileWrite): Promise<import("@juling-harness/client-contract").SystemFileSaveResult>;
+  createDirectory(input: { readonly parent: string; readonly name: string }): Promise<import("@juling-harness/client-contract").SystemFileMutationResult>;
+  rename(input: { readonly path: string; readonly name: string }): Promise<import("@juling-harness/client-contract").SystemFileMutationResult>;
+  trash?(input: { readonly paths: readonly string[] }): Promise<{ readonly paths: readonly string[] }>;
 }
 
 /** Host-owned system Git adapter. Repository paths and process details never cross this port. */
@@ -652,7 +668,7 @@ export interface HostInteractionRespondInput {
  * fabricates a completion.
  */
 export interface HostSemanticCommandService {
-  create?(input?: { readonly noContextFiles?: boolean }): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
+  create?(input?: { readonly noContextFiles?: boolean; readonly model?: string }): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
   resume(input: { readonly threadId: ThreadId; readonly model?: string }): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
   drop(input: {
     readonly threadId: ThreadId;

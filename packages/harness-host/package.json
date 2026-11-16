@@ -1,6 +1,6 @@
 {
   "name": "@juling-harness/harness-host",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "main": "./dist/src/index.js",
@@ -18,8 +18,8 @@
     "test:built": "node --test \"dist/test/*.test.js\""
   },
   "dependencies": {
-    "@juling-harness/runtime-installer": "0.2.0",
-    "@juling-harness/harness-protocol": "0.2.0",
+    "@juling-harness/runtime-installer": "0.2.2",
+    "@juling-harness/harness-protocol": "0.2.2",
     "ignore": "^7.0.6"
   }
 }

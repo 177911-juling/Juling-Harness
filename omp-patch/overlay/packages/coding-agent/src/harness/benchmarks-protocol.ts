@@ -1,4 +1,21 @@
+/** The native one-based --account choice, bound to stable credential rows for each provider. */
+export interface BenchmarkAccountSelection {
+	account: number;
+	credentialIds: Record<string, number>;
+}
+export interface BenchmarkAccountOption {
+	account: number;
+	credentialId: number;
+	label: string;
+}
+export interface BenchmarkAccounts {
+	providerId: string;
+	accounts: BenchmarkAccountOption[];
+}
+
 export interface BenchmarkSpec {
+	account?: BenchmarkAccountSelection;
+	serviceTier?: string;
 	models: string[];
 	profile: "chat" | "prefill" | "generation" | "mix" | "cache" | "detailed";
 	runs: number;
@@ -79,12 +96,14 @@ export interface BenchmarkSnapshot {
 	models: BenchmarkModelResult[];
 }
 export type BenchmarkOperation =
+	| { kind: "benchmarks.accounts.read"; sessionId: string; providerId: string }
 	| { kind: "benchmarks.list"; sessionId: string }
 	| { kind: "benchmarks.start"; sessionId: string; spec: BenchmarkSpec }
 	| { kind: "benchmarks.read"; sessionId: string; id: string }
 	| { kind: "benchmarks.cancel"; sessionId: string; id: string }
 	| { kind: "benchmarks.close"; sessionId: string; id: string };
 export interface BenchmarkResultMap {
+	"benchmarks.accounts.read": BenchmarkAccounts;
 	"benchmarks.list": { runs: BenchmarkRun[] };
 	"benchmarks.start": { run: BenchmarkRun };
 	"benchmarks.read": BenchmarkSnapshot;
@@ -92,6 +111,7 @@ export interface BenchmarkResultMap {
 	"benchmarks.close": { closed: boolean };
 }
 export const BENCHMARK_OPERATION_KINDS = [
+	"benchmarks.accounts.read",
 	"benchmarks.list",
 	"benchmarks.start",
 	"benchmarks.read",
@@ -121,6 +141,22 @@ function number(value: unknown, min = 0, max = Number.MAX_VALUE, integer = false
 	)
 		throw new Error("Invalid benchmark number");
 }
+export function validateBenchmarkAccountSelection(value: unknown): asserts value is BenchmarkAccountSelection {
+	const selection = record(value, ["account", "credentialIds"]);
+	number(selection.account, 1, Number.MAX_SAFE_INTEGER, true);
+	if (
+		!selection.credentialIds ||
+		typeof selection.credentialIds !== "object" ||
+		Array.isArray(selection.credentialIds)
+	)
+		throw new Error("Choose the stored credential for each selected provider");
+	const entries = Object.entries(selection.credentialIds);
+	if (!entries.length || entries.length > 8) throw new Error("Choose 1–8 provider credentials");
+	for (const [provider, id] of entries) {
+		text(provider);
+		number(id, 1, Number.MAX_SAFE_INTEGER, true);
+	}
+}
 export function validateBenchmarkSpec(value: unknown): asserts value is BenchmarkSpec {
 	const spec = record(value, [
 		"models",
@@ -131,7 +167,11 @@ export function validateBenchmarkSpec(value: unknown): asserts value is Benchmar
 		"prompt",
 		"prefillBytes",
 		"cachePrefixBytes",
+		"serviceTier",
+		"account",
 	]);
+	if (spec.account !== undefined) validateBenchmarkAccountSelection(spec.account);
+	if (spec.serviceTier !== undefined) text(spec.serviceTier);
 	if (
 		!Array.isArray(spec.models) ||
 		spec.models.length < 1 ||
@@ -170,141 +210,16 @@ export function validateBenchmarkOperation(value: unknown): asserts value is Ben
 	const input = record(value, [
 		"kind",
 		"sessionId",
-		...(kind === "benchmarks.start" ? ["spec"] : kind === "benchmarks.list" ? [] : ["id"]),
+		...(kind === "benchmarks.start"
+			? ["spec"]
+			: kind === "benchmarks.accounts.read"
+				? ["providerId"]
+				: kind === "benchmarks.list"
+					? []
+					: ["id"]),
 	]);
 	text(input.sessionId);
 	if (kind === "benchmarks.start") validateBenchmarkSpec(input.spec);
+	else if (kind === "benchmarks.accounts.read") text(input.providerId);
 	else if (kind !== "benchmarks.list") text(input.id);
-}
-function run(value: unknown): void {
-	const row = record(value, ["id", "sessionId", "createdAt", "finishedAt", "state", "spec", "error"]);
-	text(row.id);
-	text(row.sessionId);
-	number(row.createdAt, 0, Number.MAX_SAFE_INTEGER, true);
-	if (row.finishedAt !== undefined) number(row.finishedAt, 0, Number.MAX_SAFE_INTEGER, true);
-	if (!["running", "cancelling", "completed", "cancelled", "failed"].includes(row.state as string))
-		throw new Error("Invalid benchmark state");
-	validateBenchmarkSpec(row.spec);
-	if (row.error !== undefined) text(row.error, 4000);
-}
-function stats(value: unknown): void {
-	const row = record(value, [
-		"ttftMs",
-		"durationMs",
-		"tokensPerSecond",
-		"generationTps",
-		"prefillTps",
-		"inputTokens",
-		"outputTokens",
-		"cost",
-	]);
-	for (const key of ["ttftMs", "durationMs", "tokensPerSecond", "generationTps", "prefillTps"]) {
-		const metric = record(row[key], ["mean", "min", "p50", "p95", "max"]);
-		for (const field of ["mean", "min", "p50", "p95", "max"]) number(metric[field]);
-	}
-	for (const key of ["inputTokens", "outputTokens", "cost"]) number(row[key]);
-}
-export function validateBenchmarkResult(kind: BenchmarkOperation["kind"], value: unknown): void {
-	if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 700000)
-		throw new Error("Benchmark result exceeds its budget");
-	if (kind === "benchmarks.close") {
-		if (typeof record(value, ["closed"]).closed !== "boolean") throw new Error("Invalid close result");
-		return;
-	}
-	if (kind === "benchmarks.list") {
-		const input = record(value, ["runs"]);
-		if (!Array.isArray(input.runs) || input.runs.length > 10) throw new Error("Invalid run list");
-		input.runs.forEach(run);
-		return;
-	}
-	const input = record(value, kind === "benchmarks.read" ? ["run", "models"] : ["run"]);
-	run(input.run);
-	if (kind !== "benchmarks.read") return;
-	if (!Array.isArray(input.models) || input.models.length > 8) throw new Error("Invalid benchmark models");
-	for (const entry of input.models) {
-		const model = record(entry, [
-			"selector",
-			"model",
-			"state",
-			"total",
-			"completed",
-			"failed",
-			"inFlight",
-			"stats",
-			"byChallenge",
-			"measurements",
-			"phases",
-		]);
-		text(model.selector);
-		text(model.model);
-		if (!["queued", "running", "done"].includes(model.state as string)) throw new Error("Invalid model run state");
-		for (const key of ["total", "completed", "failed", "inFlight"]) number(model[key], 0, 80, true);
-		if (model.stats !== null) stats(model.stats);
-		if (model.phases !== undefined)
-			for (const phase of Object.values(record(model.phases, ["single", "parallel", "prefill"]))) {
-				const p = record(phase, ["concurrency", "runs", "wallMs", "aggregateTps", "stats"]);
-				for (const key of ["concurrency", "runs", "wallMs", "aggregateTps"]) number(p[key]);
-				if (p.stats !== null) stats(p.stats);
-			}
-		const groups = record(model.byChallenge, ["chat", "prefill", "generation"]);
-		Object.values(groups).forEach(stats);
-		if (!Array.isArray(model.measurements) || model.measurements.length > 80) throw new Error("Invalid measurements");
-		for (const item of model.measurements) {
-			const measurement = record(item, [
-				"ok",
-				"transport",
-				"challenge",
-				"error",
-				"phase",
-				"workloadPhase",
-				"cacheReadTokens",
-				"cacheWriteTokens",
-				"cacheObservations",
-				"ttftMs",
-				"durationMs",
-				"generationMs",
-				"inputTokens",
-				"outputTokens",
-				"tokensPerSecond",
-				"generationTps",
-				"prefillTps",
-				"cost",
-			]);
-			if (
-				measurement.workloadPhase !== undefined &&
-				!["single", "parallel", "prefill"].includes(measurement.workloadPhase as string)
-			)
-				throw new Error("Invalid workload phase");
-			if (typeof measurement.ok !== "boolean") throw new Error("Invalid measurement");
-			if (measurement.error !== undefined) text(measurement.error, 4000);
-			if (
-				measurement.challenge !== undefined &&
-				!["chat", "prefill", "generation"].includes(measurement.challenge as string)
-			)
-				throw new Error("Invalid challenge");
-			if (
-				measurement.phase !== undefined &&
-				!["cold", "warm", "single", "parallel", "prefill"].includes(measurement.phase as string)
-			)
-				throw new Error("Invalid benchmark phase");
-			if (
-				measurement.cacheObservations !== undefined &&
-				(!Array.isArray(measurement.cacheObservations) ||
-					measurement.cacheObservations.length > 4 ||
-					measurement.cacheObservations.some(
-						item =>
-							![
-								"prompt_cache_read_observed",
-								"prompt_cache_write_observed",
-								"response_cache_hit_observed",
-								"no_provider_proof",
-							].includes(item),
-					))
-			)
-				throw new Error("Invalid cache observation");
-			for (const [key, value] of Object.entries(measurement))
-				if (!["ok", "transport", "error", "challenge", "phase", "workloadPhase", "cacheObservations"].includes(key))
-					number(value);
-		}
-	}
 }

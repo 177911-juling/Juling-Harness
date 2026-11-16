@@ -1,4 +1,10 @@
 import { RUNTIME_VIEW_KINDS, isRuntimeViewKind, type RuntimeViewOperation } from "./runtime-views-protocol";
+import { isSelectiveCommitKind, validateSelectiveCommitOperation } from "./commit-protocol";
+import {
+	MODEL_SERVICES_COMMAND_KINDS,
+	isModelServicesKind,
+	type ModelServicesOperation,
+} from "./model-services-protocol";
 import type { SessionOwnerOperation } from "./session-owner-protocol";
 import { COMPUTER_WORKSPACE_QUERY_KINDS } from "./computer-workspace-protocol";
 import { CONTEXT_VIEW_KINDS, isContextViewKind, type ContextViewOperation } from "./context-view-protocol";
@@ -86,6 +92,7 @@ export type HarnessOperation =
 	| SessionOwnerOperation
 	| ContextViewOperation
 	| RuntimeViewOperation
+	| ModelServicesOperation
 	| PredictionOperation
 	| WorkbenchOperation
 	| UpgradeOperation
@@ -173,7 +180,7 @@ export type HarnessOperation =
 			definition: string;
 			model?: string[];
 			assignment?: string;
-			taskFile?: string;
+			steps?: string[];
 			solutionSpace?: string;
 			context?: string;
 			async?: boolean;
@@ -206,6 +213,7 @@ export type HarnessOperation =
 			kind: "interaction.respond";
 			interactionId: string;
 			commandId: string;
+			leaseGeneration?: number;
 			decision: "submit" | "cancel";
 			value?: unknown;
 	  };
@@ -226,6 +234,10 @@ export type HarnessRemoteInteractionRequest =
 			title: string;
 			options: Array<{ id: string; label: string; description?: string }>;
 			multiple?: boolean;
+			initialIndex?: number;
+			selectionMarker?: "radio" | "checkbox";
+			checkedIndices?: readonly number[];
+			markableCount?: number;
 	  }
 	| {
 			kind: "input";
@@ -263,6 +275,16 @@ export type HarnessRemoteInteractionRequest =
 			commandId: string;
 			title: string;
 			questions: HarnessAskQuestion[];
+	  }
+	| {
+			kind: "form";
+			interactionId: string;
+			commandId: string;
+			title: string;
+			summary: string;
+			fieldCount: number;
+			sectionCount: number;
+			timeoutMs?: number;
 	  };
 
 export type HarnessAskOption = {
@@ -616,7 +638,12 @@ export function parseHarnessRequest(value: unknown): HarnessRequest {
 		throw new HarnessFrameError("Invalid Harness request");
 	}
 	if (operation.kind === "session.owner.update") return input as unknown as HarnessRequest;
+	if (isSelectiveCommitKind(operation.kind)) {
+		validateSelectiveCommitOperation(operation);
+		return input as unknown as HarnessRequest;
+	}
 	if (isRuntimeViewKind(operation.kind)) return input as unknown as HarnessRequest;
+	if (isModelServicesKind(operation.kind)) return input as unknown as HarnessRequest;
 	if (isContextViewKind(operation.kind)) return input as unknown as HarnessRequest;
 	if (isEvaluationOperationKind(operation.kind)) {
 		validateEvaluationOperation(operation);
@@ -885,7 +912,7 @@ export function parseHarnessRequest(value: unknown): HarnessRequest {
 				"kind",
 				"definition",
 				"assignment",
-				"taskFile",
+				"steps",
 				"context",
 				"async",
 				"isolation",
@@ -1082,7 +1109,7 @@ export function parseHarnessRequest(value: unknown): HarnessRequest {
 			if ("arguments" in operation) assertJsonValue(operation.arguments);
 			break;
 		case "interaction.respond":
-			exactKeys(operation, ["kind", "interactionId", "commandId", "decision", "value"]);
+			exactKeys(operation, ["kind", "interactionId", "commandId", "leaseGeneration", "decision", "value"]);
 			if (!nonEmptyString(operation.interactionId) || !nonEmptyString(operation.commandId)) {
 				throw new HarnessFrameError("Invalid interaction identity");
 			}
@@ -1173,6 +1200,7 @@ export const HARNESS_IMPLEMENTED_CAPABILITIES = [
 	...COMPUTER_WORKSPACE_QUERY_KINDS,
 	...CONTEXT_VIEW_KINDS,
 	...RUNTIME_VIEW_KINDS,
+	...MODEL_SERVICES_COMMAND_KINDS,
 	"settings.approval",
 	"prediction.query",
 	"composer.predictions",
@@ -1255,6 +1283,8 @@ export const HARNESS_IMPLEMENTED_CAPABILITIES = [
 	"interaction.respond",
 	"tui.transfer",
 	"remoteUi.standard",
+	"remoteUi.leaseGeneration",
+	"harness.locale",
 	"tui.manualCompatibility",
 ] as const;
 

@@ -5,6 +5,8 @@
  * may import this file. This is not a Host / Harness Bridge surface.
  */
 
+import type { TmuxSessionsInput, TmuxSessionsResult, TmuxAttachInput, TmuxAttachResult, TmuxCommandInput, TmuxTopology } from "./tmux/tmux-shared.js";
+
 export const TERMINAL_IPC_CHANNELS = {
   create: "juling-harness:desktop:terminal-create",
   write: "juling-harness:desktop:terminal-write",
@@ -213,6 +215,11 @@ export function parseAckInput(value: unknown): TerminalAckInput {
 }
 
 export interface OmpHarnessTerminalApi {
+  tmuxSessions?(input: TmuxSessionsInput): Promise<TmuxSessionsResult>;
+  tmuxAttach?(input: TmuxAttachInput): Promise<TmuxAttachResult>;
+  tmuxCommand?(input: TmuxCommandInput): Promise<void>;
+  tmuxDetach?(connectionId: string): Promise<void>;
+  onTmux?(listener: (topology: TmuxTopology) => void): () => void;
   create(size?: TerminalCreateInput): Promise<TerminalSessionInfo>;
   write(id: string, data: string): Promise<void>;
   resize(id: string, cols: number, rows: number): Promise<void>;

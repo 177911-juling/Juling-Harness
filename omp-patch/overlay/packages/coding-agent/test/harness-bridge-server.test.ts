@@ -26,6 +26,7 @@ import { HarnessLoopService } from "@oh-my-pi/pi-coding-agent/harness/services/l
 import { HarnessPauseService } from "@oh-my-pi/pi-coding-agent/harness/services/pause-service";
 import type { HarnessHostRuntime } from "@oh-my-pi/pi-coding-agent/harness/harness-host-mode";
 import { VERSION } from "@oh-my-pi/pi-utils";
+import { runtimeText, setRuntimeLocale } from "../src/harness/locale";
 
 const servers: HarnessBridgeServer[] = [];
 const sockets: net.Socket[] = [];
@@ -40,12 +41,13 @@ function fakeLoopService(): HarnessLoopService {
 		reset: () => {},
 		nowMs: Date.now,
 		setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
-		clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
+		clearTimer: timer => clearTimeout(timer as NodeJS.Timeout),
 	});
 }
 
 function fakeExtendedServices(session: Record<string, unknown>) {
 	return {
+		workbench: { views: { cancelClose: () => {} } },
 		modes: {
 			state: () => ({
 				...((session.getPlanModeState as () => unknown)() === undefined
@@ -55,7 +57,7 @@ function fakeExtendedServices(session: Record<string, unknown>) {
 			onChange: () => () => {},
 			dispose: () => {},
 		},
-		tree: { getTree: () => ({ leafId: null, roots: [] }), navigate: async () => ({}) },
+		tree: { getTree: () => ({ leafId: null, roots: [] }), navigate: async () => ({}), cancelReanswer: () => {} },
 		fork: { fork: async () => ({ forked: true, sessionId: "session-test" }) },
 		commands: new HarnessCommandManifestService(session as never),
 		agents: {
@@ -308,12 +310,40 @@ function sendHello(socket: net.Socket, challenge: string, versions = [1]): void 
 }
 
 describe("WP-011 Harness Bridge runtime server", () => {
+	test("authenticated language changes affect Runtime copy without receipts or event sequence changes", async () => {
+		const previous = process.env.JULING_HARNESS_LOCALE;
+		const fixture = await bridgeFixture();
+		const server = new HarnessBridgeServer(fixture.endpoint, fixture.tokenFile);
+		servers.push(server);
+		setRuntimeLocale("zh");
+		try {
+			const started = server.start(fakeRuntime());
+			await waitForTokenConsumption(fixture.tokenFile);
+			const socket = await connect(fixture.endpoint);
+			const helloFrame = receiveFrame(socket);
+			sendHello(socket, "locale");
+			const hello = (await helloFrame).body as HarnessHelloResponse;
+			expect(hello.capabilityManifest.capabilities.some(capability => capability.id === "harness.locale")).toBe(true);
+			socket.write(encodeHarnessFrame("locale-en", hello.runtimeEpoch, { type: "harness.locale", locale: "en" }));
+			const english = await exchangeSnapshot(socket, "snapshot-en");
+			await started;
+			expect(runtimeText("Agent 提问", "Agent Question")).toBe("Agent Question");
+			socket.write(encodeHarnessFrame("locale-zh", hello.runtimeEpoch, { type: "harness.locale", locale: "zh" }));
+			const chinese = await exchangeSnapshot(socket, "snapshot-zh");
+			expect(runtimeText("Agent 提问", "Agent Question")).toBe("Agent 提问");
+			expect(chinese.lastEventSeq).toBe(english.lastEventSeq);
+		} finally {
+			if (previous === undefined) delete process.env.JULING_HARNESS_LOCALE;
+			else process.env.JULING_HARNESS_LOCALE = previous;
+		}
+	});
 	test("Computer query and increment use private envelopes without command receipts or Harness event sequence", async () => {
 		const fixture = await bridgeFixture();
 		const runtime = fakeRuntime();
 		let listener: ((event: ComputerWorkspaceChange) => void) | undefined;
 		Object.assign(runtime.services, {
 			workbench: {
+				views: { cancelClose: () => {} },
 				computerWorkspace: {
 					subscribe(callback: (event: ComputerWorkspaceChange) => void) {
 						listener = callback;

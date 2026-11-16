@@ -1,4 +1,11 @@
 import { HarnessSearchCredentialsService } from "./search-credentials-service";
+import { inspectHarnessAntigravity } from "./antigravity-readiness";
+import { HarnessCommitService } from "./commit-service";
+import { HarnessPromptHistoryService } from "./prompt-history-service";
+import { HarnessModelSystemTemplatesService } from "./model-system-templates-service";
+import { HarnessModelAuthService } from "./model-auth-service";
+import { HarnessModelRosterService } from "./model-roster-service";
+import type { ModelServicesOperation } from "../model-services-protocol";
 import { HarnessQueuedCompactionService } from "./queued-compaction-service";
 import { HarnessRuntimeViews } from "./runtime-view-service";
 import type { MCPManager } from "../../mcp/manager";
@@ -77,7 +84,6 @@ import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { listServices, requestService, startService } from "../../launch/services";
 import type { AgentSession } from "../../session/agent-session";
 import type { HarnessServiceRow, WorkbenchOperation } from "../workbench-protocol";
-import { validateWorkbenchOperation, validateWorkbenchResult } from "../workbench-protocol";
 import { SessionControlError } from "./session-control-service";
 
 function isAdvisorConfigOperation(operation: WorkbenchOperation): operation is AdvisorConfigOperation {
@@ -174,6 +180,11 @@ export class HarnessWorkbenchService {
 	readonly skillshare: HarnessSkillshareService;
 	readonly media: HarnessMediaService;
 	readonly benchmarks: HarnessBenchmarkService;
+	readonly modelSystemTemplates: HarnessModelSystemTemplatesService;
+	readonly modelAuth: HarnessModelAuthService;
+	readonly modelRoster: HarnessModelRosterService;
+	readonly promptHistory: HarnessPromptHistoryService;
+	#commit: HarnessCommitService | undefined;
 	readonly views: HarnessRuntimeViews;
 	readonly catalog: HarnessRuntimeCatalogService;
 	readonly judgments: HarnessJudgmentService;
@@ -190,6 +201,7 @@ export class HarnessWorkbenchService {
 		readonly session: AgentSession,
 		readonly liveAudio = new HarnessLiveAudioService(session),
 		mcpManager?: MCPManager,
+		readonly runtimeEpoch: () => number = () => 0,
 	) {
 		this.advisorConfig = new HarnessAdvisorConfigService(session);
 		this.contextView = new HarnessContextViewService(session);
@@ -219,7 +231,14 @@ export class HarnessWorkbenchService {
 		this.judgments = new HarnessJudgmentService(session);
 		this.runtimeFeatures = new HarnessRuntimeFeatureService(session, mcpManager);
 		this.catalog = new HarnessRuntimeCatalogService(session, mcpManager);
+		this.modelSystemTemplates = new HarnessModelSystemTemplatesService(session);
+		this.modelAuth = new HarnessModelAuthService(session);
+		this.modelRoster = new HarnessModelRosterService(session);
+		this.promptHistory = new HarnessPromptHistoryService(session);
 		this.views = new HarnessRuntimeViews(session, liveAudio);
+		this.views.modelServicesReader = operation => this.executeModelServices(operation);
+		this.views.commitReader = operation => this.commit.execute(operation);
+		this.views.promptHistoryReader = operation => this.promptHistory.execute(operation);
 		this.benchmarks = new HarnessBenchmarkService(session);
 		this.media = new HarnessMediaService(session);
 		this.annotations = new HarnessAnnotationService(session);
@@ -229,7 +248,13 @@ export class HarnessWorkbenchService {
 		this.managedBrowser = new HarnessManagedBrowserService(session);
 		this.computerObservation = new HarnessComputerObservationService(session, undefined, this.computerWorkspace);
 	}
+	get commit(): HarnessCommitService {
+		return (this.#commit ??= new HarnessCommitService(this.session, this.runtimeEpoch));
+	}
 	dispose(): void {
+		this.#commit?.dispose();
+		this.modelAuth.dispose();
+		this.modelRoster.dispose();
 		this.views.dispose();
 		this.queuedCompaction.dispose();
 		this.contextView.dispose();
@@ -253,13 +278,32 @@ export class HarnessWorkbenchService {
 		this.media.dispose();
 		this.liveAudio.dispose();
 	}
+	async executeModelServices(operation: ModelServicesOperation): Promise<unknown> {
+		if (operation.kind === "models.available.refresh") return this.modelRoster.refreshAll(operation.sessionId);
+		if (operation.kind === "models.available.read" || operation.kind === "models.available.release")
+			return this.modelRoster.available(operation);
+		if (operation.kind === "models.antigravity.readiness")
+			return inspectHarnessAntigravity(this.session, operation.sessionId);
+		if (operation.kind.startsWith("models.systemTemplates."))
+			return this.modelSystemTemplates.execute(
+				operation as Extract<ModelServicesOperation, { kind: `models.systemTemplates.${string}` }>,
+			);
+		if (operation.kind.startsWith("models.auth."))
+			return this.modelAuth.execute(operation as Extract<ModelServicesOperation, { kind: `models.auth.${string}` }>);
+		if (operation.kind === "models.provider.roster.refresh")
+			return this.modelRoster.refresh(operation.sessionId, operation.providerId);
+		if (operation.kind === "models.accounts.resetPolicy.set")
+			return this.accounts.setResetPolicy(operation.sessionId, operation.key, operation.mode);
+		throw new SessionControlError("COMMAND_BLOCKED", "Unknown native model operation");
+	}
 	async execute(operation: WorkbenchOperation): Promise<unknown> {
-		validateWorkbenchOperation(operation);
 		const result = await this.#execute(operation);
-		validateWorkbenchResult(operation.kind, result);
 		return result;
 	}
 	async #execute(operation: WorkbenchOperation): Promise<unknown> {
+		if (operation.kind === "commit.draft.select" || operation.kind === "commit.draft.execute")
+			return this.commit.execute(operation);
+		if (operation.kind === "history.prompts.delete") return this.promptHistory.execute(operation);
 		if (
 			operation.kind === "search.credentials.list" ||
 			operation.kind === "search.credentials.set" ||
@@ -359,6 +403,7 @@ export class HarnessWorkbenchService {
 		)
 			return this.media.execute(operation);
 		if (
+			operation.kind === "benchmarks.accounts.read" ||
 			operation.kind === "benchmarks.list" ||
 			operation.kind === "benchmarks.start" ||
 			operation.kind === "benchmarks.read" ||

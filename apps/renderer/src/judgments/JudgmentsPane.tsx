@@ -8,7 +8,6 @@ import type {
   HarnessClient,
 } from "@juling-harness/client-contract";
 import {
-  validateJudgmentBatchSpec,
   type JudgmentBatchSpec,
   type JudgmentBatchRow,
   type JudgmentBatchPage,
@@ -19,9 +18,9 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import {
-  PREVIEW_JUDGMENT_BATCH,
-  PREVIEW_JUDGMENT_ITEMS,
-  PREVIEW_JUDGMENT_SPEC,
+  getPreviewJudgmentBatch,
+  getPreviewJudgmentItems,
+  getPreviewJudgmentSpec,
 } from "../preview/judgmentsPreview";
 import "./judgments.css";
 
@@ -98,7 +97,6 @@ function buildSpec(
     retries,
     minOk,
   };
-  validateJudgmentBatchSpec(spec);
   return spec;
 }
 
@@ -189,7 +187,7 @@ export function JudgmentsPane({
     setError("");
     setNotice("");
     setConfirmation(undefined);
-    setBatches(preview ? [structuredClone(PREVIEW_JUDGMENT_BATCH)] : []);
+    setBatches(preview ? [structuredClone(getPreviewJudgmentBatch(zh))] : []);
     setPage(undefined);
     setSelected(undefined);
     setOffset(0);
@@ -204,7 +202,7 @@ export function JudgmentsPane({
     return () => {
       generation.current++;
     };
-  }, [sessionId, workspaceId, preview, available]);
+  }, [sessionId, workspaceId, preview, available, zh]);
   useEffect(() => {
     if (confirmation) confirmRef.current?.focus();
   }, [confirmation]);
@@ -248,7 +246,7 @@ export function JudgmentsPane({
           batch,
           items:
             batch.id === "batch-4f21"
-              ? PREVIEW_JUDGMENT_ITEMS
+              ? getPreviewJudgmentItems(zh)
               : [
                   {
                     key: "demo",
@@ -295,6 +293,7 @@ export function JudgmentsPane({
     sessionId,
     invoke,
     refresh,
+    zh,
     preview ? batches : undefined,
   ]);
   const choose = (id: string) => {
@@ -342,7 +341,7 @@ export function JudgmentsPane({
           );
         else {
           const batch = {
-            ...PREVIEW_JUDGMENT_BATCH,
+            ...getPreviewJudgmentBatch(zh),
             id: "demo-" + crypto.randomUUID(),
             intent:
               confirmation.kind === "create"
@@ -732,9 +731,10 @@ export function JudgmentsPane({
                 <button
                   className="btn small"
                   onClick={() => {
-                    setIntent(PREVIEW_JUDGMENT_SPEC.intent);
+                    const spec = getPreviewJudgmentSpec(zh);
+                    setIntent(spec.intent);
                     setItems(
-                      JSON.stringify(PREVIEW_JUDGMENT_SPEC.items, null, 2),
+                      JSON.stringify(spec.items, null, 2),
                     );
                     setJsonItems(true);
                     setQuestions([
@@ -742,7 +742,7 @@ export function JudgmentsPane({
                         id: "clear",
                         type: "bool",
                         instructions:
-                          PREVIEW_JUDGMENT_SPEC.questions.clear!.instructions,
+                          spec.questions.clear!.instructions,
                         criteria: "",
                       },
                     ]);

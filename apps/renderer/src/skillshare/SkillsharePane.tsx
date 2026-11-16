@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { WorkspaceDialog } from "../workspaces/Workspace";
 import type { CommandInput, HarnessClient } from "@juling-harness/client-contract";
 import {
-  validateSkillshareAction,
   type SkillshareAction,
   type SkillshareActionState,
   type SkillshareResultMap,
@@ -14,9 +13,9 @@ import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import {
+  getPreviewSkillsharePackage,
+  getPreviewSkillshareSearch,
   PREVIEW_SKILLSHARE_INSTALLED,
-  PREVIEW_SKILLSHARE_PACKAGE,
-  PREVIEW_SKILLSHARE_SEARCH,
   PREVIEW_SKILLSHARE_STATUS,
   PREVIEW_SKILLSHARE_TOKENS,
 } from "../preview/skillsharePreview";
@@ -229,7 +228,7 @@ export function SkillsharePane({
     const generation = epoch.current;
     if (preview) {
       setStatus(PREVIEW_SKILLSHARE_STATUS);
-      setSearch(PREVIEW_SKILLSHARE_SEARCH);
+      setSearch(getPreviewSkillshareSearch(zh));
       setInstalled(PREVIEW_SKILLSHARE_INSTALLED);
       setTokens(PREVIEW_SKILLSHARE_TOKENS);
       return;
@@ -243,7 +242,7 @@ export function SkillsharePane({
       setStatus(state);
       setInstalled(inventory);
     }
-  }, [preview, available, sessionId, invoke, visible]);
+  }, [preview, available, sessionId, invoke, visible, zh]);
   useEffect(() => {
     const generation = ++epoch.current;
     lock.current = false;
@@ -327,7 +326,6 @@ export function SkillsharePane({
   }, [action?.id, action?.state, preview, sessionId, invoke, load, visible]);
   const prepare = (request: SkillshareAction) =>
     void run(async (generation) => {
-      validateSkillshareAction(request);
       setSecret(undefined);
       if (preview) {
         const id = crypto.randomUUID();
@@ -353,7 +351,7 @@ export function SkillsharePane({
               : [],
           files:
             request.type === "publish"
-              ? PREVIEW_SKILLSHARE_PACKAGE.selected!.files
+              ? getPreviewSkillsharePackage(zh).selected!.files
               : [],
           filesTotal: request.type === "publish" ? 2 : 0,
           scripts,
@@ -412,8 +410,9 @@ export function SkillsharePane({
   ) =>
     void run(async (generation) => {
       if (preview) {
-        setDetail(PREVIEW_SKILLSHARE_PACKAGE);
-        setPackageName(PREVIEW_SKILLSHARE_PACKAGE.package);
+        const previewPkg = getPreviewSkillsharePackage(zh);
+        setDetail(previewPkg);
+        setPackageName(previewPkg.package);
         return;
       }
       const value = await invoke("skillshare.package", {
@@ -430,7 +429,7 @@ export function SkillsharePane({
   const find = (page = 0) =>
     void run(async (generation) => {
       if (preview) {
-        setSearch(PREVIEW_SKILLSHARE_SEARCH);
+        setSearch(getPreviewSkillshareSearch(zh));
         return;
       }
       const value = await invoke("skillshare.search", {
@@ -558,7 +557,7 @@ export function SkillsharePane({
               onClick={() =>
                 void run(async (generation) => {
                   if (preview) {
-                    setSearch(PREVIEW_SKILLSHARE_SEARCH);
+                    setSearch(getPreviewSkillshareSearch(zh));
                     return;
                   }
                   const home = await invoke("skillshare.home", {
