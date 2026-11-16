@@ -85,6 +85,7 @@ export class HarnessBridgeRequestError extends Error {
 export interface HarnessBridgeClientOptions {
   endpoint: string;
   token: string;
+  locale?: () => "zh" | "en";
   handshakeTimeoutMs?: number;
   supportedProtocolVersions?: readonly number[];
   connectSocket?: (endpoint: string) => Socket;
@@ -149,6 +150,14 @@ export class HarnessBridgeClient {
 
   get state(): HarnessBridgeClientState {
     return this.#state;
+  }
+
+  /** Private display preference; older Runtimes receive no new frame. */
+  setLocale(locale: "zh" | "en"): void {
+    if (!["negotiated", "snapshotting", "snapshot-required", "ready"].includes(this.#state) ||
+      !this.#socket || this.#runtimeEpoch === undefined ||
+      !this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === "harness.locale" && capability.grade !== "unavailable")) return;
+    this.#socket.write(encodeFrame("locale", this.#runtimeEpoch, { type: "harness.locale", locale }));
   }
 
   async connect(): Promise<HarnessHelloResponse> {
@@ -316,7 +325,7 @@ export class HarnessBridgeClient {
     });
   }
 
-  async invoke(request: HarnessRequest, onReceipt?: (receipt: HarnessReceipt) => void): Promise<HarnessReceipt> {
+  async invoke(request: HarnessRequest, onReceipt?: (receipt: HarnessReceipt) => void, timeoutMs: number | null | undefined = this.options.requestTimeoutMs): Promise<HarnessReceipt> {
     if (this.#state !== "ready") throw new Error(`Cannot invoke Harness Bridge command from ${this.#state}`);
     if (request.runtimeEpoch !== this.#runtimeEpoch) throw new Error("Harness Bridge request Runtime epoch is stale");
     if (this.#pendingRequests.has(request.requestId)) throw new Error(`Duplicate request id ${request.requestId}`);
@@ -324,9 +333,8 @@ export class HarnessBridgeClient {
     if (socket === undefined) throw new Error("Harness Bridge connection is unavailable");
 
     return new Promise<HarnessReceipt>((resolve, reject) => {
-      const timeoutMs = this.options.requestTimeoutMs;
       const timer =
-        timeoutMs === undefined
+        timeoutMs == null
           ? undefined
           : setTimeout(() => {
               this.#pendingRequests.delete(request.requestId);
@@ -339,8 +347,14 @@ export class HarnessBridgeClient {
         ...(timer === undefined ? {} : { timer }),
       });
       try {
-        socket.write(encodeFrame(`request:${request.requestId}`, request.runtimeEpoch, request));
-      } catch (error) {
+        let wireRequest = request;
+        if (request.operation.kind === "interaction.respond" && request.operation.leaseGeneration !== undefined &&
+          !this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === "remoteUi.leaseGeneration" && capability.grade !== "unavailable")) {
+          const { leaseGeneration: _leaseGeneration, ...operation } = request.operation;
+          wireRequest = { ...request, operation };
+        }
+        socket.write(encodeFrame(`request:${request.requestId}`, request.runtimeEpoch, wireRequest));
+      } catch {
         if (timer !== undefined) clearTimeout(timer);
         this.#pendingRequests.delete(request.requestId);
         reject(error instanceof FrameCodecError
@@ -372,7 +386,13 @@ export class HarnessBridgeClient {
   async readRuntimeView<K extends RuntimeViewOperation["kind"]>(operation: Extract<RuntimeViewOperation, { kind: K }>): Promise<RuntimeViewResultMap[K]> {
     if (this.#state !== "ready" || this.#runtimeEpoch === undefined) throw new HarnessHostError("OUTCOME_UNKNOWN", "Runtime view unavailable");
     const receipt = await this.invoke({ type: "harness.request", requestId: (this.options.createRequestId ?? randomUUID)() as RequestId, runtimeEpoch: this.#runtimeEpoch, operation });
-    if (receipt.status !== "completed") throw new HarnessHostError(receipt.error?.code ?? "OUTCOME_UNKNOWN", receipt.error?.message ?? "Runtime view failed");
+    if (receipt.status !== "completed") {
+      // Native cursor invalidation explicitly permits one bounded fresh read.
+      // Keep that signal across the Bridge instead of losing it during error mapping.
+      throw Object.assign(new HarnessHostError(receipt.error?.code ?? "OUTCOME_UNKNOWN", receipt.error?.message ?? "Runtime view failed"), {
+        retryable: receipt.error?.retryable,
+      });
+    }
     return receipt.result as RuntimeViewResultMap[K];
   }
 
@@ -436,8 +456,7 @@ export class HarnessBridgeClient {
   async predict(input: PredictionQuery): Promise<PredictionResult> {
     if(this.#state !== "ready" || this.#runtimeEpoch === undefined) throw new HarnessHostError("OUTCOME_UNKNOWN", "Prediction unavailable");
     const receipt = await this.invoke({type:"harness.request",requestId:(this.options.createRequestId ?? randomUUID)() as RequestId,runtimeEpoch:this.#runtimeEpoch,operation:{kind:"prediction.query",...input}});
-    if(receipt.status !== "completed") throw new HarnessHostError("OUTCOME_UNKNOWN", "Prediction unavailable");
-    validatePredictionResult(receipt.result); return receipt.result;
+    if(receipt.status !== "completed") throw new HarnessHostError("OUTCOME_UNKNOWN", "Prediction unavailable"); return receipt.result as PredictionResult;
   }
 
   async readTranscript(
@@ -584,6 +603,23 @@ export class HarnessBridgeClient {
     return () => this.#resyncListeners.delete(listener);
   }
 
+  /** Reversible operator-close gate. Older Runtimes must never receive an unknown operation. */
+  async confirmClose(): Promise<boolean> {
+    if (!this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === "runtime.close.confirm" && capability.grade !== "unavailable")) return true;
+    const snapshot = this.#projection.snapshot();
+    const runtimeEpoch = this.#runtimeEpoch;
+    if (this.#state !== "ready" || !snapshot || runtimeEpoch === undefined) return true;
+    const receipt = await this.invoke({
+      type: "harness.request",
+      requestId: (this.options.createRequestId ?? randomUUID)() as RequestId,
+      runtimeEpoch,
+      operation: { kind: "runtime.close.confirm", sessionId: snapshot.sessionId },
+    }, undefined, null);
+    if (this.#runtimeEpoch !== runtimeEpoch || this.#projection.snapshot()?.sessionId !== snapshot.sessionId) return true;
+    if (receipt.status !== "completed") throw new HarnessBridgeRequestError("OUTCOME_UNKNOWN");
+    return (receipt.result as RuntimeViewResultMap["runtime.close.confirm"] | undefined)?.allowed !== false;
+  }
+
   async shutdown(): Promise<HarnessReceipt> {
     const runtimeEpoch = this.#runtimeEpoch;
     if (runtimeEpoch === undefined) throw new Error("Harness Bridge negotiation is incomplete");
@@ -709,6 +745,7 @@ export class HarnessBridgeClient {
         this.#readyDecoder = decoder;
         this.#projection.beginConnection(response);
         this.#state = "negotiated";
+        if (this.options.locale) this.setLocale(this.options.locale());
         socket.once("error", () => socket.destroy());
         socket.once("close", () => this.#handleSocketClosed(socket));
         resolve(response);
@@ -948,4 +985,4 @@ export class HarnessBridgeClient {
     }
   }
 }
-import { type PredictionQuery, type PredictionResult, validatePredictionResult } from "@juling-harness/harness-protocol";
+import { type PredictionQuery, type PredictionResult } from "@juling-harness/harness-protocol";

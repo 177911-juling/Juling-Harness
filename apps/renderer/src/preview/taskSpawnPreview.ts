@@ -1,6 +1,9 @@
 import type { RuntimeFeatureResultMap } from "@juling-harness/harness-protocol";
 
 export const PREVIEW_TASK_SPAWN_OPTIONS: RuntimeFeatureResultMap["agent.spawn.options"] = {
+  stepsAdvertised: true,
+  autoParallel: "off",
+  effortSelection: true,
   modelSelection: true,
   maxEffort: "max",
   models: [

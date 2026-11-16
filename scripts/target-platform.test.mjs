@@ -50,7 +50,8 @@ test("target platform follows the host unless overridden, and only supported tar
   assert.equal(resolveTargetPlatform({}, { platform: "darwin", arch: "x64" }), "darwin-x64");
   assert.equal(resolveTargetPlatform({}, { platform: "linux", arch: "x64" }), "linux-x64");
   assert.equal(resolveTargetPlatform({}, { platform: "linux", arch: "arm64" }), "linux-arm64");
-  assert.equal(installer.isUpdatePlatform("linux-x64"), false);
+  assert.equal(installer.isUpdatePlatform("linux-x64"), true);
+  assert.equal(installer.isUpdatePlatform("linux-arm64"), false);
 });
 
 test("Mach-O parsing accepts thin arm64/x64 and refuses universal or foreign files", () => {
@@ -75,7 +76,7 @@ test("executable architecture uses PE on Windows and Mach-O on macOS", async () 
   assertExecutableTarget(join(root, "juling"), "darwin-arm64");
 });
 
-test("Linux Runtime uses ELF targets without enabling Linux desktop updates", () => {
+test("Linux Runtime uses ELF targets; only x64 has a desktop catalog", () => {
   const elf = Buffer.alloc(64);
   elf.write("\x7fELF", 0, "ascii");
   elf[4] = 2; elf[5] = 1;

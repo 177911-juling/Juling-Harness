@@ -361,7 +361,7 @@ macOS 的完整磁盘访问是用户的授权选择，不是自动开启项；�
 - [dsh 常驻命令会话](https://github.com/ZhangFengshun/dsh-remote-ssh/blob/55001e20572e19ec38988daa16f9a44f6bbb5dd3/lib/index.js#L546-L589)
 - [dsh SSH 参数与认证](https://github.com/ZhangFengshun/dsh-remote-ssh/blob/55001e20572e19ec38988daa16f9a44f6bbb5dd3/lib/index.js#L729-L768)
 - [dsh 终端 wrapper](https://github.com/ZhangFengshun/dsh-remote-ssh/blob/55001e20572e19ec38988daa16f9a44f6bbb5dd3/lib/index.js#L5074-L5128)
-- [VS Code Remote SSH 官方文档](https://code.visualharness.com/docs/remote/ssh)；本轮读取的是[官方文档仓库](https://github.com/microsoft/vscode-docs/blob/main/docs/remote/ssh.md)。
+- [VS Code Remote SSH 官方文档](https://code.visualstudio.com/docs/remote/ssh)；本轮读取的是[官方文档仓库](https://github.com/microsoft/vscode-docs/blob/main/docs/remote/ssh.md)。
 - [OpenSSH ssh_config 官方手册源码](https://github.com/openssh/openssh-portable/blob/master/ssh_config.5)
 - [OpenSSH ssh 官方手册源码](https://github.com/openssh/openssh-portable/blob/master/ssh.1)
 - [ssh2 官方 README / Client API](https://github.com/mscdex/ssh2#client)

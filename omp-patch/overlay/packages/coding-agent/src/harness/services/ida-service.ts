@@ -3,15 +3,9 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentSession } from "../../session/agent-session";
 import { acquireIdaDatabase, listIdaDatabases, resolveIdaRuntime } from "../../ida";
-import {
-	validateIdaOperation,
-	validateIdaResult,
-	type IdaOperation,
-	type IdaEdit,
-	type IdaResultMap,
-	type IdaRow,
-} from "../ida-protocol";
+import { type IdaOperation, type IdaEdit, type IdaRow } from "../ida-protocol";
 import { SessionControlError } from "./session-control-service";
+import { runtimeText } from "../locale";
 export interface HarnessIdaDb {
 	id: string;
 	label: string;
@@ -99,11 +93,9 @@ export class HarnessIdaService {
 		return { file, fingerprint: JSON.stringify([stat.dev, stat.ino, stat.size, stat.mtimeMs]) };
 	}
 	async execute(op: IdaOperation): Promise<unknown> {
-		validateIdaOperation(op);
 		this.#assert(op.sessionId);
 		const result = await this.#execute(op);
 		this.#assert(op.sessionId);
-		validateIdaResult(op.kind, result);
 		return result;
 	}
 	async #execute(op: IdaOperation): Promise<unknown> {
@@ -202,7 +194,7 @@ export class HarnessIdaService {
 					throw Error("IDA input changed since review");
 				this.#assert(op.sessionId);
 				await this.port.open(file.file, controller.signal);
-				return { text: "Opened / 已打开" };
+				return { text: runtimeText("已打开", "Opened") };
 			}
 			const db = await this.#db(edit.dbId);
 			const { action, dbId, ...params } = edit;

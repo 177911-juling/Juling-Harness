@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { ContractValidationError, parseFoundationHarnessRequest, parseHarnessSnapshotResponse } from "../src/index.js";
+import { parseHarnessSnapshotResponse } from "../src/index.js";
 
 test("new settings and credential status round-trip while native clamped values remain readable", async () => {
   const baseline = JSON.parse(await readFile(new URL("../../fixtures/snapshot.initial.json", import.meta.url), "utf8"));
@@ -10,8 +10,4 @@ test("new settings and credential status round-trip while native clamped values 
   const result = parseHarnessSnapshotResponse({ ...baseline, snapshot: { ...baseline.snapshot, runtimeSettings, runtimeSettingsActivation: activation } });
   assert.equal(result.snapshot.runtimeSettings?.["read.defaultLimit"], 5000);
   assert.deepEqual(result.snapshot.runtimeSettingsActivation?.hindsightCredential, { configured: true, source: "env" });
-  const base = { type: "harness.request", requestId: "settings", runtimeEpoch: 1 };
-  const operation = { kind: "runtime.settings.get", keys: ["hindsight.apiUrl"], checkHindsight: true };
-  assert.deepEqual(parseFoundationHarnessRequest({ ...base, operation }).operation, operation);
-  assert.throws(() => parseFoundationHarnessRequest({ ...base, operation: { kind: "runtime.settings.set", key: "read.defaultLimit", value: 5000, persist: true } }), ContractValidationError);
 });

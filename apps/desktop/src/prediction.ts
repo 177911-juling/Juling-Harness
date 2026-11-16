@@ -5,26 +5,22 @@ import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import {
-  validatePredictionEvent,
-  validatePredictionInput,
-} from "@juling-harness/harness-protocol";
 import type { TerminalSender, TerminalIpcMain } from "./terminal-ipc.js";
 import {
   PREDICTION_CHANNELS,
   type PredictionResult,
 } from "./prediction-shared.js";
+import type { PredictionEvent, PredictionInput } from "@juling-harness/harness-protocol";
 const id = (value: unknown): string => {
   if (typeof value !== "string" || !/^[a-f0-9-]{36}$/.test(value))
     throw new Error("Invalid prediction ID");
   return value;
 };
-function object(value: unknown, keys: string[]): Record<string, unknown> {
+function object(value: unknown): Record<string, unknown> {
   if (
     !value ||
     typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.keys(value).some((key) => !keys.includes(key))
+    Array.isArray(value)
   )
     throw new Error("Invalid prediction fields");
   return value as Record<string, unknown>;
@@ -57,6 +53,8 @@ export class DesktopPrediction {
   async attach(sender: TerminalSender, value: unknown): Promise<void> {
     const input = object(value, ["channelId", "sessionId", "expiresAt", "protocolVersion"]),
       channelId = id(input.channelId);
+    if (input.protocolVersion !== undefined && input.protocolVersion !== 2)
+      throw new Error("Invalid prediction protocol");
     if (
       typeof input.sessionId !== "string" ||
       !input.sessionId ||
@@ -73,14 +71,7 @@ export class DesktopPrediction {
       stat = await lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4096)
       throw new Error("Prediction descriptor unavailable");
-    const descriptor = object(JSON.parse(await readFile(file, "utf8")), [
-      "version",
-      "channelId",
-      "sessionId",
-      "endpoint",
-      "token",
-      "expiresAt",
-    ]);
+    const descriptor = object(JSON.parse(await readFile(file, "utf8")));
     const endpoint =
       process.platform === "win32"
         ? "\\\\.\\pipe\\juling-harness-predict-" + channelId
@@ -167,8 +158,7 @@ export class DesktopPrediction {
           continue;
         }
         try {
-          const event: unknown = JSON.parse(line);
-          validatePredictionEvent(event);
+          const event = JSON.parse(line) as PredictionEvent;
           if (event.channelId !== entry.id)
             throw new Error("Prediction target changed");
           if (
@@ -213,9 +203,8 @@ export class DesktopPrediction {
     }
   }
   input(sender: TerminalSender, value: unknown): void {
-    const raw = object(value, ["channelId", "input"]);
-    validatePredictionInput(raw.input);
-    if (raw.input.kind === "import")
+    const raw = object(value);
+    if ((raw.input as PredictionInput).kind === "import")
       throw new Error("History imports require the file picker");
     const entry = this.#entry(sender, raw.channelId);
     if (entry.socket.writableLength > 32768)
@@ -233,7 +222,7 @@ export class DesktopPrediction {
     return entry;
   }
   detach(sender: TerminalSender, value: unknown): void {
-    const input = object(value, ["channelId"]);
+    const input = object(value);
     if (this.#connections.get(sender.id)?.id === id(input.channelId))
       this.disposeWindow(sender.id);
   }
@@ -254,7 +243,7 @@ export class DesktopPrediction {
     sender: TerminalSender,
     value: unknown,
   ): Promise<PredictionResult> {
-    const raw = object(value, ["channelId"]),
+    const raw = object(value),
       entry = this.#entry(sender, raw.channelId);
     if (entry.importing) throw new Error("A history import is already running");
     const selected = await this.options.chooseHistory(sender);

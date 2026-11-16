@@ -4,6 +4,7 @@ import { parseClientCommandRequest, parseClientQueryRequest } from "@juling-harn
 import { REMOTE_CHANNELS, type RemoteConnectionProfile, type RemoteCredentials } from "./shared.js";
 import type { RemoteConnectionManager } from "./manager.js";
 import { RemoteOperationError } from "./wire.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 interface Sender {
   getURL(): string;
@@ -76,7 +77,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
     const remote = manager.get(target);
     const generation = remote.generation;
     const result = await action(remote);
-    if (manager.get(target) !== remote || remote.generation !== generation) throw new Error("SSH 通道已改变，请重新同步；已丢弃旧连接的读取结果");
+    if (manager.get(target) !== remote || remote.generation !== generation) throw new Error(desktopText("SSH 通道已改变，请重新同步；已丢弃旧连接的读取结果", "SSH channel changed; please resynchronize (read result from previous connection was discarded)"));
     return result;
   };
   const cancelPending = async (): Promise<void> => {
@@ -104,7 +105,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
         stopWaiting = () => attempt.controller.signal.removeEventListener("abort", onAbort);
       });
       const confirmed = options.confirmDeployment ? await Promise.race([options.confirmDeployment(manager.profile(target)), cancelled]) : true;
-      if (!confirmed || attempt.controller.signal.aborted || disposed) throw new Error("连接已取消");
+      if (!confirmed || attempt.controller.signal.aborted || disposed) throw new Error(desktopText("连接已取消", "Connection cancelled"));
       await manager.connect(target, credentials, attempt.controller.signal);
     } finally {
       stopWaiting?.();
@@ -146,7 +147,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
     const transport = target(sender, name, contextId);
     const command = parseClientCommandRequest(request);
     try { return { ok: true, accepted: await transport.command(command) }; }
-    catch (error) { return { ok: false, error: { code: error instanceof RemoteOperationError ? "UNAVAILABLE" : "OUTCOME_UNKNOWN", message: error instanceof Error ? error.message : "命令结果未知；未自动重发，请重新连接核对" } }; }
+    catch (error) { return { ok: false, error: { code: error instanceof RemoteOperationError ? "UNAVAILABLE" : "OUTCOME_UNKNOWN", message: error instanceof Error ? error.message : desktopText("命令结果未知；未自动重发，请重新连接核对", "Command outcome is unknown; it was not resent — reconnect to verify") } }; }
   });
   handle(REMOTE_CHANNELS.directories, (_sender, id, path) => read(id, remote => remote.transport.peer.request("directories", typeof path === "string" ? { path } : {})));
   handle(REMOTE_CHANNELS.register, (_sender, id, path) => {

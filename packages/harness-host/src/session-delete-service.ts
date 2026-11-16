@@ -3,6 +3,8 @@ import { lstat, mkdir, open, readdir, rename, rm, unlink, writeFile, type FileHa
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Dirent } from "node:fs";
+import type { SessionPurgeResult } from "@juling-harness/harness-protocol";
+import type { SessionPurgeInput } from "./session-purge-maintenance.js";
 
 import { readGunzipPrefix } from "./gzip-file.js";
 import {
@@ -41,6 +43,10 @@ export interface SessionDeleteServiceOptions {
   readonly archiveRoot?: string;
   readonly allowedCwd: string;
   readonly maxScanFiles?: number;
+  /** The target Runtime profile. Defaults to the parent of sessionsRoot. */
+  readonly agentDir?: string;
+  /** Native best-effort SQLite cleanup, invoked only after ownership/residency checks and before unlink. */
+  readonly purgeRows?: (input: SessionPurgeInput) => Promise<SessionPurgeResult>;
   /** Rejects deletion while the session is resident in a Runtime. */
   readonly isResident?: (sessionId: string) => boolean | Promise<boolean>;
   /** Injectable artifacts removal used by the retry-after-failure regression test. */
@@ -50,6 +56,8 @@ export interface SessionDeleteServiceOptions {
 export interface SessionDeleteResult {
   readonly sessionId: string;
   readonly deleted: true;
+  /** Independent native-store outcomes; transcript removal is not a cross-store transaction. */
+  readonly nativeCleanup: SessionPurgeResult;
 }
 
 interface LocatedSession {
@@ -72,6 +80,8 @@ export class HarnessSessionDeleteService {
   readonly #archiveRoot: string;
   readonly #allowedCwd: string;
   readonly #maxScanFiles: number;
+  readonly #agentDir: string;
+  readonly #purgeRows: SessionDeleteServiceOptions["purgeRows"];
   readonly #isResident: ((sessionId: string) => boolean | Promise<boolean>) | undefined;
   readonly #removeArtifacts: (path: string) => Promise<void>;
 
@@ -81,6 +91,8 @@ export class HarnessSessionDeleteService {
     this.#archiveRoot = resolve(options.archiveRoot ?? defaultOmpArchiveRoot(this.#sessionsRoot));
     this.#allowedCwd = resolve(options.allowedCwd);
     this.#maxScanFiles = options.maxScanFiles ?? DEFAULT_MAX_SCAN_FILES;
+    this.#agentDir = resolve(options.agentDir ?? dirname(this.#sessionsRoot));
+    this.#purgeRows = options.purgeRows;
     this.#isResident = options.isResident;
     this.#removeArtifacts = options.removeArtifacts ?? ((path) => rm(path, { recursive: true, force: true }));
     if (!Number.isSafeInteger(this.#maxScanFiles) || this.#maxScanFiles <= 0) {
@@ -114,8 +126,8 @@ export class HarnessSessionDeleteService {
     }
     this.#assertWorkspace(located);
 
-    await this.#removeSessionWithArtifacts(located.path);
-    return { sessionId, deleted: true };
+    const nativeCleanup = await this.#removeSessionWithArtifacts(located.path, sessionId);
+    return { sessionId, deleted: true, nativeCleanup };
   }
 
   #assertWorkspace(source: LocatedSession): void {
@@ -172,7 +184,7 @@ export class HarnessSessionDeleteService {
    * the primary object; a failing artifacts cleanup is surfaced so the
    * operator knows residue remains (same policy as OMP's own delete).
    */
-  async #removeSessionWithArtifacts(sessionPath: string): Promise<void> {
+  async #removeSessionWithArtifacts(sessionPath: string, sessionId: string): Promise<SessionPurgeResult> {
     let metadata;
     try {
       metadata = await lstat(sessionPath);
@@ -182,6 +194,18 @@ export class HarnessSessionDeleteService {
     if (!metadata.isFile() || metadata.isSymbolicLink()) {
       throw new SessionDeleteServiceError("SESSION_NOT_FOUND", "Session file is not a regular file");
     }
+    await this.#assertNotResident(sessionId);
+    let nativeCleanup: SessionPurgeResult = { status: "partial", reason: "runtime-unavailable" };
+    if (this.#purgeRows !== undefined) {
+      try {
+        nativeCleanup = await this.#purgeRows({ sessionId, sessionFile: sessionPath, agentDir: this.#agentDir });
+      } catch {
+        nativeCleanup = { status: "partial", reason: "process-failed" };
+      }
+    }
+    // Maintenance may take seconds. A session reopened while it was running
+    // must not lose its transcript or artifacts when the worker finally exits.
+    await this.#assertNotResident(sessionId);
     try {
       await unlink(sessionPath);
     } catch (error) {
@@ -198,6 +222,7 @@ export class HarnessSessionDeleteService {
         `Session file deleted but failed to remove artifacts directory ${artifactsDir}: ${errorMessage(error)}`,
       );
     }
+    return nativeCleanup;
   }
 }
 

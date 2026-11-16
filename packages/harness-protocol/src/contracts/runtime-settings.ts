@@ -64,6 +64,9 @@ export type HarnessRuntimeCodeMode = (typeof HARNESS_RUNTIME_CODE_MODES)[number]
 /** Exact schema-backed public values; no arbitrary key/value escapes. */
 export interface HarnessRuntimeSettingsSnapshot extends GuiSettingsSnapshot {
   "modelRoles.judge"?: string;
+  /** Legacy Runtime read-only compatibility; new consent is per governing window. */
+  "claudeResets.autoRedeem"?: "unset" | "yes" | "no";
+  "codexResets.autoRedeem"?: "unset" | "yes" | "no";
   "claudeResets.autoRedeem5h"?: "unset" | "yes" | "no";
   "claudeResets.autoRedeemWeekly"?: "unset" | "yes" | "no";
   "claudeResets.autoRedeemFable"?: "unset" | "yes" | "no";

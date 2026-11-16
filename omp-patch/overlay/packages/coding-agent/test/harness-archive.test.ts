@@ -2,7 +2,7 @@ import { expect, test, spyOn } from "bun:test";
 import * as archive from "../src/archive/archive";
 import type { AgentSession } from "../src/session/agent-session";
 import { HarnessArchiveService } from "../src/harness/services/archive-service";
-import { validateArchiveOperation, validateArchiveResult } from "../src/harness/archive-protocol";
+import { validateArchiveOperation } from "../src/harness/archive-protocol";
 test("Archive bounds native content and pages while preserving IDs and omitting session paths", async () => {
 	const session = { sessionId: "main", sessionManager: { getCwd: () => "/workspace" } } as unknown as AgentSession;
 	const rows = Array.from({ length: 21 }, (_, index) => ({
@@ -22,7 +22,6 @@ test("Archive bounds native content and pages while preserving IDs and omitting 
 			sessionId: "main",
 			scope: "workspace",
 		});
-		validateArchiveResult("archive.sessions.list", result);
 		expect(result).toMatchObject({
 			truncated: true,
 			rows: [

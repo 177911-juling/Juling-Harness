@@ -1,6 +1,6 @@
 import { AppSelect } from "../AppSelect";
 import { Fragment, useEffect, useState } from "react";
-import { GUI_SETTING_DEFINITIONS, GUI_SETTING_KEYS, validateGuiSetting, type GuiSettingKey } from "@juling-harness/harness-protocol";
+import { GUI_SETTING_DEFINITIONS, GUI_SETTING_KEYS, type GuiSettingKey } from "@juling-harness/harness-protocol";
 import type { HarnessRuntimeSettingValue } from "@juling-harness/client-contract";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -54,7 +54,6 @@ function RuntimeSetting({ name, runtime, persist }: { name: GuiSettingKey; runti
   const label = zh ? definition.zh : definition.en;
   const save = (next: unknown) => {
     try {
-      validateGuiSetting(name, next);
       setError("");
       runtime?.set?.(name, next as HarnessRuntimeSettingValue, persist);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }

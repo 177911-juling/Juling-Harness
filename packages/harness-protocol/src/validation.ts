@@ -1,28 +1,10 @@
-import { isRuntimeViewKind } from "./contracts/runtime-views.js";
+
 import { GUI_SETTING_KEYS, isGuiSettingKey, validateGuiSetting } from "./contracts/gui-settings.js";
-import { isContextViewKind } from "./contracts/context-view.js";
-import { isWorkbenchOperationKind, validateWorkbenchOperation } from "./contracts/workbench.js";
-import { isUpgradeOperationKind, validateUpgradeOperation } from "./contracts/runtime-upgrade.js";
-import { isEvaluationOperationKind, parseEvaluationOperation } from "./evaluation-validation.js";
 import { ContractValidationError } from "./contract-error.js";
 import type { AgentTranscriptMessage, AgentTranscriptPage } from "./contracts/agents-jobs.js";
 import { parseBtwSnapshot } from "./btw-validation.js";
 import type { AgentId, Generation, OpaqueCursor } from "./contracts/ids.js";
-import {
-  CONVERSATION_LIMITS,
-  SESSION_TRANSCRIPT_READ_KIND,
-} from "./contracts/conversation.js";
-import {
-  HARNESS_PROTOCOL_NAME,
-  HARNESS_PROTOCOL_VERSION,
-  type FrameHeader,
-  type HarnessEventEnvelope,
-  type HarnessHelloRequest,
-  type HarnessHelloResponse,
-  type HarnessReceipt,
-  type HarnessRequest,
-  type HarnessSnapshotResponse,
-} from "./contracts/protocol.js";
+import { HARNESS_PROTOCOL_NAME, HARNESS_PROTOCOL_VERSION, type FrameHeader, type HarnessEventEnvelope, type HarnessHelloRequest, type HarnessHelloResponse, type HarnessReceipt, type HarnessSnapshotResponse } from "./contracts/protocol.js";
 import { SESSION_THINKING_LEVELS, SESSION_THINKING_SELECTORS } from "./contracts/state.js";
 import type { OperatorStateSnapshot } from "./contracts/state.js";
 import {
@@ -276,53 +258,16 @@ const OPTIONAL_RUNTIME_SETTING_KEYS: ReadonlySet<string> = new Set([
 ]);
 function validateRuntimeSettingsSnapshot(value: unknown, path: string): void {
   const settings = record(value, path);
-  exactKeys(settings, HARNESS_RUNTIME_SETTING_KEYS, path);
+  exactKeys(settings, [...HARNESS_RUNTIME_SETTING_KEYS, "claudeResets.autoRedeem", "codexResets.autoRedeem"], path);
+  for (const legacy of ["claudeResets.autoRedeem", "codexResets.autoRedeem"] as const) {
+    if (settings[legacy] !== undefined) oneOf(settings[legacy], ["unset", "yes", "no"], `${path}.${legacy}`);
+  }
   for (const key of HARNESS_RUNTIME_SETTING_KEYS) {
     if (settings[key] === undefined && OPTIONAL_RUNTIME_SETTING_KEYS.has(key)) continue;
     // Native config may contain values outside the editor's range. The Runtime
     // clamps those at use time; accepting the snapshot must not disconnect it.
     if (["read.defaultLimit", "async.maxJobs", "mnemopi.recallLimit", "mnemopi.injectionTokenLimit", "hindsight.recallMaxTokens", "tools.maxTimeout"].includes(key) && typeof settings[key] === "number" && Number.isFinite(settings[key])) continue;
     validateRuntimeSettingValue(key, settings[key], `${path}.${key}`);
-  }
-}
-
-function validateRuntimeSettingsSelection(value: unknown, path: string): void {
-  if (!Array.isArray(value) || value.length === 0 || value.length > HARNESS_RUNTIME_SETTING_KEYS.length) {
-    throw new ContractValidationError("expected a non-empty settings key array", path);
-  }
-  if (
-    value.some((key) => !HARNESS_RUNTIME_SETTING_KEYS.includes(key as HarnessRuntimeSettingKey)) ||
-    new Set(value).size !== value.length
-  ) {
-    throw new ContractValidationError("expected unique supported settings keys", path);
-  }
-}
-
-function validatePlanSavePath(value: unknown, path: string): void {
-  const rawPath = nonEmptyString(value, path);
-  if (
-    rawPath.length > 1024 ||
-    rawPath.includes("\0") ||
-    rawPath !== rawPath.trim() ||
-    ((rawPath.startsWith('"') && rawPath.endsWith('"')) || (rawPath.startsWith("'") && rawPath.endsWith("'")))
-  ) {
-    throw new ContractValidationError("invalid plan save path", path);
-  }
-  const normalized = rawPath.replaceAll("\\", "/");
-  if (
-    normalized.startsWith("/") ||
-    normalized.startsWith("~") ||
-    /^[A-Za-z]:/.test(rawPath) ||
-    normalized.endsWith("/")
-  ) {
-    throw new ContractValidationError("plan save path must be workspace-relative", path);
-  }
-  const segments = normalized.split("/");
-  if (segments.some((segment) => segment === ".." || segment.includes(":"))) {
-    throw new ContractValidationError("plan save path escapes the workspace", path);
-  }
-  if (segments.every((segment) => segment.length === 0 || segment === ".")) {
-    throw new ContractValidationError("plan save path must name a file", path);
   }
 }
 
@@ -927,7 +872,7 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
       }
       return;
     case "select": {
-      exactKeys(request, [...baseKeys, "options", "multiple"], path);
+      exactKeys(request, [...baseKeys, "options", "multiple", "initialIndex", "selectionMarker", "checkedIndices", "markableCount"], path);
       if (!Array.isArray(request.options) || request.options.length === 0 || request.options.length > INTERACTION_LIMITS.OPTION_COUNT_MAX) {
         throw new ContractValidationError("expected non-empty options", `${path}.options`);
       }
@@ -980,6 +925,10 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
         }
       }
       return;
+    case "form":
+      exactKeys(request, [...baseKeys, "summary", "fieldCount", "sectionCount", "timeoutMs"], path);
+      boundedInteractionString(request.summary, `${path}.summary`, INTERACTION_LIMITS.TITLE_MAX_CHARS);
+      return;
     case "ask": {
       exactKeys(request, [...baseKeys, "questions", "acceptImages"], path);
       if(request.acceptImages!==undefined&&typeof request.acceptImages!=="boolean")throw new ContractValidationError("invalid image capability",path);
@@ -991,28 +940,6 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
   }
 }
 
-type OperationShape = {
-  readonly keys: readonly string[];
-  readonly validate?: (operation: Record<string, unknown>) => void;
-};
-
-function optionalImageArray(value: unknown, path: string): void {
-  if (!Array.isArray(value)) {
-    throw new ContractValidationError("expected an array", path);
-  }
-  for (const [index, image] of value.entries()) {
-    if (image === null || typeof image !== "object" || Array.isArray(image)) {
-      throw new ContractValidationError("expected an image object", `${path}[${index}]`);
-    }
-  }
-}
-
-const MAX_COMMAND_ID_LENGTH = 1024;
-const MAX_AGENT_ID_LENGTH = 512;
-const MAX_AGENT_DEFINITION_LENGTH = 256;
-const MAX_AGENT_TEXT_LENGTH = 64 * 1024;
-const MAX_MODEL_SELECTOR_LENGTH = 256;
-const MAX_TRANSCRIPT_PAGE = CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX;
 const THINKING_LEVEL_SET = new Set<string>(SESSION_THINKING_LEVELS);
 const THINKING_SELECTOR_SET = new Set<string>(SESSION_THINKING_SELECTORS);
 
@@ -1619,7 +1546,6 @@ export function parseFoundationHarnessRequest(value: unknown): HarnessRequest {
   shape.validate?.(operation);
   return input as unknown as HarnessRequest;
 }
-
 const RECEIPT_STATUSES = new Set(["accepted", "completed", "rejected", "failed", "outcome_unknown"]);
 const ERROR_CODES = new Set([
   "UNAUTHENTICATED",
@@ -1717,4 +1643,3 @@ export function parseAgentTranscriptPage(value: unknown): AgentTranscriptPage {
     eof: input.eof as boolean,
   };
 }
-import { validatePredictionQuery } from "./contracts/prediction.js";

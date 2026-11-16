@@ -533,7 +533,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
     })) as { ok: boolean; message?: string };
 
     assert.equal(res.ok, false);
-    assert.match(res.message ?? "", /平台不匹配/);
+    assert.match(res.message ?? "", /Platform mismatch/);
     assert.equal(pending.peek(), undefined);
 
     handle.dispose();
@@ -576,7 +576,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
     })) as { ok: boolean; message?: string };
 
     assert.equal(res.ok, false);
-    assert.match(res.message ?? "", /通道不匹配/);
+    assert.match(res.message ?? "", /Channel mismatch/);
     assert.equal(pending.peek(), undefined);
 
     handle.dispose();

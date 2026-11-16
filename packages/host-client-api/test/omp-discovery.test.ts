@@ -152,7 +152,7 @@ describe("omp-discovery scope alignment", () => {
       const mkt = result.skills.find((skill) => skill.name === "mkt");
       assert.ok(mkt);
       assert.equal(mkt?.sourceKind, "plugin");
-      assert.equal(mkt?.sourceLabel, "Claude 插件");
+      assert.equal(mkt?.sourceLabel, "Claude Plugin");
       const mkt2 = result.skills.find((skill) => skill.name === "mkt2");
       assert.ok(mkt2, "skills from plugin.json-declared dirs must be scanned");
       assert.equal(mkt2?.sourceKind, "plugin");
@@ -254,7 +254,7 @@ describe("omp-discovery scope alignment", () => {
       const skill = result.skills.find((entry) => entry.name === "ext");
       assert.ok(skill);
       assert.equal(skill?.sourceKind, "plugin");
-      assert.equal(skill?.sourceLabel, "插件");
+      assert.equal(skill?.sourceLabel, "Plugin");
     } finally {
       await rm(home, { recursive: true, force: true });
     }

@@ -14,6 +14,7 @@ import {
 import { getAgentDirsForRead, getConfigDirNames } from "./paths.js";
 import { listOmpPluginRoots, listSettingsExtensionRoots, resolvePluginSkillDirs } from "./plugin-roots.js";
 import { classifyAgentPluginRoot, legacyProviderAllowed } from "./agent-plugin.js";
+import { hostText } from "../locale.js";
 import type { LoadContext, DiscoveredSkill, DiscoveryWarning } from "./types.js";
 
 export interface ProviderResult {
@@ -27,7 +28,7 @@ function providerLabel(providerId: string): string {
   if (providerId === "omp-plugins") return "插件";
   if (providerId === "claude") return "Claude";
   if (providerId === "agent-plugins") return "Agent Plugin";
-  if (providerId === "claude-plugins") return "Claude 插件";
+  if (providerId === "claude-plugins") return hostText("Claude 插件", "Claude Plugin");
   if (providerId === "codex") return "Codex";
   if (providerId === "opencode") return "OpenCode";
   if (providerId === "github") return "GitHub";

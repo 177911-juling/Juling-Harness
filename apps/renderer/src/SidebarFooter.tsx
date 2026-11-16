@@ -35,7 +35,8 @@ export function SidebarFooter({
   /** 底栏盒子：壳用它的底边换算落点，这里用它盯实时高度。 */
   readonly footerRef: RefObject<HTMLElement | null> | undefined;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const localFooterRef = useRef<HTMLElement>(null);
   const footer = footerRef ?? localFooterRef;
   const [mounted, setMounted] = useState(railCollapsed);

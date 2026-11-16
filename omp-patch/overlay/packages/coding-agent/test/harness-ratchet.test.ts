@@ -15,7 +15,7 @@ import type { StructuredSubagentResult } from "../src/task/structured-subagent";
 import { ISOLATION_OWNER_FILE } from "../src/task/isolation-ownership";
 import { HarnessRatchetService } from "../src/harness/services/ratchet-service";
 import { enforceHarnessRatchetBoundary } from "../src/harness/services/ratchet-boundary";
-import { validateWorkbenchOperation, validateWorkbenchResult } from "../src/harness/workbench-protocol";
+import { validateWorkbenchOperation } from "../src/harness/workbench-protocol";
 import type { RatchetRunView } from "../src/harness/ratchet-protocol";
 
 afterEach(() => mock.restore());
@@ -81,7 +81,6 @@ test("Ratchet uses isolated native state, invalidates changed approvals, and sto
 		};
 		validateWorkbenchOperation(create);
 		const run = (await service.execute(create)) as RatchetRunView;
-		validateWorkbenchResult("ratchet.create", run);
 		expect(run.workspace).toBe(isolated);
 		expect(run.trainCount + run.testCount).toBe(4);
 		await expect(

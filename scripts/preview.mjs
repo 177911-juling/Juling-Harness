@@ -269,6 +269,11 @@ async function preparePreviewElectron() {
   if (!existsSync(electronDist)) {
     throw new Error("Electron distribution is missing. Run `npm install` once, then retry.");
   }
+  if (process.platform === "linux") {
+    // The npm Electron distribution ships the binary at dist/electron; an
+    // unpackaged run reports app.isPackaged === false, so no Runtime staging.
+    return join(electronDist, "electron");
+  }
   if (process.platform !== "win32") {
     return join(electronDist, "Electron.app", "Contents", "MacOS", "Electron");
   }
@@ -351,8 +356,8 @@ async function brandWindowsExecutable(exePath) {
 }
 
 async function main() {
-  if (process.platform !== "win32" && process.platform !== "darwin") {
-    throw new Error("The current preview launcher supports Windows and macOS Electron builds.");
+  if (process.platform !== "win32" && process.platform !== "darwin" && process.platform !== "linux") {
+    throw new Error("The current preview launcher supports Windows, macOS and Linux Electron builds.");
   }
   if (!existsSync(join(root, "node_modules", "electron", "package.json"))) {
     throw new Error("Dependencies are missing. Run `npm install` once, then retry.");
@@ -362,6 +367,14 @@ async function main() {
     throw new Error(
       "OMP_PREVIEW_DATA=1 only applies to the Renderer dev server. Unset OMP_PREVIEW_MODE=production to open the preview with demo data.",
     );
+  }
+
+  const commandExtension = process.platform === "win32" ? ".cmd" : "";
+  if (["tsc", "vite"].some((command) => !existsSync(join(root, "node_modules", ".bin", `${command}${commandExtension}`)))) {
+    console.log("[preview] Repairing workspace dependencies / 正在修复工作区依赖...");
+    // 补齐中断安装遗留的缺包，再恢复命令链接；保留锁文件与已准备好的原生模块。
+    await run(process.execPath, [npmCli, "install", "--include=dev", "--ignore-scripts", "--bin-links=true", "--no-save", "--no-audit", "--no-fund"]);
+    await run(process.execPath, [npmCli, "rebuild", "--ignore-scripts", "--bin-links=true"]);
   }
 
   console.log("[preview] Building workspace...");

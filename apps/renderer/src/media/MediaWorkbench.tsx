@@ -8,7 +8,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CommandInput, HarnessClient } from "@juling-harness/client-contract";
 import {
   mediaInputArtifacts,
-  validateMediaRequest,
   type ArtifactRecord,
   type MediaDetail,
   type MediaJob,
@@ -21,8 +20,8 @@ import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import {
-  PREVIEW_MEDIA_DETAILS,
-  PREVIEW_MEDIA_DETAIL,
+  getPreviewMediaDetail,
+  getPreviewMediaDetails,
   PREVIEW_MEDIA_INPUTS,
   PREVIEW_MEDIA_MODELS,
 } from "../preview/mediaWorkbenchPreview";
@@ -82,7 +81,7 @@ export function MediaWorkbench({
   const [model, setModel] = useState("");
   const [inputCursor, setInputCursor] = useState<string>();
   const demos = useRef(
-    new Map(PREVIEW_MEDIA_DETAILS.map((value) => [value.job.id, value])),
+    new Map(getPreviewMediaDetails(zh).map((value) => [value.job.id, value])),
   );
   const [inputs, setInputs] = useState<ArtifactRecord[]>([]);
   const [jobs, setJobs] = useState<MediaJob[]>([]);
@@ -168,8 +167,9 @@ export function MediaWorkbench({
   );
   useEffect(() => {
     epoch.current++;
+    const previewDetails = getPreviewMediaDetails(zh);
     demos.current = new Map(
-      PREVIEW_MEDIA_DETAILS.map((value) => [value.job.id, value]),
+      previewDetails.map((value) => [value.job.id, value]),
     );
     setInputs([]);
     setInputCursor(undefined);
@@ -177,10 +177,10 @@ export function MediaWorkbench({
     setBusy(false);
     setError("");
     setModels([]);
-    const example = PREVIEW_MEDIA_DETAILS.find(
+    const example = previewDetails.find(
       (value) => value.job.type === type,
     );
-    setJobs(preview ? PREVIEW_MEDIA_DETAILS.map((value) => value.job) : []);
+    setJobs(preview ? previewDetails.map((value) => value.job) : []);
     setSelected(preview ? example?.job.id : undefined);
     setDetail(preview ? example : undefined);
     setFileChannel(preview);
@@ -231,7 +231,7 @@ export function MediaWorkbench({
     return () => {
       epoch.current++;
     };
-  }, [available, sessionId, preview, invoke, loadInputs]);
+  }, [available, sessionId, preview, invoke, loadInputs, zh]);
   useEffect(() => {
     if (review) confirm.current?.focus();
   }, [review]);
@@ -387,8 +387,7 @@ export function MediaWorkbench({
           ([, value]) => value !== undefined,
         ),
       );
-      validateMediaRequest(request);
-      setReview(request);
+      setReview(request as MediaRequest);
     } catch (cause) {
       setError(hostErrorMessage(cause, "Invalid media request"));
     }
@@ -397,10 +396,11 @@ export function MediaWorkbench({
     void run(async (generation) => {
       if (!review) return;
       if (preview) {
+        const baseDetail = getPreviewMediaDetail(zh);
         const value: MediaDetail = {
-          ...PREVIEW_MEDIA_DETAIL,
+          ...baseDetail,
           job: {
-            ...PREVIEW_MEDIA_DETAIL.job,
+            ...baseDetail.job,
             id: crypto.randomUUID(),
             type: review.type,
             model: review.model ?? (marks ? "demo/role" : t("角色链", "Role chain")),
@@ -411,7 +411,7 @@ export function MediaWorkbench({
           request: review,
           outputs: [],
           ...(review.type === "transcription"
-            ? { text: PREVIEW_MEDIA_DETAIL.text! }
+            ? { text: baseDetail.text! }
             : {
                 text: marks
                   ? t(

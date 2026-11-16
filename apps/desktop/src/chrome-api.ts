@@ -1,13 +1,11 @@
 import { FILE_VIEWER_CHANNELS, type FileViewerDesktopApi } from "./file-viewer-shared.js";
 import { PREDICTION_CHANNELS, type PredictionAttach, type PredictionControl, type PredictionResult, type PredictionEvent } from "./prediction-shared.js";
-import { validatePredictionEvent } from "@juling-harness/harness-protocol";
 import { FLOAT_WINDOW_CHANNELS, type FloatWindowPrepare, type FloatWindowTicket, type FloatWindowControl, type FloatWindowEvent } from "./floating-windows-shared.js";
 import { SKILLSHARE_TOKEN_CHANNEL, type SkillshareTokenReveal } from "./chrome-skillshare-shared.js";
 import { LIVE_AUDIO_CHANNELS, type LiveAudioAttach, type LiveAudioChunk, type LiveAudioResult } from "./live-audio-shared.js";
 import { DICTATION_AUDIO_CHANNELS, type DictationAudioApi, type DictationAudioAttach, type DictationAudioResult, type DictationDesktopEvent } from "./dictation-audio-shared.js";
 import { BROWSER_OBSERVATION_CHANNELS, type BrowserObservationAttach, type BrowserObservationControl, type BrowserObservationEvent, type BrowserObservationResult } from "./browser-observation-shared.js";
-import { validateBrowserObservationEvent } from "@juling-harness/harness-protocol";
-import type { ManagedBrowserApi, ManagedBrowserEvent, ManagedBrowserState } from "@juling-harness/harness-protocol";
+import type { ManagedBrowserApi, ManagedBrowserEvent, ManagedBrowserState, BrowserPageInspection } from "@juling-harness/harness-protocol";
 import { MANAGED_BROWSER_CHANNELS } from "./managed-browser-shared.js";
 import { COMPUTER_CAPTURE_CHANNEL, type ComputerCaptureRequest, type ComputerCaptureResult } from "./computer-observation-shared.js";
 import { COMPUTER_FRAME_CHANNELS, type ComputerFrameRequest, type ComputerFrameReadResult, type ComputerFrameSaveResult } from "./computer-frames-shared.js";
@@ -15,6 +13,7 @@ import { CHROME_SERVICE_CHANNELS, type ServiceDefinitionResult, type ServiceDefi
 import { PAYLOAD_HEALTH_CHANNEL, type PayloadHealthStatus } from "./payload-health-shared.js";
 import { CHROME_ARTIFACT_CHANNELS, type ArtifactFileResult, type ArtifactImportInput } from "./chrome-artifacts-shared.js";
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
+import { DESKTOP_LANGUAGE_CHANNEL, type DesktopLocale } from "./desktop-language-shared.js";
 import { CHROME_PERFORMANCE_CHANNEL } from "./chrome-performance-shared.js";
 import type { MemorySample } from "@juling-harness/harness-protocol";
 import { CONVERSATION_VIEW_CHANNEL, type ConversationViewState } from "./conversation-views.js";
@@ -51,6 +50,8 @@ import {
   type WorkspaceFileActionResult,
   type WorkspaceFileTargetInput,
   type WorkspaceShellEditorResult,
+  type SystemFileTargetInput,
+  type SystemFileOpenWithInput,
 } from "./workspace-shell-shared.js";
 import {
   CHROME_UPDATES_CHANNELS,
@@ -147,12 +148,13 @@ export function createJulingHarnessChromeApi(ipcRenderer: IpcRendererLike, webUt
     predictionInput(input:PredictionControl):Promise<PredictionResult>{return ipcRenderer.invoke(PREDICTION_CHANNELS.input,input) as Promise<PredictionResult>;},
     detachPrediction(input:{channelId:string}):Promise<PredictionResult>{return ipcRenderer.invoke(PREDICTION_CHANNELS.detach,input) as Promise<PredictionResult>;},
     importPredictionHistory(input:{channelId:string}):Promise<PredictionResult>{return ipcRenderer.invoke(PREDICTION_CHANNELS.import,input) as Promise<PredictionResult>;},
-    onPrediction(listener:(event:PredictionEvent)=>void):()=>void{return subscribeChannel<unknown>(ipcRenderer,PREDICTION_CHANNELS.event,event=>{try{validatePredictionEvent(event);listener(event);}catch{/* Ignore malformed private data. */}});},
+    onPrediction(listener:(event:PredictionEvent)=>void):()=>void{return subscribeChannel<unknown>(ipcRenderer,PREDICTION_CHANNELS.event,event=>listener(event as PredictionEvent));},
     managedBrowser: Object.freeze<ManagedBrowserApi>({
       available: () => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.available) as Promise<boolean>,
       read: sessionId => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.read, sessionId) as Promise<ManagedBrowserState>,
       execute: command => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.execute, command) as Promise<ManagedBrowserState>,
       present: presentation => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.present, presentation) as Promise<void>,
+      inspect: request => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.inspect, request) as Promise<BrowserPageInspection>,
       subscribe: listener => subscribeChannel<ManagedBrowserEvent>(ipcRenderer, MANAGED_BROWSER_CHANNELS.event, listener),
     }),
     attachBrowserObservation(input: BrowserObservationAttach): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.attach, input) as Promise<BrowserObservationResult>; },
@@ -161,7 +163,7 @@ export function createJulingHarnessChromeApi(ipcRenderer: IpcRendererLike, webUt
     saveComputerFrame(input: ComputerFrameRequest): Promise<ComputerFrameSaveResult> { return ipcRenderer.invoke(COMPUTER_FRAME_CHANNELS.save, input) as Promise<ComputerFrameSaveResult>; },
     controlBrowserObservation(input: BrowserObservationControl): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.input, input) as Promise<BrowserObservationResult>; },
     detachBrowserObservation(input: { observationId: string }): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.detach, input) as Promise<BrowserObservationResult>; },
-    onBrowserObservation(listener: (event: BrowserObservationEvent) => void): () => void { return subscribeChannel<unknown>(ipcRenderer, BROWSER_OBSERVATION_CHANNELS.event, event => { try { validateBrowserObservationEvent(event); listener(event); } catch { /* Malformed private frames never enter the Renderer. */ } }); },
+    onBrowserObservation(listener: (event: BrowserObservationEvent) => void): () => void { return subscribeChannel<unknown>(ipcRenderer, BROWSER_OBSERVATION_CHANNELS.event, event => listener(event as BrowserObservationEvent)); },
     appendLiveAudio(input: LiveAudioChunk): Promise<LiveAudioResult> { return ipcRenderer.invoke(LIVE_AUDIO_CHANNELS.chunk, input) as Promise<LiveAudioResult>; },
     detachLiveAudio(input: { audioId: string }): Promise<LiveAudioResult> { return ipcRenderer.invoke(LIVE_AUDIO_CHANNELS.detach, input) as Promise<LiveAudioResult>; },
     beginMediaUpload(input: MediaUploadInput): Promise<MediaUploadResult> { return ipcRenderer.invoke(MEDIA_UPLOAD_CHANNELS.begin, input) as Promise<MediaUploadResult>; },
@@ -192,6 +194,9 @@ export function createJulingHarnessChromeApi(ipcRenderer: IpcRendererLike, webUt
     setTheme(theme: "light" | "dark", tint?: { color: string; symbolColor: string }): Promise<void> {
       if (theme !== "light" && theme !== "dark") return Promise.resolve();
       return ipcRenderer.invoke(TITLEBAR_OVERLAY_CHANNEL, tint === undefined ? { theme } : { theme, tint }) as Promise<void>;
+    },
+    setLanguage(locale: DesktopLocale): Promise<void> {
+      return ipcRenderer.invoke(DESKTOP_LANGUAGE_CHANNEL, { locale }) as Promise<void>;
     },
     notify(payload: { title: string; body?: string }): Promise<void> {
       return ipcRenderer.invoke(CHROME_NOTIFY_CHANNEL, payload) as Promise<void>;
@@ -244,6 +249,15 @@ export function createJulingHarnessChromeApi(ipcRenderer: IpcRendererLike, webUt
     },
     openFile(input: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> {
       return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpen, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileOpen(input: SystemFileTargetInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileOpen, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileOpenWith(input: SystemFileOpenWithInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileOpenWith, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileReveal(input: SystemFileTargetInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileReveal, input) as Promise<WorkspaceFileActionResult>;
     },
     openFileWith(input: FileOpenWithInput): Promise<WorkspaceFileActionResult> {
       return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpenWith, input) as Promise<WorkspaceFileActionResult>;

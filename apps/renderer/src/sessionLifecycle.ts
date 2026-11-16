@@ -10,9 +10,17 @@ import type {
 } from "@juling-harness/client-contract";
 import type { OperatorStateSnapshot } from "@juling-harness/harness-protocol";
 import { waitReceipt } from "./hostError";
+import { pickLocale } from "./i18n";
+
+export function newConversationUnavailableReason(): string {
+  return pickLocale(
+    "Host 未提供 session.create，无法创建新的 Runtime 会话。",
+    "Host does not provide session.create, so a new Runtime session cannot be created.",
+  );
+}
 
 export const NEW_CONVERSATION_UNAVAILABLE_REASON =
-  "Host 未提供 session.create，无法创建新的 Runtime 会话。";
+  "Host does not provide session.create, so a new Runtime session cannot be created.";
 
 export type NewSessionWaitResult =
   | { readonly ok: true; readonly sessionId?: SessionId }
@@ -159,6 +167,7 @@ export async function ensureSelectedSessionActive(
     readonly activeSessionId?: SessionId;
     readonly selectedSessionId?: SessionId;
     readonly selectedThreadId?: ThreadId;
+    readonly model?: string;
   },
 ): Promise<void> {
   if (target.selectedSessionId !== undefined && target.activeSessionId !== target.selectedSessionId) {

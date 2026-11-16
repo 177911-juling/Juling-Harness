@@ -42,13 +42,13 @@ const DASHBOARD_EMBED_URL = `${DASHBOARD_URL}#/overview?range=all`;
 const DASHBOARD_START_TIMEOUT_MS = 20_000;
 const DASHBOARD_POLL_MS = 250;
 
-const OPEN_OK: ConfigWriteResult = {
+const openOk = (): ConfigWriteResult => ({
   applied: true,
   runtimeEffect: "immediate",
   message: "正在打开 Juling Stats 仪表盘。",
 };
 
-const OPENED_OK: ConfigWriteResult = {
+const openedOk = (): ConfigWriteResult => ({
   applied: true,
   runtimeEffect: "immediate",
   message: "已在浏览器打开 Juling Stats 仪表盘。",
@@ -371,10 +371,10 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
           await delay(DASHBOARD_POLL_MS);
           if (await probeDashboard()) return { url: DASHBOARD_EMBED_URL };
         }
-        return { reason: "本机统计面板未在预期时间内就绪，可稍后重试或在浏览器打开。" };
+        return { reason: hostText("本机统计面板未在预期时间内就绪，可稍后重试或在浏览器打开。", "The local stats dashboard did not become ready in time; retry shortly or open it in your browser.") };
       } catch {
         // A rejected locator or spawn must not leave the shared promise stuck.
-        return { reason: "启动本机统计面板失败。" };
+        return { reason: hostText("启动本机统计面板失败。", "Failed to start the local stats dashboard.") };
       }
     })();
     const result = await dashboardStarting;
@@ -468,7 +468,7 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
         const live = await probeDashboard();
         if (live && openUrl !== undefined) {
           await openUrl(DASHBOARD_URL);
-          return OPENED_OK;
+          return openedOk();
         }
         // An explicit request to see the panel in a browser keeps `juling stats`
         // opening one; only the embedded start suppresses it.
@@ -477,7 +477,7 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
         const message = error instanceof Error ? error.message : "打开 Juling Stats 失败";
         throw { code: "UNAVAILABLE", message };
       }
-      return OPEN_OK;
+      return openOk();
     },
   };
 }

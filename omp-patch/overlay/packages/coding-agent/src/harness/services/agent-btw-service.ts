@@ -3,12 +3,7 @@ import { randomUUID } from "node:crypto";
 import { AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
 type HarnessChildBtwPort = Omit<HarnessBtwSessionPort, "branchFromBtw">;
 import { HarnessBtwService, HarnessBtwError, type HarnessBtwSessionPort, type HarnessBtwSnapshot } from "./btw-service";
-import {
-	validateAgentBtwOperation,
-	validateAgentBtwState,
-	type AgentBtwOperation,
-	type AgentBtwState,
-} from "../agent-btw-protocol";
+import { type AgentBtwOperation, type AgentBtwState } from "../agent-btw-protocol";
 
 interface Entry {
 	binding: string;
@@ -142,7 +137,6 @@ export class HarnessAgentBtwService {
 		return entry;
 	}
 	async execute(operation: AgentBtwOperation): Promise<AgentBtwState> {
-		validateAgentBtwOperation(operation);
 		const entry = this.#entry(operation);
 		if (operation.kind === "agent.btw.ask") {
 			if (operation.topicId) await entry.service.followUp(operation.topicId, operation.question, operation.images);
@@ -180,7 +174,6 @@ export class HarnessAgentBtwService {
 					}
 				: null,
 		};
-		validateAgentBtwState(result);
 		return result;
 	}
 	async settle(): Promise<void> {

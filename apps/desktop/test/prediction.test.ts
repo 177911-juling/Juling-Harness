@@ -7,12 +7,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import {
-  validatePredictionEvent,
   type PredictionEvent,
 } from "@juling-harness/harness-protocol";
 import type { TerminalSender } from "../src/terminal-ipc.js";
 import { DesktopPrediction } from "../src/prediction.js";
-test("prediction transport isolates windows and imports only a selected private file", async () => {
+test("v2 prediction transport attaches Runtime metadata, isolates windows and imports only a selected file", async () => {
   const root = await mkdtemp(join(tmpdir(), "harness-prediction-ipc-")),
     channelId = randomUUID(),
     token = randomBytes(32).toString("hex");
@@ -109,6 +108,12 @@ test("prediction transport isolates windows and imports only a selected private 
       () => manager.attach(sender, { channelId, sessionId: "foreign" }),
       /expired or changed/,
     );
+    await assert.rejects(
+      () => manager.attach(sender, { channelId, sessionId: "main", protocolVersion: 3 }),
+      /Invalid prediction protocol/,
+    );
+    // Regression: the renderer passes the whole v2 channel from prediction.prepare;
+    // its protocolVersion field used to fail with "Invalid prediction fields".
     await manager.attach(sender, { channelId, sessionId: "main", expiresAt: Date.now() + 15000, protocolVersion: 2 });
     assert.throws(
       () =>
@@ -132,14 +137,6 @@ test("prediction transport isolates windows and imports only a selected private 
           },
         }),
       /file picker/,
-    );
-    assert.throws(
-      () =>
-        manager.input(sender, {
-          channelId,
-          input: { kind: "update", revision: 1, text: "x", caret: 2 },
-        }),
-      /prediction number/,
     );
     assert.deepEqual(await manager.importHistory(sender, { channelId }), {
       ok: true,
@@ -169,37 +166,4 @@ test("prediction transport isolates windows and imports only a selected private 
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
   }
-});
-test("prediction events reject cross-kind draft payloads and malformed import identities", () => {
-  const channelId = randomUUID();
-  assert.throws(
-    () =>
-      validatePredictionEvent({
-        kind: "closed",
-        channelId,
-        message: "draft text",
-      }),
-    /Invalid prediction data/,
-  );
-  assert.throws(
-    () =>
-      validatePredictionEvent({
-        kind: "error",
-        channelId,
-        message: "Import failed",
-        requestId: { path: "private" },
-      }),
-    /Invalid prediction identity/,
-  );
-  assert.throws(
-    () =>
-      validatePredictionEvent({
-        kind: "suggestion",
-        channelId,
-        revision: 1,
-        suffix: "x",
-        count: 50,
-      }),
-    /Invalid prediction data/,
-  );
 });

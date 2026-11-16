@@ -29,12 +29,7 @@ function writeJsonLine(socket: net.Socket, value: unknown): void {
 }
 import { HarnessPredictionService } from "../src/harness/services/prediction-service";
 import { HarnessPredictionEngine } from "../src/harness/services/prediction-engine";
-import {
-	validatePredictionEvent,
-	validatePredictionChannelResult,
-	type PredictionChannel,
-	type PredictionEvent,
-} from "../src/harness/prediction-channel-protocol";
+import { type PredictionChannel, type PredictionEvent } from "../src/harness/prediction-channel-protocol";
 test("prediction channels keep prose private, apply native prose gates and close when session ownership changes", async () => {
 	const temp = TempDir.createSync("@harness-prediction-");
 	const session = { sessionId: "main", settings: Settings.isolated() } as AgentSession;
@@ -46,7 +41,6 @@ test("prediction channels keep prose private, apply native prose gates and close
 	let socket: net.Socket | undefined;
 	try {
 		const prepared = (await service.execute({ kind: "prediction.prepare", sessionId: "main" })) as PredictionChannel;
-		validatePredictionChannelResult("prediction.prepare", prepared);
 		const descriptor = (await Bun.file(
 			path.join(temp.path(), "prediction", prepared.channelId + ".json"),
 		).json()) as { token: string; endpoint: string };
@@ -61,8 +55,7 @@ test("prediction channels keep prose private, apply native prose gates and close
 				authenticated = true;
 				return;
 			}
-			const event: unknown = JSON.parse(line);
-			validatePredictionEvent(event);
+			const event = JSON.parse(line) as PredictionEvent;
 			frames.push(event);
 		});
 

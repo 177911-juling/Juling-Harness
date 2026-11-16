@@ -21,6 +21,10 @@
    loads this file gets the shared keyframes, the surface classes and the
    reduced-motion policy with it. */
 @import "./motion.css";
+/* Light is a layer on top of the flat surfaces, chosen by the 光效 setting
+   (`data-light`). It only adds: base colours, borders and backgrounds stay
+   exactly what this file says, so `data-light="off"` is the flat UI. */
+@import "./light.css";
 
 :root {
   /* Typography — UI 正文以 Inter 打头（latin），CJK 逐级回落系统栈；
@@ -145,6 +149,11 @@
   --loop-spin: 800ms;
   --loop-pulse: 1400ms;
   --loop-drift: 2400ms;
+  /* Light loops (styles/light.css). The orbit is a light travelling round the
+     edge of a surface that is working; the ambient field drifts so slowly it
+     is only noticed as the window being alive. */
+  --loop-orbit: 3200ms;
+  --loop-ambient: 18000ms;
 
   /* Curves — pick by what the motion means:
        --ease           state    colour, opacity, anything that stays where it is
@@ -370,6 +379,7 @@
   --danger-glow: #fed7aa;
   --blue: #60a5fa;
   --blue-soft: rgba(96, 165, 250, 0.14);
+
 
   --tint-green: #4ade80;
   --tint-green-soft: rgba(74, 222, 128, 0.14);

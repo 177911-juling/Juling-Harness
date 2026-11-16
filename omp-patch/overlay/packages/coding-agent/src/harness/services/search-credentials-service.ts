@@ -20,6 +20,7 @@ const SEARCH_AUTH_PROVIDERS = new Set([
 	"exa",
 	"keenable",
 	"tinyfish",
+	"sofya",
 	"jina",
 	"kagi",
 	"tavily",
@@ -44,7 +45,7 @@ export class HarnessSearchCredentialsService {
 		const auth = this.session.modelRegistry.authStorage;
 		await auth.credentials.revalidate();
 		if (operation.kind === "search.credentials.list")
-			return { providers: [...new Set(providers)].map(provider => this.status(provider)) };
+			return { providers: [...new Set(providers)].map(provider => this.#status(provider)) };
 		if (operation.kind === "search.credentials.set") {
 			if (OAUTH_ONLY.has(operation.provider))
 				throw new SessionControlError("INVALID_ARGUMENT", "This provider requires its native login flow");
@@ -64,10 +65,10 @@ export class HarnessSearchCredentialsService {
 					"The selected credential is no longer stored; refresh the list",
 				);
 		}
-		return this.status(operation.provider);
+		return this.#status(operation.provider);
 	}
 
-	private status(provider: string): SearchCredentialStatus {
+	#status(provider: string): SearchCredentialStatus {
 		const auth = this.session.modelRegistry.authStorage;
 		const source = auth.keys.source(provider);
 		const login = authPolicyFor(provider)?.login;

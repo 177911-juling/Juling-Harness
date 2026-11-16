@@ -13,12 +13,7 @@ import type {
 	DictationOperation,
 	DictationState,
 } from "../dictation-protocol";
-import {
-	type LiveAudioOperation,
-	type LiveAudioState,
-	validateLiveAudioOperation,
-	validateLiveAudioResult,
-} from "../live-audio-protocol";
+import { type LiveAudioOperation, type LiveAudioState } from "../live-audio-protocol";
 import { HarnessLiveError, type HarnessLiveService, type HarnessLiveSessionFactory } from "./live-service";
 import { HarnessDictationCapture } from "./dictation-capture";
 import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
@@ -388,7 +383,6 @@ export class HarnessLiveAudioService {
 
 	execute(operation: LiveAudioOperation): Promise<LiveAudioState> {
 		const work = this.#operations.then(async () => {
-			validateLiveAudioOperation(operation);
 			if (this.#disposed || operation.sessionId !== this.session.sessionId)
 				throw new HarnessLiveError("COMMAND_BLOCKED", "Live audio requires the active session");
 			if (operation.kind === "live.audio.prepare")
@@ -421,7 +415,6 @@ export class HarnessLiveAudioService {
 				}
 			}
 			const state = this.#current()?.sessionId === operation.sessionId ? this.#state : blank(this.#available);
-			validateLiveAudioResult(operation.kind, state);
 			return structuredClone(state);
 		});
 		this.#operations = work.catch(() => {});
@@ -478,6 +471,7 @@ export class HarnessLiveAudioService {
 					settings: this.session.settings,
 					registry: this.session.modelRegistry,
 					getSessionId: () => sessionId,
+					getSessionProvider: () => this.session.model?.provider,
 					configuration: { model, language: configuration.language, submitTrigger: configuration.submitTrigger },
 				},
 				{

@@ -17,6 +17,9 @@ export const WORKSPACE_SHELL_IPC_CHANNELS = {
   fileReveal: "juling-harness:desktop:file-reveal",
   fileAbsolutePath: "juling-harness:desktop:file-absolute-path",
   fileOpeners: "juling-harness:desktop:file-openers",
+  systemFileOpen: "juling-harness:desktop:system-file-open",
+  systemFileOpenWith: "juling-harness:desktop:system-file-open-with",
+  systemFileReveal: "juling-harness:desktop:system-file-reveal",
 } as const;
 
 /** Opaque workspace ids are Host-generated base64url tokens (or test ids). */
@@ -157,6 +160,10 @@ export type FileOpenerChoice = "vscode" | "cursor" | "windsurf" | "choose";
 export interface FileOpenWithInput extends WorkspaceFileTargetInput {
   readonly openerId: FileOpenerChoice;
 }
+
+/** Absolute paths are accepted only by these explicit local system-file actions. */
+export interface SystemFileTargetInput { readonly path: string }
+export interface SystemFileOpenWithInput extends SystemFileTargetInput { readonly openerId: FileOpenerChoice }
 
 /**
  * Result of a file-level shell action. `cancelled` means the user closed the

@@ -122,10 +122,11 @@ test("context viewer redacts credentials, pages a frozen body and expires it on 
 	}
 });
 
-test("idle maintenance needs explicit recap opt-in and known visible unblocked ownership", () => {
+test("idle maintenance inherits native recap policy and needs known visible unblocked ownership", () => {
 	const settings = Settings.isolated();
+	const nativeRecap = cfgRecapEnabled.get(settings);
 	applyHarnessDefaults(settings);
-	expect(cfgRecapEnabled.get(settings)).toBe(false);
+	expect(cfgRecapEnabled.get(settings)).toBe(nativeRecap);
 	const opted = Settings.isolated({ "recap.enabled": true });
 	applyHarnessDefaults(opted);
 	expect(cfgRecapEnabled.get(opted)).toBe(true);
