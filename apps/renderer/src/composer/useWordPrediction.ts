@@ -1,0 +1,542 @@
+import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import type { HarnessClient } from "@juling-harness/client-contract";
+import type {
+  PredictionChannel,
+  PredictionInput,
+} from "@juling-harness/harness-protocol";
+import { usePreviewMode } from "../preview/PreviewContext";
+import { waitReceipt } from "../hostError";
+import { insertPlainText } from "./editorDom";
+import { PREVIEW_NEXT_MESSAGES } from "../preview/nextMessagePreview";
+import "./prediction.css";
+export interface ComposerPrediction {
+  client: HarnessClient;
+  sessionId?: string | undefined;
+  available: boolean;
+  nextMessageAvailable?: boolean;
+}
+/** Plain prose only: chips, hidden attachment names and image bytes never reach prediction. */
+function plain(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  if (
+    node instanceof Element &&
+    node.matches(".cm-chip,[contenteditable=false]")
+  )
+    return "\n";
+  if (node instanceof Element && node.tagName === "BR") return "\n";
+  let text = Array.from(node.childNodes).map(plain).join("");
+  if (
+    node instanceof Element &&
+    ["DIV", "P"].includes(node.tagName) &&
+    text &&
+    !text.endsWith("\n")
+  )
+    text += "\n";
+  return text;
+}
+export function predictionDraft(
+  editor: HTMLElement,
+): { text: string; caret: number } | undefined {
+  const selection = editor.ownerDocument.defaultView!.getSelection();
+  if (!selection?.isCollapsed || !selection.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (!editor.contains(range.startContainer)) return;
+  const parent =
+    range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement;
+  if (parent?.closest(".cm-chip,[contenteditable=false]")) return;
+  if ((editor.textContent?.length ?? 0) > 4096) return;
+  const before = range.cloneRange();
+  before.selectNodeContents(editor);
+  before.setEnd(range.startContainer, range.startOffset);
+  const text = plain(editor),
+    head = plain(before.cloneContents());
+  if (text.length > 4096) return;
+  return { text, caret: Math.min(head.length, text.length) };
+}
+function currentDraft(editor: HTMLElement, allowEmpty: boolean): { text: string; caret: number } | undefined {
+  if (allowEmpty && !editor.textContent && !editor.querySelector(".cm-chip,[contenteditable=false]")) {
+    const text = plain(editor);
+    if (text === "" || text === "\n") return { text: "", caret: 0 };
+  }
+  if (editor.ownerDocument.activeElement !== editor) return;
+  const draft = predictionDraft(editor);
+  const selection = editor.ownerDocument.defaultView!.getSelection();
+  if (!draft || !selection?.rangeCount) return;
+  const after = selection.getRangeAt(0).cloneRange();
+  after.selectNodeContents(editor);
+  after.setStart(selection.focusNode!, selection.focusOffset);
+  const remaining = after.cloneContents();
+  if (remaining.textContent || remaining.querySelector("br,.cm-chip,[contenteditable=false]")) return;
+  return draft;
+}
+function previewSuffix(text: string, caret: number): string | null {
+  const before = text.slice(0, caret),
+    word = before.match(/[\p{L}]+$/u)?.[0];
+  if (!word || /[/\\@]/.test(before)) return null;
+  const choices = ["review", "implementation", "testing", "测试", "验证"];
+  const full = choices.find(
+    (value) =>
+      value.toLowerCase().startsWith(word.toLowerCase()) &&
+      value.length > word.length,
+  );
+  return full?.slice(word.length) ?? null;
+}
+type Ghost = {
+  next?: boolean;
+  rank?: number | undefined;
+  suffix: string;
+  revision: number;
+  draft: string;
+  caret: number;
+  left: number;
+  top: number;
+  width: number;
+};
+export function useWordPrediction(
+  editorRef: RefObject<HTMLDivElement | null>,
+  options: ComposerPrediction | undefined,
+  blocked: boolean,
+) {
+  const document = useSurfaceDocument(), window = surfaceWindow(document);
+  const { preview } = usePreviewMode();
+  const [ghost, setGhost] = useState<Ghost>(),
+    [error, setError] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false), [choiceIndex, setChoiceIndex] = useState(0);
+  const [alternatives, setAlternatives] = useState<{ values: readonly string[]; revision: number }>();
+  const offers = useRef(alternatives); offers.current = alternatives;
+  const installed = useRef<string | undefined>(undefined);
+  const shown = useRef<Ghost | undefined>(undefined);
+  const acknowledged = useRef<number | undefined>(undefined);
+  shown.current = ghost;
+  const inputPort = useRef<
+    ((input: Exclude<PredictionInput, { kind: "import" }>) => void) | undefined
+  >(undefined);
+  const generation = useRef(0),
+    revision = useRef(0);
+  useEffect(() => {
+    const editor = editorRef.current;
+    const current = ++generation.current;
+    setGhost(undefined);
+    offers.current = undefined;
+    setAlternatives(undefined); setMenuOpen(false); installed.current = undefined;
+    setError("");
+    if (
+      !editor ||
+      !options ||
+      blocked ||
+      (!preview && (!options.available || !options.sessionId))
+    )
+      return;
+    const chrome = window.ompHarnessChrome;
+    if (
+      !preview &&
+      (!chrome?.attachPrediction ||
+        !chrome.predictionInput ||
+        !chrome.onPrediction)
+    )
+      return;
+    let channel: PredictionChannel | undefined,
+      connecting: Promise<void> | undefined,
+      composing = false,
+      timer: number | undefined,
+      lastDraft: { text: string; caret: number; revision: number } | undefined;
+    const send = (input: Exclude<PredictionInput, { kind: "import" }>) => {
+      if (channel && !preview)
+        void chrome!.predictionInput!({ channelId: channel.channelId, input })
+          .then((result) => {
+            if (!result.ok && generation.current === current) {
+              setError(result.message ?? "Prediction unavailable");
+              offers.current = undefined; setAlternatives(undefined);
+              setGhost(undefined);
+            }
+          })
+          .catch(() => {
+            if (generation.current === current) {
+              offers.current = undefined; setAlternatives(undefined);
+              setGhost(undefined);
+            }
+          });
+    };
+    inputPort.current = send;
+    const close = () => {
+      const previous = channel;
+      channel = undefined;
+      if (previous && !preview)
+        void chrome
+          ?.detachPrediction?.({ channelId: previous.channelId })
+          .catch(() => {});
+    };
+    const show = (suffix: string | null, version: number, next = false, rank?: number) => {
+      const draft = lastDraft;
+      if (
+        generation.current !== current ||
+        version !== revision.current ||
+        !draft ||
+        draft.revision !== version ||
+        composing ||
+        (!next && (document.activeElement !== editor || document.hidden))
+      )
+        return;
+      if (!suffix) {
+        setGhost(undefined);
+        return;
+      }
+      const now = currentDraft(editor, !!options.nextMessageAvailable);
+      if (!now || now.text !== draft.text || now.caret !== draft.caret) return;
+      if (!next && offers.current?.values.some(value => value.startsWith(now.text.trimEnd()))) return;
+      const editorBounds = editor.getBoundingClientRect();
+      const previous = shown.current;
+      if (next && !draft.text && editorBounds.width < 20 && previous?.next && !previous.draft) {
+        setGhost({ ...previous, suffix, rank, revision: version });
+        return;
+      }
+      const style = window.getComputedStyle(editor);
+      const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5 || 20;
+      let rect: DOMRect;
+      if (!draft.text) {
+        rect = new DOMRect(editorBounds.left + (parseFloat(style.paddingLeft) || 0),
+          editorBounds.top + (parseFloat(style.paddingTop) || 0), 0,
+          lineHeight);
+      } else {
+        const selection = window.getSelection();
+        if (!selection?.rangeCount) return;
+        const range = selection.getRangeAt(0).cloneRange();
+        rect = range.getBoundingClientRect();
+        if (!rect.height && range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset > 0) {
+          range.setStart(range.startContainer, range.startOffset - 1);
+          rect = range.getBoundingClientRect();
+          rect = new DOMRect(rect.right, rect.top, 0, rect.height);
+        }
+      }
+      if (rect.bottom < editorBounds.top || rect.top > editorBounds.bottom) {
+        setGhost(undefined);
+        return;
+      }
+      const parent = editor.parentElement!.getBoundingClientRect();
+      const left = Math.max(0, rect.left - parent.left),
+        top = rect.top - parent.top - (lineHeight - rect.height) / 2,
+        width = Math.max(0, editorBounds.right - (parseFloat(style.paddingRight) || 0) - rect.left);
+      if (width < 20 || !rect.height) {
+        setGhost(undefined);
+        return;
+      }
+      setGhost({
+        next, rank,
+        suffix,
+        revision: version,
+        draft: draft.text,
+        caret: draft.caret,
+        left,
+        top,
+        width,
+      });
+      setError("");
+    };
+    const unsubscribe = preview
+      ? undefined
+      : chrome!.onPrediction!((event) => {
+          if (
+            event.channelId !== channel?.channelId ||
+            generation.current !== current
+          )
+            return;
+          if (event.kind === "next") {
+            if (event.revision !== lastDraft?.revision || event.revision !== revision.current) return;
+            const next = event.choices?.length ? { values: event.choices, revision: event.revision } : undefined;
+            offers.current = next; setAlternatives(next);
+            show(event.suffix, event.revision, true, event.rank);
+            return;
+          }
+          if (event.kind === "suggestion") {
+            if (event.revision === 0) {
+              if (!shown.current?.next) setGhost(undefined);
+              return;
+            }
+            show(event.suffix, event.revision);
+          }
+          if (event.kind === "error" && !event.requestId) {
+            setError(event.message);
+            offers.current = undefined; setAlternatives(undefined);
+            setGhost(undefined);
+          }
+          if (event.kind === "closed") {
+            channel = undefined;
+            offers.current = undefined; setAlternatives(undefined);
+            setGhost(undefined);
+          }
+        });
+    const ensure = async () => {
+      if (preview || channel) return;
+      if (connecting) return connecting;
+      connecting = (async () => {
+        const handle = await options.client.command("prediction.prepare", {
+          sessionId: options.sessionId!,
+          protocolVersion: 2,
+        });
+        const prepared = (
+          await waitReceipt<{ result: PredictionChannel }>(
+            options.client,
+            handle.requestId,
+          )
+        ).result;
+        if (
+          generation.current !== current ||
+          !currentDraft(editor, !!options.nextMessageAvailable) ||
+          document.hidden
+        ) {
+          void options.client
+            .command("prediction.release", {
+              sessionId: prepared.sessionId,
+              channelId: prepared.channelId,
+            })
+            .catch(() => {});
+          return;
+        }
+        const attached = await chrome!.attachPrediction!(prepared);
+        if (
+          !attached.ok ||
+          generation.current !== current ||
+          !currentDraft(editor, !!options.nextMessageAvailable) ||
+          document.hidden
+        ) {
+          void chrome!.detachPrediction!({
+            channelId: prepared.channelId,
+          }).catch(() => {});
+          void options.client
+            .command("prediction.release", {
+              sessionId: prepared.sessionId,
+              channelId: prepared.channelId,
+            })
+            .catch(() => {});
+          if (!attached.ok)
+            throw new Error(attached.message ?? "Prediction unavailable");
+          return;
+        }
+        channel = prepared;
+      })()
+        .catch((cause) => {
+          if (generation.current === current)
+            setError(cause instanceof Error ? cause.message : String(cause));
+        })
+        .finally(() => {
+          connecting = undefined;
+        });
+      return connecting;
+    };
+    const update = () => {
+      clearTimeout(timer);
+      const previous = shown.current;
+      const draft = currentDraft(editor, !!options.nextMessageAvailable);
+      if (!composing && previous?.next && !previous.draft && lastDraft?.revision === previous.revision && draft?.text === "") {
+        show(previous.suffix, previous.revision, true, previous.rank);
+        return;
+      }
+      const offer = offers.current;
+      if (!composing && !document.hidden && options.nextMessageAvailable && draft?.text === "" && offer?.values.length && (preview || channel)) {
+        const version = ++revision.current;
+        lastDraft = { ...draft, revision: version };
+        const next = { values: offer.values, revision: version };
+        offers.current = next; setAlternatives(next);
+        if (!preview) send({ kind: "next", revision: version, empty: true });
+        show(next.values[0]!, version, true, 0);
+        return;
+      }
+      lastDraft = undefined;
+      setGhost(undefined);
+      if (composing || document.hidden)
+        return;
+      timer = window.setTimeout(
+        () =>
+          void (async () => {
+            const draft = currentDraft(editor, !!options.nextMessageAvailable);
+            if (!draft || (!draft.text.trim() && !options.nextMessageAvailable)) return;
+            const version = ++revision.current;
+            lastDraft = { ...draft, revision: version };
+            if (preview) {
+              const rank = options.nextMessageAvailable ? PREVIEW_NEXT_MESSAGES.findIndex(value => value.startsWith(draft.text.trimEnd())) : -1;
+              if (rank >= 0) {
+                const next = { values: PREVIEW_NEXT_MESSAGES, revision: version };
+                offers.current = next; setAlternatives(next);
+                show(PREVIEW_NEXT_MESSAGES[rank]!.slice(draft.text.trimEnd().length), version, true, rank);
+              } else {
+                if (!options.nextMessageAvailable) { offers.current = undefined; setAlternatives(undefined); }
+                show(previewSuffix(draft.text, draft.caret), version);
+              }
+              return;
+            }
+            await ensure();
+            if (
+              generation.current !== current ||
+              lastDraft?.revision !== version
+            )
+              return;
+            const latest = currentDraft(editor, !!options.nextMessageAvailable);
+            if (latest?.text !== draft.text || latest.caret !== draft.caret)
+              return;
+            if (!draft.text && options.nextMessageAvailable && !editor.querySelector(".cm-chip,[contenteditable=false]")) {
+              send({ kind: "next", revision: version, empty: true });
+            } else {
+              if (offers.current && !offers.current.values.some(value => value.startsWith(draft.text.trimEnd()))) {
+                offers.current = undefined; setAlternatives(undefined);
+              }
+              send({ kind: "update", revision: version, ...draft });
+            }
+          })(),
+        140,
+      );
+    };
+    const blur = () => {
+      setMenuOpen(false);
+      if (options.nextMessageAvailable && currentDraft(editor, true)?.text === "" && !document.hidden) {
+        update();
+        return;
+      }
+      clearTimeout(timer);
+      lastDraft = undefined;
+      setGhost(undefined);
+      setAlternatives(undefined); offers.current = undefined;
+      close();
+    };
+    const start = () => {
+      if (options.nextMessageAvailable) {
+        send({ kind: "next", revision: ++revision.current, empty: false });
+        if (!preview && channel) { offers.current = undefined; setAlternatives(undefined); }
+      }
+      composing = true;
+      clearTimeout(timer);
+      lastDraft = undefined;
+      setGhost(undefined);
+    };
+    const end = () => {
+      composing = false;
+      update();
+    };
+    const visibility = () => {
+      if (document.hidden) {
+        clearTimeout(timer);
+        setMenuOpen(false);
+      } else update();
+    };
+    const selectionChange = () => {
+      if (document.activeElement === editor) update();
+    };
+    const observer = new MutationObserver(update);
+    observer.observe(editor, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    const sizeObserver = window.ResizeObserver ? new window.ResizeObserver(update) : undefined;
+    sizeObserver?.observe(editor);
+    editor.addEventListener("input", update);
+    editor.addEventListener("focus", update);
+    editor.addEventListener("blur", blur);
+    editor.addEventListener("scroll", update);
+    editor.addEventListener("compositionstart", start);
+    editor.addEventListener("compositionend", end);
+    document.addEventListener("selectionchange", selectionChange);
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("resize", update);
+    const ping = window.setInterval(() => {
+      if (channel && !document.hidden)
+        send({ kind: "ping" });
+    }, 15000);
+    update();
+    return () => {
+      generation.current++;
+      clearTimeout(timer);
+      clearInterval(ping);
+      close();
+      unsubscribe?.();
+      inputPort.current = undefined;
+      observer.disconnect();
+      sizeObserver?.disconnect();
+      editor.removeEventListener("input", update);
+      editor.removeEventListener("focus", update);
+      editor.removeEventListener("blur", blur);
+      editor.removeEventListener("scroll", update);
+      editor.removeEventListener("compositionstart", start);
+      editor.removeEventListener("compositionend", end);
+      document.removeEventListener("selectionchange", selectionChange);
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("resize", update);
+    };
+  }, [
+    editorRef,
+    options?.client,
+    options?.sessionId,
+    options?.available,
+    options?.nextMessageAvailable,
+    blocked,
+    preview,
+    document,
+    window,
+  ]);
+  useEffect(() => {
+    if (!ghost?.next || !alternatives || acknowledged.current === ghost.revision) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (!document.hidden && (editorRef.current?.getBoundingClientRect().width ?? 0) >= 20) {
+        acknowledged.current = ghost.revision;
+        inputPort.current?.({ kind: "next.shown", revision: ghost.revision });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [ghost, alternatives, document, editorRef, window]);
+  function choose(index: number): boolean {
+    const editor = editorRef.current, offer = offers.current, value = offer?.values[index];
+    if (!editor || !offer || !value || editor.querySelector(".cm-chip,[contenteditable=false]")) return false;
+    const draft = currentDraft(editor, !!options?.nextMessageAvailable);
+    if (!draft || (!value.startsWith(draft.text.trimEnd()) && draft.text.trimEnd() !== installed.current)) return false;
+    inputPort.current?.({ kind: "next.accepted", revision: offer.revision, rank: index });
+    const range = document.createRange(); range.selectNodeContents(editor);
+    const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
+    insertPlainText(editor, value);
+    installed.current = value; setChoiceIndex(index); setMenuOpen(false); setGhost(undefined);
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  }
+  function key(key: string): boolean {
+    if (menuOpen && offers.current) {
+      if (key === "Escape") { setMenuOpen(false); return true; }
+      if (key === "ArrowDown" || key === "ArrowUp") { setChoiceIndex(value => (value + (key === "ArrowDown" ? 1 : offers.current!.values.length - 1)) % offers.current!.values.length); return true; }
+      if (key === "Enter" || key === "Tab") return choose(choiceIndex);
+    }
+    const current = shown.current,
+      editor = editorRef.current;
+    if (key === "Tab" && editor && installed.current && offers.current && offers.current.values.length > 1 && predictionDraft(editor)?.text.trimEnd() === installed.current) {
+      setMenuOpen(true); return true;
+    }
+    if (!current || !editor) return false;
+    const draft = currentDraft(editor, !!options?.nextMessageAvailable);
+    if (draft?.text !== current.draft || draft.caret !== current.caret) {
+      setGhost(undefined);
+      return false;
+    }
+    if (key === "Escape") {
+      inputPort.current?.({
+        kind: "feedback",
+        revision: current.revision,
+        accepted: false,
+      });
+      revision.current++;
+      offers.current = undefined; setAlternatives(undefined);
+      setGhost(undefined);
+      return true;
+    }
+    if (key !== "Tab" && key !== "ArrowRight") return false;
+    if (current.next && offers.current) return choose(current.rank ?? 0);
+    inputPort.current?.({
+      kind: "feedback",
+      revision: current.revision,
+      accepted: true,
+    });
+    insertPlainText(editor, current.suffix + (key === "Tab" ? " " : ""));
+    setGhost(undefined);
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  }
+  return { ghost, error, key, choose, choiceIndex, menuChoices: menuOpen ? alternatives?.values : undefined };
+}

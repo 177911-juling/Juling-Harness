@@ -1,0 +1,39 @@
+{
+  "name": "@juling-harness/desktop",
+  "productName": "Juling Harness",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/src/main.js",
+  "author": "snowpear",
+  "description": "Juling Harness desktop shell (Electron Main) for Windows and macOS",
+  "scripts": {
+    "dev": "electron .",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "test:built": "node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@juling-harness/client": "0.2.0",
+    "@juling-harness/client-contract": "0.2.0",
+    "@juling-harness/host-client-api": "0.2.0",
+    "@juling-harness/platform": "0.2.0",
+    "@juling-harness/platform-darwin": "0.2.0",
+    "@juling-harness/platform-win32": "0.2.0",
+    "@juling-harness/runtime-installer": "0.2.0",
+    "@juling-harness/harness-host": "0.2.0",
+    "@juling-harness/transport-desktop": "0.2.0",
+    "builder-util-runtime": "9.7.0",
+    "electron-updater": "6.8.9",
+    "node-pty": "^1.1.0",
+    "socks": "2.8.7"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@juling-harness/testkit": "0.2.0",
+    "@types/node": "^24.0.0",
+    "electron": "^43.8.8",
+    "typescript": "^5.9.0"
+  }
+}

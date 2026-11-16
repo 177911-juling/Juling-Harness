@@ -1,0 +1,57 @@
+# Docs
+
+Public documentation for Juling Harness.
+
+| Document | Audience |
+|---|---|
+| [../README.md](../README.md) | 中文总览 |
+| [../README.en.md](../README.en.md) | English overview |
+| [getting-started.md](getting-started.md) | Run from source |
+| [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
+| [time-travel.md](time-travel.md) | Time Travel 开启、检查点、代码/对话恢复、存储与限制 |
+| [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |
+| [../doc/ssh-workspace-test-prompt.md](../doc/ssh-workspace-test-prompt.md) | SSH 与账密功能的独立测试交接提示词 |
+| [model-adaptation.md](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |
+| [workbench-docking.md](workbench-docking.md) | 工具停靠、浮窗、会话布局和预设 |
+| [browser.md](browser.md) | 聊天浏览器、人工接管、元素引用、登录空间和恢复 |
+| [computer-use.md](computer-use.md) | 电脑操作工作区、画面与步骤、安全停止、界面结构和隐私 |
+| [dock-delivery-2026-10-29.md](dock-delivery-2026-10-29.md) | 停靠工作台实现与验收记录、未验证边界 |
+| [dictation.md](dictation.md) | 工作台与 BTW 语音输入、原生模式、麦克风配置和内存恢复 |
+| [btw.md](btw.md) | BTW 原生功能对齐、话题历史、图片、子代理与快捷键 |
+| [fonts.md](fonts.md) | Independent interface, terminal and output font preferences |
+| [releases/v0.1.11.md](releases/v0.1.11.md) | 0.1.11 发布页文案、三平台下载与升级说明 |
+| [releases/v0.1.10.md](releases/v0.1.10.md) | 0.1.10 发布页文案、三平台下载与升级说明 |
+| [migrations/omp-18.13.2.md](migrations/omp-18.13.2.md) | 18.12.6 → 18.13.2 正式版本变化、完整 Runtime / GUI 迁移与无付费验收 |
+| [migrations/omp-18.18.0.md](migrations/omp-18.18.0.md) | 从 18.13.2-harness.44 升级至 18.18.0：逐版变化、worker / 队列 / Shell / WebRTC / WebMCP 适配与验证 |
+| [migrations/omp-18.12.6.md](migrations/omp-18.12.6.md) | 18.10.4 → 18.12.6 版本概览、Runtime 适配与新功能 GUI 入口 |
+| [migrations/omp-18.10.4.md](migrations/omp-18.10.4.md) | 18.8.0 → 18.10.4 完整版本概览、GUI 入口与验收 |
+| [migrations/omp-18.8.0.md](migrations/omp-18.8.0.md) | Harness 0.1.9 / OMP 18.8.0 changes, compatibility and acceptance boundaries |
+| [gui-18.4.4.md](gui-18.4.4.md) | OMP 18.4.4 GUI 使用说明 |
+| [migrations/omp-18.4.4.md](migrations/omp-18.4.4.md) | Upstream changes and Runtime migration |
+| [migrations/omp-18.4.4-gui.md](migrations/omp-18.4.4-gui.md) | Complete GUI scope and local delivery evidence |
+| [development.md](development.md) | Inner loop, tests, overlay |
+| [performance.md](performance.md) | Streaming budgets, local counters, rollback and repeatable benchmarks |
+| [reviews/security-memory-fixes-2026-11-12.md](reviews/security-memory-fixes-2026-11-12.md) | 安全、Git、Bridge 与资源修复；真实 Chromium/Electron 前后采样和验收边界 |
+| [performance-2026-10-29.md](performance-2026-10-29.md) | 启动、整壳性能与包体优化；开源方案对比、实测及覆盖限制 |
+| [performance-audit-2026-10-29.md](performance-audit-2026-10-29.md) | 启动/运行/GPU/低配独立审查、量化基线与 P0/P1/P2 路线 |
+| [performance-review-2026-10-29-round2.md](performance-review-2026-10-29-round2.md) | 第二轮综合审查：同 HEAD 复测、打包形态/GPU 软合成/6× 低配/动画 A/B、优化方案与门禁 |
+| [architecture.md](architecture.md) | Packages, Bridge, data rules |
+| [releasing.md](releasing.md) | Version, changelog, tag, Windows installer, macOS build |
+| [updates.md](updates.md) | In-app updates on Windows and macOS: storage, trust, recovery |
+| [migrations/omp-18.3.0.md](migrations/omp-18.3.0.md) | OMP v18.3.0 upgrade, Harness features, verification and external acceptance decisions |
+| [migrations/omp-18.2.5.md](migrations/omp-18.2.5.md) | OMP v18.2.5 changes, selected GUI features, verification and rollback |
+| [migrations/omp-18.1.18.md](migrations/omp-18.1.18.md) | OMP v18.1.18 changes, adaptation, verification and rollback |
+| [../CHANGELOG.md](../CHANGELOG.md) | User-facing history |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | How to send a change |
+| [../SECURITY.md](../SECURITY.md) | Vulnerability reports |
+| [../doc/feature-index.md](../doc/feature-index.md) | Feature → file map for contributors |
+
+`../doc/` also holds historical design notes (`BACKEND_FOUNDATION.md`,
+`FRONTEND_INTEGRATION.md`, `real-conversation/`). Treat those as archaeology
+when they disagree with `architecture.md` or the TypeScript contracts.
+
+- [OMP 18.4.4 与 macOS 整合、修复和验收](integration-18.4.4-macos.md)
+
+- [评测工作区](evaluation.md)：原生基准、指令遵循、评判与 Ratchet，后台运行、历史复跑与导出。
+
+- [文件查看器](file-viewer.md)：工作台文件窗口、文本编辑、本地 / SSH 读取与可选 Office 组件。

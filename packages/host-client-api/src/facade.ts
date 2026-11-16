@@ -1,0 +1,3726 @@
+import type { RuntimeViewOperation } from "@juling-harness/harness-protocol";
+import type { EvaluationCoordinator } from "@juling-harness/harness-host";
+import { isComputerWorkspaceCommand, type ComputerWorkspaceQuery, type ContextViewOperation } from "@juling-harness/harness-protocol";
+import { validateArtifactTextInput, validateArtifactIdInput, isWorkbenchOperationKind, isUpgradeOperationKind } from "@juling-harness/harness-protocol";
+import { isEvaluationOperationKind } from "@juling-harness/harness-protocol";
+/**
+ * HarnessHostClientFacade — the P1 presentation-neutral product API.
+ *
+ * Implements the exact `ClientTransport` envelopes (bootstrap/query/
+ * command/subscribe/close) over injected Host seams: a public authority
+ * identity, platform facts, `HostBackend`, capability/command manifest
+ * providers, an optional ready `HarnessRuntimeSessionController` with safe
+ * hello/snapshot access, a session catalog provider, a diagnostics
+ * clock/id factory, the runtime install command service and the optional
+ * semantic command service.
+ *
+ * Contract guarantees (FRONTEND_INTEGRATION.md §§8, 9.2):
+ * - `accepted` is distinct from terminal: a command is never reported as
+ *   accepted unless the Host took it, and only a `command.receipt` event
+ *   carries the final outcome. No fake completions.
+ * - Unavailable operations fail closed: missing Runtime snapshot or
+ *   missing service maps to UNAVAILABLE / CAPABILITY_UNAVAILABLE before
+ *   anything is accepted.
+ * - Same idempotency key + same semantic input replays the same
+ *   acceptance; key reuse with different input fails.
+ * - Events carry a monotonic decimal cursor, authority/runtime epochs and
+ *   stateVersion, so the client reducer can detect gaps and stale epochs.
+ * - `close()` severs only this client session (subscriptions); Host and
+ *   Runtime keep running.
+ *
+ * Nothing client-facing structurally contains executable identities/paths,
+ * session filesystem data, Runtime PIDs, Bridge endpoints or tokens. This
+ * module never imports Electron.
+ */
+
+import { createHash } from "node:crypto";
+
+import type {
+  ArchId,
+  ClientBootstrap,
+  ClientBootstrapBase,
+  ClientCommandAccepted,
+  ClientCommandRequest,
+  ClientError,
+  ClientErrorCode,
+  ClientInteraction,
+  ConversationTranscriptReadPage,
+  ClientEvent,
+  ClientQueryRequest,
+  ClientQueryResponse,
+  ClientSelection,
+  ClientTransport,
+  CommandName,
+  CommandInput,
+  CommandReceipt,
+  CommandRequestId,
+  DiagnosticEntry,
+  DiagnosticReadModel,
+  EnvironmentReadModel,
+  ConfigWriteResult,
+  ExtensibilityReadModel,
+  McpLogsReadModel,
+  McpReadModel,
+  McpTestResult,
+  AgentDefinitionsReadModel,
+  HomeReadModel,
+  IdempotencyKey,
+  InteractionId,
+  ModelConfigReadModel,
+  ModelDiscoveryResult,
+  ModelProviderTestResult,
+  OperatorInvokeOutcome,
+  SessionTreeCommandOutcome,
+  PlatformId,
+  PublicAuthorityIdentity,
+  QueryName,
+  RuntimeChannel,
+  RuntimeConnection,
+  RuntimeEpoch,
+  RuntimeId,
+  RuntimeInstallState,
+  ResidentsReadModel,
+  SessionHistoryEntry,
+  SessionHistoryReadModel,
+  SessionHistoryStatus,
+  SessionId,
+  StateVersion,
+  SubscriptionScope,
+  SurfaceCapabilities,
+  ThreadId,
+  TokenUsageReadModel,
+  Unsubscribe,
+  WorkspaceId,
+  WorkspaceListReadModel,
+  WorkspaceFileTreeReadModel,
+  WorkspaceFileMutationResult,
+  OpaqueCursor,
+  GitExecuteInput,
+  GitHubExecuteInput,
+  GitOperationResult,
+  GitHubOperationResult,
+} from "@juling-harness/client-contract";
+import { CLIENT_CONTRACT_VERSION } from "@juling-harness/client-contract";
+import type {
+  AgentTranscriptPage,
+  CapabilityManifest,
+  CommandLedgerEntry,
+  ConversationOpenResult,
+  ConversationTranscriptPage,
+  OperatorCommandManifest,
+  OperatorStateSnapshot,
+  RuntimeInstallationManifest,
+  SessionTelemetryReadResult,
+  SessionTelemetrySnapshot,
+  HarnessAgentSnapshot,
+} from "@juling-harness/harness-protocol";
+import type { HarnessOperation } from "@juling-harness/harness-protocol";
+import {
+  canonicalJson,
+  parseConversationOpenResult,
+  parseConversationRuntimeEvent,
+  parseConversationTranscriptPage,
+  parseFoundationHarnessRequest,
+  parseSessionTelemetryReadResult,
+  parseSessionTelemetrySnapshot,
+} from "@juling-harness/harness-protocol";
+import type { HostBackend, RuntimePublication, HarnessBtwForward, HarnessComputerForward, HarnessConversationForward, HarnessInteractionForward, HarnessTelemetryForward } from "@juling-harness/harness-host";
+
+import {
+  HostEventBus,
+  receiptFromLedgerEntry,
+  type HostEventContext,
+} from "./events.js";
+import {
+  buildDiagnosticsReadModel,
+  environmentIdFor,
+  historyIdFor,
+  neutralCapabilityManifest,
+  neutralCommandManifest,
+  redactText,
+  sanitizeDisplayText,
+  threadIdFor,
+} from "./read-models.js";
+import { mapRemoteInteractionToClient } from "./interaction-map.js";
+import {
+  formatRuntimeDisconnectMessage,
+  formatRuntimeUnavailableMessage,
+  toClientError,
+  type HostCatalogEntry,
+  type HostDiagnosticsFactory,
+  type HostExtensibilityService,
+  type HostMcpService,
+  type HostAgentDefinitionsService,
+  type HostManifestProvider,
+  type HostModelsService,
+  type HostInvokeOutcome,
+  type HostRuntimeAccess,
+  type HostRuntimeDisconnect,
+  type HostRuntimeHelloView,
+  type HostRuntimeUnavailable,
+  type HostResidentsService,
+  type HostRuntimeInstallProbe,
+  type HostRuntimeInstallService,
+  type HostSemanticCommandService,
+  type HostSessionCatalogProvider,
+  type HostSessionArchiveProvider,
+  type HostSessionTelemetryProbePort,
+  type HostSessionTelemetryStorePort,
+  type HostTelemetryProbeWorkspacePort,
+  type HostUsageService,
+  type HostWorkspaceService,
+  type HostWorkspaceFileService,
+  type HostGitService,
+  type HostGitHubService,
+} from "./services.js";
+
+/** Conservative surface grants: every optional surface is off by default. */
+const DEFAULT_SURFACE: SurfaceCapabilities = Object.freeze({
+  terminalAttach: false,
+  fileReveal: false,
+  previewInput: false,
+  openExternal: false,
+});
+
+const HISTORY_DEFAULT_LIMIT = 20;
+const HISTORY_MAX_LIMIT = 200;
+const HOME_RECENT_THREADS = 5;
+const HOME_RECENT_WORKSPACES = 8;
+const DEFAULT_REGISTRY_CAPACITY = 512;
+/**
+ * Retained "already emitted" fingerprints per facade. Two entries per command
+ * (`#terminalEmitted` + `#ledgerReceiptKeys`) would otherwise grow for the
+ * whole process lifetime. Sized well above the Renderer's
+ * `COMMAND_STATE_TERMINAL_CAP` (100) and equal to `DEFAULT_REGISTRY_CAPACITY`,
+ * so a receipt can never be de-duplicated away while a client still shows —
+ * or could still replay — the command it belongs to.
+ */
+const DEDUPE_KEY_CAPACITY = 512;
+
+/** FIFO trim for insertion-ordered dedupe sets; mirrors `CommandRegistry#evictOldest`. */
+function evictOldestKeys<T>(keys: Set<T>, capacity: number): void {
+  while (keys.size > capacity) {
+    const oldest = keys.keys().next().value as T | undefined;
+    if (oldest === undefined) break;
+    keys.delete(oldest);
+  }
+}
+
+function guiInteractionKey(interactionId: string, leaseGeneration: number): string {
+  return `${interactionId}:${leaseGeneration}`;
+}
+
+/** Model-config write/test commands dispatched through the models adapter. */
+type ModelsCommandName =
+  | "models.provider.upsert"
+  | "models.provider.delete"
+  | "models.provider.setEnabled"
+  | "models.roles.set"
+  | "models.roles.write"
+  | "models.roles.create"
+  | "models.roles.delete"
+  | "models.roleStorage.set"
+  | "models.fallback.set"
+  | "models.providerOrder.set"
+  | "models.yml.write"
+  | "models.login.start"
+  | "models.login.logout"
+  | "models.provider.test"
+  | "models.provider.probe"
+  | "models.catalog.refresh"
+  | "models.discovery.refresh"
+  | "models.cycleOrder.set"
+  | "models.webSearch.set"
+  | "models.webSearch.credential.set"
+  | "models.webSearch.credential.remove";
+
+type AgentDefinitionsCommandName =
+  | "agents.definition.upsert"
+  | "agents.definition.delete"
+  | "agents.definition.configure";
+
+/** Facade constructor inputs; every seam is explicit and injectable. */
+export interface HarnessHostClientFacadeOptions {
+  readonly authority: PublicAuthorityIdentity;
+  readonly platform: PlatformId;
+  readonly arch: ArchId;
+  readonly backend: HostBackend;
+  readonly capabilityManifest: HostManifestProvider<CapabilityManifest>;
+  readonly commandManifest: HostManifestProvider<OperatorCommandManifest>;
+  /** Optional ready Runtime session controller plus safe hello/snapshot access. */
+  readonly runtime?: HostRuntimeAccess;
+  /** Optional authority-level Runtime resident projection. */
+  readonly residents?: HostResidentsService;
+  readonly catalog: HostSessionCatalogProvider;
+  /** Optional Runtime-independent persistent transcript reader. */
+  readonly archive?: HostSessionArchiveProvider;
+  readonly timeTravel?: import("./services.js").HostTimeTravelService;
+  /** Optional "last observed" telemetry persistence for archived sessions. */
+  readonly telemetryStore?: HostSessionTelemetryStorePort;
+  /** Optional one-shot OMP probe for archived-session telemetry. */
+  readonly telemetryProbe?: HostSessionTelemetryProbePort;
+  /** Optional scratch-directory factory for probe transcript copies. */
+  readonly telemetryProbeWorkspace?: HostTelemetryProbeWorkspacePort;
+  readonly projectReads?: SharedProjectReads;
+  readonly archiveTelemetry?: SharedArchiveTelemetry<SessionTelemetryReadResult | undefined>;
+  /** Resolves the active workspace cwd used to scope probe requests. */
+  readonly workspaceCwd?: () => string | undefined;
+  readonly diagnostics: HostDiagnosticsFactory;
+  readonly install: HostRuntimeInstallService;
+  /**
+   * Optional local-artifact version probe. When set, `environment.get`
+   * uses it instead of the last `runtime.install` receipt so a later
+   * newer artifact can surface as `update-available`.
+   */
+  readonly installProbe?: HostRuntimeInstallProbe;
+  /** Optional semantic service for session.resume/drop and interaction.respond. */
+  readonly commands?: HostSemanticCommandService;
+  /** Optional OMP models.yml / config / login adapter. */
+  readonly models?: HostModelsService;
+  readonly evaluations?: EvaluationCoordinator;
+  readonly artifacts?: import("./services.js").HostArtifactService;
+  /** Optional configured skills/plugins inventory adapter. */
+  readonly extensibility?: HostExtensibilityService;
+  /** Optional configured MCP server inventory adapter. */
+  readonly mcp?: HostMcpService;
+  /** Optional configured task-agent definition adapter. */
+  readonly agentDefinitions?: HostAgentDefinitionsService;
+  /** Optional Host workspace registry adapter (paths never leave it). */
+  readonly workspaces?: HostWorkspaceService;
+  /** Optional Host-owned workspace-relative file tree adapter. */
+  readonly workspaceFiles?: HostWorkspaceFileService;
+  /** Optional Host-owned system Git adapter. Independent of Runtime availability. */
+  readonly git?: HostGitService;
+  /** Optional Host-owned GitHub CLI adapter. Independent of Runtime availability. */
+  readonly github?: HostGitHubService;
+  readonly usage?: HostUsageService;
+  /** Bounded idempotency registry capacity (default 512). */
+  readonly registryCapacity?: number;
+}
+
+interface RegistryEntry {
+  readonly key: IdempotencyKey;
+  readonly requestId: CommandRequestId;
+  readonly commandName: CommandName;
+  /**
+   * sha256 of the canonical input JSON, never the JSON itself: the value is
+   * only ever compared for equality, and `core.prompt` inputs carry base64
+   * images (up to 64MiB per prompt), so retaining them for the whole
+   * `DEFAULT_REGISTRY_CAPACITY` window would pin hundreds of MB in Main.
+   */
+  readonly inputHash: string;
+  readonly acceptedAt: string;
+  terminal: CommandReceipt | undefined;
+}
+
+/** Same digest shape as the Host confirmation registry (`host-confirmation.ts`). */
+function inputFingerprint(input: unknown): string {
+  return createHash("sha256").update(canonicalJson(input)).digest("hex");
+}
+
+/**
+ * Bounded requestId+idempotencyKey registry enforcing semantic equality:
+ * same key + same command + same canonical input replays; key reuse with
+ * different input (or requestId reuse under a different key) fails.
+ */
+class CommandRegistry {
+  readonly #byKey = new Map<IdempotencyKey, RegistryEntry>();
+  readonly #byRequestId = new Map<CommandRequestId, RegistryEntry>();
+
+  constructor(private readonly capacity: number) {
+    if (!Number.isSafeInteger(capacity) || capacity < 1) {
+      throw new RangeError("registry capacity must be a positive integer");
+    }
+  }
+
+  /**
+   * Returns the existing entry when the envelope repeats an idempotency
+   * key with identical semantic input; throws INVALID_ARGUMENT on key
+   * reuse with different input or requestId reuse under another key;
+   * registers and returns undefined otherwise.
+   */
+  accept(
+    request: {
+      readonly commandName: CommandName;
+      readonly input: unknown;
+      readonly idempotencyKey: IdempotencyKey;
+      readonly requestId: CommandRequestId;
+    },
+    acceptedAt: string,
+  ): RegistryEntry | undefined {
+    const inputHash = inputFingerprint(request.input);
+    const existing = this.#byKey.get(request.idempotencyKey);
+    if (existing !== undefined) {
+      if (existing.commandName !== request.commandName || existing.inputHash !== inputHash) {
+        throw clientError("INVALID_ARGUMENT", "idempotency key reused with different semantic input");
+      }
+      return existing;
+    }
+    const tracked = this.#byRequestId.get(request.requestId);
+    if (tracked !== undefined) {
+      throw clientError("INVALID_ARGUMENT", "request id reused with a different idempotency key");
+    }
+    const entry: RegistryEntry = {
+      key: request.idempotencyKey,
+      requestId: request.requestId,
+      commandName: request.commandName,
+      inputHash,
+      acceptedAt,
+      terminal: undefined,
+    };
+    this.#byKey.set(entry.key, entry);
+    this.#byRequestId.set(entry.requestId, entry);
+    this.#evictOldest();
+    return undefined;
+  }
+
+  getByRequestId(requestId: CommandRequestId): RegistryEntry | undefined {
+    return this.#byRequestId.get(requestId);
+  }
+
+  hasPending(): boolean {
+    return [...this.#byKey.values()].some((entry) => entry.terminal === undefined);
+  }
+
+  recordTerminal(requestId: CommandRequestId, receipt: CommandReceipt): void {
+    const entry = this.#byRequestId.get(requestId);
+    if (entry !== undefined) {
+      entry.terminal = receipt;
+    }
+  }
+
+  #evictOldest(): void {
+    while (this.#byKey.size > this.capacity) {
+      const oldestKey = this.#byKey.keys().next().value as IdempotencyKey | undefined;
+      if (oldestKey === undefined) break;
+      const entry = this.#byKey.get(oldestKey);
+      this.#byKey.delete(oldestKey);
+      if (entry !== undefined) {
+        this.#byRequestId.delete(entry.requestId);
+      }
+    }
+  }
+}
+
+function clientError(code: ClientErrorCode, message: string): ClientError {
+  return { code, message };
+}
+
+function unavailableError(message: string): ClientError {
+  return { code: "UNAVAILABLE", message };
+}
+
+function validateEnvelope(request: {
+  readonly requestId: CommandRequestId;
+  readonly idempotencyKey: IdempotencyKey;
+}): void {
+  if (request.requestId.length === 0) {
+    throw clientError("INVALID_ARGUMENT", "requestId must not be empty");
+  }
+  if (request.idempotencyKey.length === 0) {
+    throw clientError("INVALID_ARGUMENT", "idempotencyKey must not be empty");
+  }
+}
+
+/** Re-validate the three Runtime mirror commands at the in-process Host seam. */
+function validateRuntimeMirrorCommandInput(commandName: CommandName, input: unknown): void {
+  if (
+    !isWorkbenchOperationKind(commandName) &&
+    !isUpgradeOperationKind(commandName) &&
+    !isEvaluationOperationKind(commandName) &&
+    commandName !== "runtime.settings.get" &&
+    commandName !== "runtime.settings.set" &&
+    commandName !== "mode.plan.review.saveAndQuit"
+  ) {
+    return;
+  }
+  try {
+    if (isWorkbenchOperationKind(commandName) && input !== null && typeof input === "object" && ("inputTransfers" in input || "targetCwd" in input || "kind" in input)) throw new Error("Private operation fields are not client inputs");
+    // Same spread order as the dispatch seam (#commandP4): commandName wins,
+    // so validation and dispatch always see the same operation kind.
+    const operation = {
+      ...(input !== null && typeof input === "object" ? input : {}),
+      kind: commandName,
+    };
+    parseFoundationHarnessRequest({
+      type: "harness.request",
+      requestId: "host-validation",
+      runtimeEpoch: 1,
+      operation,
+    });
+  } catch (error) {
+    throw clientError(
+      "INVALID_ARGUMENT",
+      `${commandName} input is invalid: ${error instanceof Error ? error.message : "invalid"}`,
+    );
+  }
+}
+
+function validateInteractionValue(value: unknown): void {
+  const MAX_TEXT = 128 * 1024;
+  const MAX_ITEMS = 256;
+  if (value === undefined || typeof value === "boolean") return;
+  if (typeof value === "string") {
+    if (value.length > MAX_TEXT) throw clientError("INVALID_ARGUMENT", "interaction.respond text value is too large");
+    return;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > MAX_ITEMS) throw clientError("INVALID_ARGUMENT", "interaction.respond has too many selected values");
+    if (value.every((item) => typeof item === "string" && item.length <= MAX_TEXT)) return;
+    throw clientError("INVALID_ARGUMENT", "interaction.respond array value must contain only strings");
+  }
+  if (value !== null && typeof value === "object") {
+    try {
+      if (JSON.stringify(value).length <= MAX_TEXT) return;
+    } catch {
+      // Fall through to the same fail-closed error as non-JSON values.
+    }
+  }
+  throw clientError("INVALID_ARGUMENT", "interaction.respond value has an unsupported shape");
+}
+
+function isThreadCommandInput(value: unknown): value is { readonly threadId: ThreadId; readonly model?: string } {
+  if (value === null || typeof value !== "object" || !("threadId" in value)) return false;
+  return typeof value.threadId === "string" && value.threadId.length > 0;
+}
+
+function isInteractionCommandInput(
+  value: unknown,
+): value is {
+  readonly interactionId: InteractionId;
+  readonly leaseGeneration: number;
+  readonly decision: "submit" | "cancel";
+  readonly value?: unknown;
+} {
+  if (value === null || typeof value !== "object") return false;
+  if (!("interactionId" in value) || !("leaseGeneration" in value) || !("decision" in value)) return false;
+  const { interactionId, leaseGeneration, decision } = value;
+  if (typeof interactionId !== "string" || interactionId.length === 0) return false;
+  if (typeof leaseGeneration !== "number" || !Number.isSafeInteger(leaseGeneration) || leaseGeneration < 1) return false;
+  return decision === "submit" || decision === "cancel";
+}
+
+function unavailableDiagnostic(facts: HostRuntimeUnavailable | undefined): {
+  readonly message: string;
+  readonly detail?: Readonly<Record<string, unknown>>;
+} {
+  if (facts === undefined) {
+    return { message: "Runtime is not available" };
+  }
+  const reason = redactText(facts.reason);
+  return {
+    message: formatRuntimeUnavailableMessage(facts),
+    detail: { code: facts.code, reason },
+  };
+}
+
+function disconnectDiagnostic(facts: HostRuntimeDisconnect | undefined): {
+  readonly message: string;
+  readonly detail?: Readonly<Record<string, unknown>>;
+} {
+  if (facts === undefined) {
+    return { message: "Runtime connection was lost" };
+  }
+  const reason = redactText(facts.reason);
+  return {
+    message: formatRuntimeDisconnectMessage(facts),
+    detail: {
+      code: facts.code,
+      reason,
+      ...(facts.occurredAt === undefined ? {} : { occurredAt: facts.occurredAt }),
+      ...(facts.autoRespawn === undefined ? {} : { autoRespawn: facts.autoRespawn }),
+    },
+  };
+}
+
+function readUnavailable(runtime: HostRuntimeAccess | undefined): HostRuntimeUnavailable | undefined {
+  try {
+    const facts = runtime?.unavailable?.();
+    if (facts === undefined) return undefined;
+    const reason = redactText(facts.reason).trim();
+    return { code: facts.code, reason };
+  } catch {
+    return undefined;
+  }
+}
+
+function readDisconnect(runtime: HostRuntimeAccess | undefined): HostRuntimeDisconnect | undefined {
+  try {
+    const facts = runtime?.disconnect?.();
+    if (facts === undefined) return undefined;
+    const reason = redactText(facts.reason).trim();
+    return {
+      code: facts.code,
+      reason,
+      ...(facts.occurredAt === undefined ? {} : { occurredAt: facts.occurredAt }),
+      ...(facts.autoRespawn === undefined ? {} : { autoRespawn: facts.autoRespawn }),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function connectionEquals(left: RuntimeConnection, right: RuntimeConnection): boolean {
+  return (
+    left.status === right.status &&
+    left.classification === right.classification &&
+    left.runtimeId === right.runtimeId &&
+    left.runtimeEpoch === right.runtimeEpoch &&
+    left.unavailableCode === right.unavailableCode &&
+    left.unavailableReason === right.unavailableReason &&
+    left.disconnectCode === right.disconnectCode &&
+    left.disconnectReason === right.disconnectReason &&
+    left.disconnectedAt === right.disconnectedAt &&
+    left.autoRespawn === right.autoRespawn
+  );
+}
+
+function residentsEqual(left: ResidentsReadModel | undefined, right: ResidentsReadModel): boolean {
+  if (left === undefined || left.activeSessionId !== right.activeSessionId || left.residents.length !== right.residents.length) {
+    return false;
+  }
+  return left.residents.every((previous, index) => {
+    const next = right.residents[index];
+    return next !== undefined &&
+      previous.sessionId === next.sessionId &&
+      previous.workspaceId === next.workspaceId &&
+      previous.phase === next.phase &&
+      previous.pendingMessages === next.pendingMessages &&
+      previous.waitKind === next.waitKind &&
+      previous.lastActivityAt === next.lastActivityAt;
+  });
+}
+
+function validateOptions(options: HarnessHostClientFacadeOptions): void {
+  if (options.authority.authorityId.length === 0) {
+    throw new TypeError("facade authority id is required");
+  }
+  if (!Number.isSafeInteger(options.authority.authorityEpoch) || options.authority.authorityEpoch < 1) {
+    throw new TypeError("facade authority epoch must be a positive integer");
+  }
+  if (options.platform !== "win32" && options.platform !== "darwin" && options.platform !== "linux") {
+    throw new TypeError("facade platform must be 'win32', 'darwin' or 'linux'");
+  }
+  if (options.arch !== "x64" && options.arch !== "arm64") {
+    throw new TypeError("facade arch must be 'x64' or 'arm64'");
+  }
+  if (options.backend === null || typeof options.backend !== "object") {
+    throw new TypeError("facade backend is required");
+  }
+  if (typeof options.capabilityManifest !== "function") {
+    throw new TypeError("facade capability manifest provider is required");
+  }
+  if (typeof options.commandManifest !== "function") {
+    throw new TypeError("facade command manifest provider is required");
+  }
+  if (options.catalog === null || typeof options.catalog.list !== "function") {
+    throw new TypeError("facade session catalog provider is required");
+  }
+  if (options.residents !== undefined && typeof options.residents.list !== "function") {
+    throw new TypeError("facade residents service must expose list");
+  }
+  if (options.residents?.onChanged !== undefined && typeof options.residents.onChanged !== "function") {
+    throw new TypeError("facade residents change hook must be a function");
+  }
+  if (options.residents?.onTerminalOutcomes !== undefined && typeof options.residents.onTerminalOutcomes !== "function") {
+    throw new TypeError("facade resident terminal hook must be a function");
+  }
+  if (options.archive !== undefined && typeof options.archive.readPage !== "function") {
+    throw new TypeError("facade session archive provider must expose readPage");
+  }
+  if (options.telemetryStore !== undefined && typeof options.telemetryStore.record !== "function") {
+    throw new TypeError("facade telemetry store must expose record");
+  }
+  if (options.telemetryProbe !== undefined && typeof options.telemetryProbe.run !== "function") {
+    throw new TypeError("facade telemetry probe must expose run");
+  }
+  if (
+    options.telemetryProbeWorkspace !== undefined &&
+    (typeof options.telemetryProbeWorkspace.create !== "function" || typeof options.telemetryProbeWorkspace.remove !== "function")
+  ) {
+    throw new TypeError("facade telemetry probe workspace must expose create and remove");
+  }
+  if (options.workspaceCwd !== undefined && typeof options.workspaceCwd !== "function") {
+    throw new TypeError("facade workspace cwd resolver must be a function");
+  }
+  if (options.diagnostics === null || typeof options.diagnostics.now !== "function" || typeof options.diagnostics.newEntryId !== "function") {
+    throw new TypeError("facade diagnostics factory is required");
+  }
+  if (typeof options.install !== "function") {
+    throw new TypeError("facade runtime install service is required");
+  }
+  if (options.installProbe !== undefined && typeof options.installProbe !== "function") {
+    throw new TypeError("facade runtime install probe must be a function");
+  }
+  const runtime = options.runtime;
+  if (runtime !== undefined && typeof runtime.hello !== "function") {
+    throw new TypeError("facade runtime access requires a hello accessor");
+  }
+  if (runtime?.onPublication !== undefined && typeof runtime.onPublication !== "function") {
+    throw new TypeError("facade runtime publication hook must be a function");
+  }
+  if (runtime?.onConversationEvent !== undefined && typeof runtime.onConversationEvent !== "function") {
+    throw new TypeError("facade runtime conversation hook must be a function");
+  }
+  if (runtime?.onConversationResync !== undefined && typeof runtime.onConversationResync !== "function") {
+    throw new TypeError("facade runtime conversation resync hook must be a function");
+  }
+  if (runtime?.onTelemetryEvent !== undefined && typeof runtime.onTelemetryEvent !== "function") {
+    throw new TypeError("facade runtime telemetry hook must be a function");
+  }
+  if (runtime?.onBtwEvent !== undefined && typeof runtime.onBtwEvent !== "function") {
+    throw new TypeError("facade runtime btw hook must be a function");
+  }
+  if (runtime?.currentSession !== undefined && typeof runtime.currentSession !== "function") {
+    throw new TypeError("facade runtime currentSession must be a function");
+  }
+  if (runtime?.readTranscript !== undefined && typeof runtime.readTranscript !== "function") {
+    throw new TypeError("facade runtime readTranscript must be a function");
+  }
+  if (runtime?.readAgentConversation !== undefined && typeof runtime.readAgentConversation !== "function") {
+    throw new TypeError("facade runtime readAgentConversation must be a function");
+  }
+  if (runtime?.onInteractionEvent !== undefined && typeof runtime.onInteractionEvent !== "function") {
+    throw new TypeError("facade runtime interaction hook must be a function");
+  }
+  if (runtime?.unavailable !== undefined && typeof runtime.unavailable !== "function") {
+    throw new TypeError("facade runtime unavailable accessor must be a function");
+  }
+}
+
+/**
+ * Presentation-neutral Host facade implementing the exact client-contract
+ * transport surface. See the module doc for contract guarantees.
+ */
+export class HarnessHostClientFacade implements ClientTransport {
+  readonly #options: HarnessHostClientFacadeOptions;
+  readonly #registry: CommandRegistry;
+  readonly #bus: HostEventBus;
+  /** Bounded (`DEDUPE_KEY_CAPACITY`) FIFO of requestIds whose terminal receipt was already published. */
+  readonly #terminalEmitted = new Set<CommandRequestId>();
+  #unsubscribePublication: Unsubscribe | undefined;
+  #unsubscribeConnection: Unsubscribe | undefined;
+  #unsubscribeConversation: Unsubscribe | undefined;
+  #unsubscribeConversationResync: Unsubscribe | undefined;
+  #unsubscribeTelemetry: Unsubscribe | undefined;
+  #unsubscribeBtw: Unsubscribe | undefined;
+  #unsubscribeComputer: Unsubscribe | undefined;
+  #unsubscribeResidents: Unsubscribe | undefined;
+  #unsubscribeResidentTerminalOutcomes: Unsubscribe | undefined;
+  #unsubscribeInteraction: Unsubscribe | undefined;
+  #unsubscribeGitProgress: Unsubscribe | undefined;
+  #unsubscribeEvaluations: Unsubscribe | undefined;
+  #unsubscribeGitExternal: Unsubscribe | undefined;
+  #unsubscribeGithubProgress: Unsubscribe | undefined;
+  #closed = false;
+  readonly #readLifetime = new AbortController();
+  #lastHello: HostRuntimeHelloView | undefined;
+  #lastEmittedConnection: RuntimeConnection | undefined;
+  #lastPublishedVersion: StateVersion | undefined;
+  #lastPublishedRuntimeId: RuntimeId | undefined;
+  #lastPublishedEpoch: RuntimeEpoch | undefined;
+  /** A connection fence requires replay even when the Runtime version did not advance. */
+  #snapshotReplayRequired = false;
+  /** Last GUI `interaction.required` published as `id:generation`. Snapshot recovery must not re-emit the same card. */
+  #lastGuiInteractionKey: string | undefined;
+  #installInFlight = false;
+  #dispatchesInFlight = 0;
+
+  get runtimeInstallInProgress(): boolean {
+    return this.#installInFlight;
+  }
+
+  /** Commands and Runtime installs must finish before replacing the Host or closing for an update. */
+  get hasPendingCommands(): boolean {
+    return this.#installInFlight || this.#dispatchesInFlight > 0 || this.#registry.hasPending();
+  }
+  #lastInstallResult: RuntimeInstallState | undefined;
+  /** Last workspace list seen; feeds the bootstrap selection (`projects.list` wins in the Renderer). */
+  #lastWorkspaceModel: WorkspaceListReadModel | undefined;
+  #lastResidents: ResidentsReadModel | undefined;
+  /** Ledger entries repeat on every resident publication until its commit is
+   * replaced; keep a request/status fingerprint so background receipts emit
+   * once even after the active Worker changes. Bounded FIFO
+   * (`DEDUPE_KEY_CAPACITY`). */
+  readonly #ledgerReceiptKeys = new Set<string>();
+  readonly #conversationDiagnostics: DiagnosticEntry[] = [];
+  readonly #runtimeLossDiagnostics: DiagnosticEntry[] = [];
+
+  constructor(options: HarnessHostClientFacadeOptions) {
+    validateOptions(options);
+    this.#options = options;
+    this.#registry = new CommandRegistry(options.registryCapacity ?? DEFAULT_REGISTRY_CAPACITY);
+    this.#bus = new HostEventBus(options.authority.authorityEpoch, () => options.diagnostics.now(), () => this.#eventContext());
+    this.#lastEmittedConnection = this.#currentConnection();
+    this.#unsubscribeConnection = options.runtime?.onConnectionChanged?.(() => this.#syncRuntimeEvents());
+    const onPublication = options.runtime?.onPublication;
+    if (onPublication !== undefined) {
+      this.#unsubscribePublication = onPublication((publication) => this.#onPublication(publication));
+    }
+    const onResidentsChanged = options.residents?.onChanged;
+    if (onResidentsChanged !== undefined) {
+      this.#unsubscribeResidents = onResidentsChanged((residents) => this.#onResidentsChanged(residents));
+    }
+    const onResidentTerminalOutcomes = options.residents?.onTerminalOutcomes;
+    if (onResidentTerminalOutcomes !== undefined) {
+      this.#unsubscribeResidentTerminalOutcomes = onResidentTerminalOutcomes((outcomes) => {
+        for (const entry of outcomes) this.#emitLedgerReceipt(entry);
+      });
+    }
+    this.#unsubscribeEvaluations = options.evaluations?.subscribe(() => this.#bus.emit({ kind: "evaluations.changed", runtimeEpoch: null, stateVersion: null }));
+    this.#bindConversation();
+    this.#bindTelemetry();
+    this.#bindBtw();
+    this.#bindComputer();
+    this.#bindInteraction();
+    this.#unsubscribeGitProgress = options.git?.onProgress?.((progress) => {
+      this.#bus.emit({ kind: "operation.progress", progress });
+    });
+    this.#unsubscribeGitExternal = options.git?.onExternalRepositoryChange?.((change) => {
+      this.#bus.emit({
+        kind: "git.repository.changed",
+        repository: { workspaceId: change.workspaceId, reason: "external" },
+      });
+    });
+    this.#unsubscribeGithubProgress = options.github?.onProgress?.((progress) => {
+      this.#bus.emit({ kind: "operation.progress", progress });
+    });
+  }
+
+  async bootstrap(): Promise<ClientBootstrap> {
+    this.#assertOpen();
+    // Capture the resume cursor before reading the snapshot. Events emitted
+    // after this point remain strictly newer than the baseline and can be
+    // replayed from HarnessClient's bootstrap buffer instead of being
+    // mistaken for duplicates of the snapshot.
+    const bootstrapCursor = this.#bus.currentCursor();
+    const now = this.#options.diagnostics.now();
+    const capabilityManifest = await this.#resolveManifest(this.#options.capabilityManifest, () => neutralCapabilityManifest(now));
+    const commandManifest = await this.#resolveManifest(this.#options.commandManifest, () => neutralCommandManifest(now));
+    const residents = await this.#readResidentsForBootstrap();
+    // Read-only view: `selection` and the pending interaction are derived
+    // fields; only the `snapshot` handed to the Client is copied below.
+    const snapshot = this.#currentSnapshotRef();
+    const connection = this.#currentConnection();
+    this.#lastEmittedConnection = connection;
+    const base: ClientBootstrapBase = {
+      contractVersion: CLIENT_CONTRACT_VERSION,
+      authority: { ...this.#options.authority },
+      runtime: connection,
+      surface: DEFAULT_SURFACE,
+      capabilityManifest,
+      commandManifestHash: commandManifest.hash,
+      selected: this.#selection(snapshot),
+      ...(residents === undefined ? {} : { residents }),
+    };
+    if (snapshot === undefined) {
+      // Without-snapshot variant: the three snapshot keys stay structurally
+      // absent (exactOptionalPropertyTypes) until a Runtime snapshot exists.
+      return base;
+    }
+    const messagesCursor = this.#options.runtime?.messagesCursor?.();
+    const pendingInteraction = this.#bootstrapPendingInteraction(snapshot);
+    return {
+      ...base,
+      // The one copy on this path: bootstrap is an external boundary.
+      snapshot: structuredClone(snapshot),
+      stateVersion: snapshot.stateVersion,
+      cursor: bootstrapCursor,
+      ...(messagesCursor === undefined ? {} : { messagesCursor }),
+      ...(pendingInteraction === undefined ? {} : { pendingInteraction }),
+    };
+  }
+
+  /**
+   * Recoverable pending interaction for bootstrap (plan §1.4): read the
+   * full pending from the Runtime snapshot, map through the same redacting
+   * mapper. TUI-owned interactions are never exposed as submittable cards.
+   */
+  #bootstrapPendingInteraction(snapshot: OperatorStateSnapshot): ClientInteraction | undefined {
+    const pending = snapshot.pendingInteraction;
+    if (pending === undefined || pending.owner !== "gui") {
+      return undefined;
+    }
+    return mapRemoteInteractionToClient(pending.request, snapshot.sessionId as SessionId, pending.leaseGeneration);
+  }
+
+  async query<TName extends QueryName>(request: ClientQueryRequest<TName>): Promise<ClientQueryResponse<TName>> {
+    this.#assertOpen();
+    try {
+      const response = await this.#dispatchQuery(request);
+      // The dispatch switch verified the queryName discriminant; TS cannot
+      // narrow the generic type parameter itself, so the response is cast.
+      return response as ClientQueryResponse<TName>;
+    } catch (error) {
+      return { ok: false, queryName: request.queryName, error: toClientError(error) };
+    }
+  }
+
+  async #dispatchQuery(request: ClientQueryRequest): Promise<ClientQueryResponse> {
+    switch (request.queryName) {
+      case "timeTravel.settings.get": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return { ok: true, queryName: request.queryName, result: await service.settings() } as ClientQueryResponse;
+      }
+      case "timeTravel.storage.get": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return { ok: true, queryName: request.queryName, result: await service.storage() } as ClientQueryResponse;
+      }
+      case "timeTravel.timeline.read": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return { ok: true, queryName: request.queryName, result: await service.timeline(request.input as import("@juling-harness/client-contract").QueryInput<"timeTravel.timeline.read">) } as ClientQueryResponse;
+      }
+      case "timeTravel.restore.preview": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return { ok: true, queryName: request.queryName, result: await service.preview(request.input as import("@juling-harness/client-contract").QueryInput<"timeTravel.restore.preview">) } as ClientQueryResponse;
+      }
+      case "computer.workspace.get":
+      case "computer.activity.list":
+      case "computer.frame.get":
+      case "computer.structure.get": {
+        const operation = { ...request.input, kind: request.queryName } as ComputerWorkspaceQuery;
+        const snapshot = this.#currentSnapshotRef();
+        if (!snapshot) throw unavailableError("Computer workspace requires a connected Runtime");
+        if (snapshot.sessionId !== operation.sessionId) throw clientError("INVALID_ARGUMENT", "Computer session is not active in this context");
+        await this.#requireComputerCapability(request.queryName);
+        const runtime = this.#options.runtime;
+        const session = this.#runtimeSession();
+        const readComputer = runtime?.readComputer?.bind(runtime) ?? session?.readComputer?.bind(session);
+        if (!readComputer) throw clientError("CAPABILITY_UNAVAILABLE", "Computer workspace query channel is not available on this Host");
+        const result = await readComputer(operation);
+        const current = this.#currentSnapshotRef();
+        if (!current || current.runtimeId !== snapshot.runtimeId || current.runtimeEpoch !== snapshot.runtimeEpoch || current.sessionId !== snapshot.sessionId) {
+          throw clientError("STALE_EPOCH", "Runtime session changed during Computer read");
+        }
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "agent.spawn.options.read":
+      case "session.lease.read":
+      case "session.cache.get":
+      case "extensions.links.list":
+      case "browser.webmcp.list":
+      case "shell.view.read":
+      case "shell.view.release":
+      case "live.webrtc.connect":
+      case "live.webrtc.status":
+      case "live.webrtc.mute":
+      case "live.webrtc.release": {
+        const session = this.#runtimeSession();
+        if (!session) throw unavailableError("Runtime view requires a connected Runtime");
+        const result = await session.readRuntimeView({ kind: request.queryName, ...request.input } as RuntimeViewOperation);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "context.view.open":
+      case "context.view.list":
+      case "context.view.entry":
+      case "context.view.release": {
+        const session = this.#runtimeSession();
+        if (!session) throw unavailableError("Context requires a connected Runtime");
+        const result = await session.readContext({ kind: request.queryName, ...request.input } as ContextViewOperation);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "prediction.query": {
+        const input=(request as ClientQueryRequest<"prediction.query">).input;
+        validatePredictionQuery(input);
+        const session=this.#runtimeSession();
+        if(!session)throw unavailableError("Prediction requires a connected Runtime");
+        return {ok:true,queryName:request.queryName,result:await session.predict(input)} as ClientQueryResponse;
+      }
+      case "environment.get": {
+        const result = await this.#queryEnvironment();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "capabilities.get": {
+        const result = await this.#queryCapabilities();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "commands.getManifest": {
+        const result = await this.#queryCommandManifest();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "diagnostics.get": {
+        const result = await this.#queryDiagnostics();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "history.list": {
+        const result = await this.#queryHistory(request.input as {
+          readonly limit?: number;
+          readonly status?: SessionHistoryStatus;
+          readonly workspaceId?: WorkspaceId;
+        });
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "residents.list": {
+        const service = this.#options.residents;
+        if (service === undefined) {
+          throw clientError("CAPABILITY_UNAVAILABLE", "residents.list is not available on this Host");
+        }
+        const result = await service.list();
+        this.#lastResidents = result;
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "session.state": {
+        const result = this.#querySessionState();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "home.get": {
+        const result = await this.#queryHome();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "models.adaptation.resolve": {
+        const service = this.#options.models;
+        if (!service?.resolveAdaptation) throw clientError("CAPABILITY_UNAVAILABLE", "Model adaptation is unavailable");
+        const result = await service.resolveAdaptation(request.input as import("@juling-harness/client-contract").ModelAdaptationInput);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "models.get": {
+        const result = await this.#queryModels();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "evaluations.exportChunk":
+      case "evaluations.patch":
+      case "evaluations.retrySpec":
+      case "evaluations.context":
+      case "evaluations.list":
+      case "evaluations.read":
+      case "evaluations.rows": {
+        const service = this.#options.evaluations;
+        if (!service) throw clientError("CAPABILITY_UNAVAILABLE", "Evaluation workspace is unavailable on this Host");
+        let result: unknown;
+        if (request.queryName === "evaluations.exportChunk") result = await service.exportChunk(request.input as { artifactId: string; offset?: number });
+        else if (request.queryName === "evaluations.patch") result = await service.patch(request.input as { id: string; offset?: number });
+        else if (request.queryName === "evaluations.retrySpec") result = await service.retrySpec((request.input as { id: string }).id);
+        else if (request.queryName === "evaluations.context") result = await service.context((request.input as { workspaceId: string }).workspaceId);
+        else if (request.queryName === "evaluations.list") result = await service.list(request.input as import("@juling-harness/harness-protocol").EvaluationListInput);
+        else if (request.queryName === "evaluations.rows") result = await service.rows(request.input as { id: string });
+        else {
+          const record = await service.read((request.input as { id: string }).id);
+          const pending = record.interaction;
+          const clientInteraction = pending && record.sessionId ? mapRemoteInteractionToClient(pending.request, record.sessionId as SessionId, pending.leaseGeneration) : undefined;
+          result = { ...record, ...(clientInteraction ? { clientInteraction } : {}) };
+        }
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "artifacts.text.read": {
+        const service = this.#options.artifacts;
+        if (!service?.readText) throw clientError("CAPABILITY_UNAVAILABLE", "Artifact text is unavailable");
+        validateArtifactIdInput(request.input);
+        return { ok: true, queryName: request.queryName, result: await service.readText(request.input.artifactId) } as ClientQueryResponse;
+      }
+      case "artifacts.list":
+      case "artifacts.storage.get": {
+        const service = this.#options.artifacts;
+        if (!service) throw clientError("CAPABILITY_UNAVAILABLE", "The artifact library is not available on this Host");
+        const result = request.queryName === "artifacts.list"
+          ? await service.list(request.input as import("@juling-harness/client-contract").ArtifactListInput)
+          : await service.state();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "skills.get": {
+        const result = await this.#querySkills();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "mcp.get": {
+        const result = await this.#queryMcp();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "mcp.logs.get": {
+        const result = await this.#queryMcpLogs(request.input as { readonly name: string });
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "agents.definitions.get": {
+        const result = await this.#queryAgentDefinitions();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "projects.list": {
+        const result = await this.#queryProjects();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "workspace.file.inspect":
+      case "workspace.file.readText":
+      case "workspace.file.readChunk": {
+        const service = this.#options.workspaceFiles;
+        const input = request.input as import("@juling-harness/client-contract").WorkspaceFileChunkInput;
+        if (!service?.inspect || !service.readText || !service.readChunk) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持文件查看，请更新 Host");
+        const result = request.queryName === "workspace.file.inspect" ? await service.inspect(input)
+          : request.queryName === "workspace.file.readText" ? await service.readText(input) : await service.readChunk(input);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "workspace.fileTree": {
+        const service = this.#options.workspaceFiles;
+        if (service === undefined) throw clientError("CAPABILITY_UNAVAILABLE", "workspace.fileTree is not available on this Host");
+        const result = await service.get(request.input as { readonly workspaceId: WorkspaceId; readonly path?: string });
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "usage.get": {
+        const result = await this.#queryUsage();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "stats.dashboard": {
+        const usage = this.#options.usage;
+        if (usage?.dashboard === undefined) {
+          return {
+            ok: true,
+            queryName: request.queryName,
+            result: { available: false, reason: "本机统计面板未接入。" },
+          } as ClientQueryResponse;
+        }
+        return { ok: true, queryName: request.queryName, result: await usage.dashboard() } as ClientQueryResponse;
+      }
+      case "conversation.open": {
+        const openRequest = request as ClientQueryRequest<"conversation.open">;
+        const result = await this.#queryConversationOpen(openRequest.input);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "session.transcript.read": {
+        const result = await this.#queryTranscript(request.input as { readonly cursor?: OpaqueCursor; readonly limit?: number });
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "agent.transcript.read": {
+        const result = await this.#queryAgentTranscript(request.input as { readonly agentId: string; readonly cursor?: OpaqueCursor; readonly limit?: number });
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "agent.conversation.read": {
+        const result = await this.#queryAgentConversation(request.input as { readonly agentId: string; readonly cursor?: OpaqueCursor; readonly limit?: number });
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "session.transcript.readPage": {
+        const archiveRequest = request as ClientQueryRequest<"session.transcript.readPage">;
+        const result = await this.#queryArchiveTranscript(archiveRequest.input);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "session.transcript.prefetch": {
+        const page = await this.#options.archive?.prefetch?.((request as ClientQueryRequest<"session.transcript.prefetch">).input.sessionId);
+        return { ok: true, queryName: request.queryName, result: page ? { status: "ready", page } : { status: "skipped" } } as ClientQueryResponse;
+      }
+      case "session.agents.list": {
+        const agentsRequest = request as ClientQueryRequest<"session.agents.list">;
+        const result = await this.#queryPersistedAgents(agentsRequest.input);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "session.telemetry.read": {
+        const telemetryRequest = request as ClientQueryRequest<"session.telemetry.read">;
+        const result = await this.#querySessionTelemetry(telemetryRequest.input);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "session.compaction.read": {
+        const archive = this.#options.archive;
+        if (!archive?.readCompaction) throw unavailableError("Session compaction settings are unavailable");
+        const result = await archive.readCompaction((request as ClientQueryRequest<"session.compaction.read">).input.sessionId);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "git.toolchain.get": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.toolchain() } as ClientQueryResponse;
+      }
+      case "git.repository.get": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.repository(request.input as { readonly workspaceId: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "git.repository.summary": {
+        const service = this.#requireGit(request.queryName);
+        if (!service.summary) throw unavailableError("Git summary is unavailable on this Host");
+        return { ok: true, queryName: request.queryName, result: await service.summary(request.input as { workspaceId: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "git.diff.get": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.diff(request.input as never) } as ClientQueryResponse;
+      }
+      case "git.branches.list": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.branches(request.input as { readonly workspaceId: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "git.worktrees.list": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.worktrees(request.input as { readonly workspaceId: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "git.remotes.list": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.remotes(request.input as { readonly workspaceId: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "git.log.list": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.log(request.input as { readonly workspaceId: WorkspaceId; readonly limit?: number; readonly skip?: number }) } as ClientQueryResponse;
+      }
+      case "git.commit.changes": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.commitChanges(request.input as { readonly workspaceId: WorkspaceId; readonly oid: string }) } as ClientQueryResponse;
+      }
+      case "git.commit.diff": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.commitDiff(request.input as { readonly workspaceId: WorkspaceId; readonly oid: string; readonly path: string }) } as ClientQueryResponse;
+      }
+      case "github.repositories.list": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).repositories(request.input as never) } as ClientQueryResponse;
+      case "github.items.list": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).items(request.input as never) } as ClientQueryResponse;
+      case "github.items.get": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).item(request.input as never) } as ClientQueryResponse;
+      case "github.discussion.list": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).discussion(request.input as never) } as ClientQueryResponse;
+      case "github.pr.files": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).files(request.input as never) } as ClientQueryResponse;
+      case "github.pr.diff": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).fileDiff(request.input as never) } as ClientQueryResponse;
+      case "github.auth.get": {
+        const service = this.#requireGithub(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.auth(request.input as { readonly workspaceId?: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "github.pr.list": {
+        const service = this.#requireGithub(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.pullRequests(request.input as never) } as ClientQueryResponse;
+      }
+      case "github.pr.get": {
+        const service = this.#requireGithub(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.pullRequest(request.input as never) } as ClientQueryResponse;
+      }
+      case "github.pr.checks": {
+        const service = this.#requireGithub(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.checks(request.input as never) } as ClientQueryResponse;
+      }
+    }
+  }
+
+  async command<TName extends CommandName>(request: ClientCommandRequest<TName>): Promise<ClientCommandAccepted<TName>> {
+    this.#assertOpen();
+    const replay = this.#registry.getByRequestId(request.requestId);
+    if (this.#installInFlight && !(request.commandName === "runtime.install" && replay !== undefined)) {
+      throw unavailableError("Runtime update is in progress; retry after it completes");
+    }
+    if (request.commandName === "runtime.install" && replay === undefined &&
+        (this.#dispatchesInFlight > 0 || this.#registry.hasPending())) {
+      throw unavailableError("Finish pending commands before updating Runtime");
+    }
+    this.#dispatchesInFlight += 1;
+    let accepted: ClientCommandAccepted;
+    try {
+      accepted = await this.#dispatchCommand(request);
+    } finally {
+      this.#dispatchesInFlight -= 1;
+    }
+    // The dispatch switch verified the commandName discriminant; TS cannot
+    // narrow the generic type parameter itself, so the ack is cast.
+    return accepted as ClientCommandAccepted<TName>;
+  }
+
+  async #dispatchCommand(request: ClientCommandRequest): Promise<ClientCommandAccepted> {
+    if (this.#options.timeTravel?.isRestoring() && request.commandName !== "timeTravel.settings.set" && request.commandName !== "timeTravel.cleanup" && request.commandName !== "core.abort") {
+      throw unavailableError("Time Travel restore is in progress; wait for it to finish");
+    }
+    switch (request.commandName) {
+      case "timeTravel.settings.set": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return this.#commandLocalTask(request, () => service.updateSettings(request.input as import("@juling-harness/client-contract").CommandInput<"timeTravel.settings.set">));
+      }
+      case "timeTravel.restore": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return this.#commandLocalTask(request, () => service.restore(request.input as import("@juling-harness/client-contract").TimeTravelRestoreInput));
+      }
+      case "timeTravel.cleanup": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return this.#commandLocalTask(request, () => service.cleanup((request.input as import("@juling-harness/client-contract").CommandInput<"timeTravel.cleanup">).scope));
+      }
+      case "runtime.install": {
+        // The switch verified the discriminant; TS cannot re-narrow the envelope type.
+        const installRequest = request as ClientCommandRequest<"runtime.install">;
+        return this.#commandInstall(installRequest);
+      }
+      case "runtime.ensure": {
+        const ensureRequest = request as ClientCommandRequest<"runtime.ensure">;
+        return this.#commandEnsure(ensureRequest);
+      }
+      case "session.create": {
+        const createRequest = request as ClientCommandRequest<"session.create">;
+        return this.#commandCreate(createRequest);
+      }
+      case "session.resume": {
+        const resumeRequest = request as ClientCommandRequest<"session.resume">;
+        return this.#commandResume(resumeRequest);
+      }
+      case "session.drop": {
+        const dropRequest = request as ClientCommandRequest<"session.drop">;
+        return this.#commandDrop(dropRequest);
+      }
+      case "session.archive":
+      case "session.unarchive": {
+        return this.#commandArchiveToggle(request as ClientCommandRequest<"session.archive" | "session.unarchive">);
+      }
+      case "session.delete": {
+        return this.#commandDelete(request as ClientCommandRequest<"session.delete">);
+      }
+      case "interaction.respond": {
+        const respondRequest = request as ClientCommandRequest<"interaction.respond">;
+        return this.#commandRespond(respondRequest);
+      }
+      case "permissions.mode.set": {
+        const modeRequest = request as ClientCommandRequest<"permissions.mode.set">;
+        return this.#commandSetApprovalMode(modeRequest);
+      }
+      case "models.provider.upsert":
+      case "models.provider.delete":
+      case "models.provider.setEnabled":
+      case "models.roles.set":
+      case "models.roles.write":
+      case "models.roles.create":
+      case "models.roles.delete":
+      case "models.roleStorage.set":
+      case "models.fallback.set":
+      case "models.providerOrder.set":
+      case "models.yml.write":
+      case "models.login.start":
+      case "models.login.logout":
+      case "models.provider.test":
+      case "models.provider.probe":
+      case "models.catalog.refresh":
+      case "models.discovery.refresh":
+      case "models.cycleOrder.set":
+      case "models.webSearch.set":
+      case "models.webSearch.credential.set":
+      case "models.webSearch.credential.remove": {
+        return this.#commandModels(request as ClientCommandRequest<ModelsCommandName>);
+      }
+      case "workspace.open":
+      case "workspace.pick": {
+        return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick">);
+      }
+      case "workspace.file.writeText":
+      case "workspace.file.create":
+      case "workspace.directory.create": {
+        return this.#commandWorkspaceFile(request as ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">);
+      }
+      case "usage.openDashboard": {
+        return this.#commandUsage(request as ClientCommandRequest<"usage.openDashboard">);
+      }
+      case "evaluations.openWorkspace":
+      case "evaluations.prepare":
+      case "evaluations.start":
+      case "evaluations.control":
+      case "evaluations.export":
+      case "evaluations.respond": {
+        const service = this.#options.evaluations;
+        if (!service) throw clientError("CAPABILITY_UNAVAILABLE", "Evaluation workspace is unavailable on this Host");
+        return this.#commandLocalTask(request, async () => {
+          switch (request.commandName) {
+            case "evaluations.openWorkspace": await service.openWorkspace((request.input as {id: string}).id); return { opened: true };
+            case "evaluations.prepare": return service.prepare(request.input as CommandInput<"evaluations.prepare">);
+            case "evaluations.start": return service.start(request.input as CommandInput<"evaluations.start">);
+            case "evaluations.control": return service.control(request.input as CommandInput<"evaluations.control">);
+            case "evaluations.export": return service.export(request.input as CommandInput<"evaluations.export">);
+            case "evaluations.respond": await service.respond(request.input as CommandInput<"evaluations.respond">); return { responded: true };
+          }
+        });
+      }
+      case "artifacts.saveText": {
+        const service = this.#options.artifacts;
+        if (!service?.saveText) throw clientError("CAPABILITY_UNAVAILABLE", "Artifact text storage is unavailable");
+        validateArtifactTextInput(request.input);
+        const input = request.input;
+        return this.#commandLocalTask(request, () => service.saveText!(input));
+      }
+      case "artifacts.delete": {
+        const service = this.#options.artifacts;
+        if (!service) throw clientError("CAPABILITY_UNAVAILABLE", "The artifact library is not available on this Host");
+        const { artifactId } = request.input as { artifactId: string };
+        if (typeof artifactId !== "string" || !/^[a-f0-9-]{36}$/u.test(artifactId)) throw clientError("INVALID_ARGUMENT", "Invalid artifact ID");
+        return this.#commandLocalTask(request, async () => {
+          await service.remove(artifactId);
+          return { deleted: true, artifactId };
+        });
+      }
+      case "plugins.setEnabled":
+      case "skills.setEnabled":
+      case "skills.reveal":
+      case "skills.revealRoot": {
+        return this.#commandExtensibility(
+          request as ClientCommandRequest<"plugins.setEnabled" | "skills.setEnabled" | "skills.reveal" | "skills.revealRoot">,
+        );
+      }
+      case "mcp.setInstructions":
+      case "mcp.setEnabled":
+      case "mcp.refresh":
+      case "mcp.test": {
+        return this.#commandMcp(request as ClientCommandRequest<"mcp.setEnabled" | "mcp.setInstructions" | "mcp.refresh" | "mcp.test">);
+      }
+      case "agents.definition.upsert":
+      case "agents.definition.delete":
+      case "agents.definition.configure": {
+        return this.#commandAgentDefinitions(request as ClientCommandRequest<AgentDefinitionsCommandName>);
+      }
+      case "git.execute":
+        return this.#commandGit(request as ClientCommandRequest<"git.execute">);
+      case "github.execute":
+        return this.#commandGithub(request as ClientCommandRequest<"github.execute">);
+      default: {
+        const p4 = request as ClientCommandRequest;
+        return this.#commandP4(p4);
+      }
+    }
+  }
+
+  /** Host-owned tasks share the normal idempotency registry and terminal receipts. */
+  async #commandLocalTask(request: ClientCommandRequest, execute: () => Promise<unknown>): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted = { commandName: request.commandName, requestId: request.requestId, status: "accepted" as const, acceptedAt };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void Promise.resolve().then(execute).then(result => {
+      this.#emitTerminal(request.requestId, { requestId: request.requestId, commandName: request.commandName, status: "completed", result, observedAt: this.#options.diagnostics.now() } as CommandReceipt);
+    }, error => {
+      this.#emitTerminal(request.requestId, { requestId: request.requestId, commandName: request.commandName, status: "failed", error: toClientError(error), observedAt: this.#options.diagnostics.now() } as CommandReceipt);
+    });
+    return accepted;
+  }
+
+  #requireGit(name: string): HostGitService {
+    const service = this.#options.git;
+    if (service === undefined) throw clientError("CAPABILITY_UNAVAILABLE", `${name} is not available: no Git adapter is wired`);
+    return service;
+  }
+
+  #requireGithub(name: string): HostGitHubService {
+    const service = this.#options.github;
+    if (service === undefined) throw clientError("CAPABILITY_UNAVAILABLE", `${name} is not available: no GitHub adapter is wired`);
+    return service;
+  }
+
+  async #commandGit(request: ClientCommandRequest<"git.execute">): Promise<ClientCommandAccepted> {
+    return this.#commandHostOperation(request, this.#requireGit(request.commandName), "git");
+  }
+
+  async #commandGithub(request: ClientCommandRequest<"github.execute">): Promise<ClientCommandAccepted> {
+    return this.#commandHostOperation(request, this.#requireGithub(request.commandName), "github");
+  }
+
+  async #commandHostOperation(
+    request: ClientCommandRequest<"git.execute"> | ClientCommandRequest<"github.execute">,
+    service: HostGitService | HostGitHubService,
+    domain: "git" | "github",
+  ): Promise<ClientCommandAccepted> {
+    validateEnvelope(request as ClientCommandRequest);
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request as ClientCommandRequest, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt } as ClientCommandAccepted;
+    }
+    const accepted = { commandName: request.commandName, requestId: request.requestId, status: "accepted" as const, acceptedAt };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void (async () => {
+      try {
+        const result: GitOperationResult | GitHubOperationResult = domain === "git"
+          ? await (service as HostGitService).execute(request.input as GitExecuteInput, request.requestId)
+          : await (service as HostGitHubService).execute(request.input as GitHubExecuteInput, request.requestId);
+        this.#emitTerminal(request.requestId, { requestId: request.requestId, commandName: request.commandName, status: "completed", result, observedAt: this.#options.diagnostics.now() } as CommandReceipt);
+        const changesLocalRepository = domain === "git" || (domain === "github" && request.input.operation.kind === "pr.checkout");
+        if (changesLocalRepository && request.input.workspaceId !== undefined) {
+          const repository = domain === "git" ? (result as GitOperationResult).repository : undefined;
+          this.#bus.emit({
+            kind: "git.repository.changed",
+            repository: {
+              workspaceId: request.input.workspaceId,
+              ...(repository?.repositoryId === undefined ? {} : { repositoryId: repository.repositoryId }),
+              ...(repository?.revision === undefined ? {} : { revision: repository.revision }),
+              reason: "command",
+            },
+          });
+        }
+      } catch (error) {
+        this.#emitTerminal(request.requestId, { requestId: request.requestId, commandName: request.commandName, status: "failed", error: toClientError(error), observedAt: this.#options.diagnostics.now() } as CommandReceipt);
+      }
+    })();
+    return accepted as ClientCommandAccepted;
+  }
+
+  async #commandP4(request: ClientCommandRequest): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    validateRuntimeMirrorCommandInput(request.commandName, request.input);
+    const service = this.#options.commands;
+    if (service?.invoke === undefined) throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available on this Host`);
+    if (!this.#hasSnapshot()) throw unavailableError(`${request.commandName} requires a Runtime snapshot`);
+    if (isComputerWorkspaceCommand(request.commandName)) await this.#requireComputerCapability(request.commandName);
+    const operation = { ...request.input, kind: request.commandName } as unknown as HarnessOperation;
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) { this.#replayTerminal(replay, request.requestId); return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt } as ClientCommandAccepted; }
+    const accepted = { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt } as ClientCommandAccepted;
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runP4Command(() => service.invoke!(operation, request.requestId), request.requestId, request.commandName);
+    return accepted;
+  }
+
+  async #runP4Command(run: () => HostInvokeOutcome | Promise<HostInvokeOutcome>, requestId: CommandRequestId, commandName: CommandName): Promise<void> {
+    try {
+      const result = await run();
+      this.#emitTerminal(requestId, { requestId, commandName, status: "completed", result, observedAt: this.#options.diagnostics.now() } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(requestId, { requestId, commandName, status: "failed", error: toClientError(error), observedAt: this.#options.diagnostics.now() } as CommandReceipt);
+    }
+  }
+
+  subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe {
+    if (this.#closed) {
+      return () => {};
+    }
+    return this.#bus.subscribe(scope, listener);
+  }
+
+  /** Close the client session only: subscriptions are dropped, Host/Runtime keep running. */
+  async close(): Promise<void> {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
+    this.#readLifetime.abort();
+    this.#unsubscribeConnection?.();
+    this.#unsubscribeConnection = undefined;
+    this.#unsubscribePublication?.();
+    this.#unsubscribePublication = undefined;
+    this.#unsubscribeConversation?.();
+    this.#unsubscribeConversation = undefined;
+    this.#unsubscribeConversationResync?.();
+    this.#unsubscribeConversationResync = undefined;
+    this.#unsubscribeTelemetry?.();
+    this.#unsubscribeTelemetry = undefined;
+    this.#unsubscribeBtw?.();
+    this.#unsubscribeBtw = undefined;
+    this.#unsubscribeComputer?.();
+    this.#unsubscribeComputer = undefined;
+    this.#unsubscribeResidents?.();
+    this.#unsubscribeResidents = undefined;
+    this.#unsubscribeResidentTerminalOutcomes?.();
+    this.#unsubscribeResidentTerminalOutcomes = undefined;
+    this.#unsubscribeInteraction?.();
+    this.#unsubscribeInteraction = undefined;
+    this.#unsubscribeGitProgress?.();
+    this.#unsubscribeGitProgress = undefined;
+    this.#unsubscribeEvaluations?.();
+    this.#unsubscribeEvaluations = undefined;
+    this.#unsubscribeGitExternal?.();
+    this.#unsubscribeGitExternal = undefined;
+    this.#unsubscribeGithubProgress?.();
+    this.#unsubscribeGithubProgress = undefined;
+    this.#bus.close();
+    this.#terminalEmitted.clear();
+    this.#ledgerReceiptKeys.clear();
+    const store = this.#options.telemetryStore;
+    if (store !== undefined) {
+      void store.flush().catch(() => {});
+    }
+  }
+
+  #assertOpen(): void {
+    if (this.#closed) {
+      throw clientError("TRANSPORT_ERROR", "host client facade is closed");
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Bootstrap helpers
+  // ------------------------------------------------------------------
+
+  #eventContext(): HostEventContext {
+    // Read two fields; the operator pack is never copied for an event envelope.
+    const snapshot = this.#currentSnapshotRef();
+    if (snapshot === undefined) {
+      return {};
+    }
+    return { stateVersion: snapshot.stateVersion, runtimeEpoch: snapshot.runtimeEpoch };
+  }
+
+  #selection(snapshot: OperatorStateSnapshot | undefined): ClientSelection {
+    const environmentId = environmentIdFor(this.#options.authority.authorityId);
+    const activeWorkspaceId = this.#lastWorkspaceModel?.activeWorkspaceId;
+    return {
+      environmentId,
+      ...(snapshot === undefined ? {} : { sessionId: snapshot.sessionId }),
+      ...(activeWorkspaceId === undefined ? {} : { workspaceId: activeWorkspaceId }),
+    };
+  }
+
+  async #resolveManifest<T>(provider: HostManifestProvider<T>, fallback: () => T): Promise<T> {
+    try {
+      const value = await provider();
+      return value === undefined ? fallback() : value;
+    } catch {
+      return fallback();
+    }
+  }
+
+  async #readResidentsForBootstrap(): Promise<ResidentsReadModel | undefined> {
+    const service = this.#options.residents;
+    if (service === undefined) return undefined;
+    try {
+      const residents = await service.list();
+      this.#lastResidents = residents;
+      return residents;
+    } catch {
+      // Bootstrap remains useful when a broker read races shutdown; the
+      // explicit residents.list query still fails closed through its service.
+      return undefined;
+    }
+  }
+
+  #onResidentsChanged(residents: ResidentsReadModel): void {
+    // Broker lifecycle changes are also the reliable wake-up when the active
+    // Worker disappears before it can publish a final snapshot (for example,
+    // lease loss followed by a failed relaunch). Publish runtime.changed first
+    // so Clients fence the stale snapshot before rendering resident summaries.
+    this.#syncRuntimeEvents();
+    if (residentsEqual(this.#lastResidents, residents)) return;
+    this.#lastResidents = residents;
+    // Resident summaries are authority/broker facts, not a projection of the
+    // currently selected Worker. Do not inherit the active Runtime epoch or
+    // state version onto this event.
+    this.#bus.emit({
+      kind: "residents.changed",
+      residents,
+      runtimeEpoch: null,
+      stateVersion: 0 as StateVersion,
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Runtime connection / snapshot access
+  // ------------------------------------------------------------------
+
+  #deriveHello(): HostRuntimeHelloView | undefined {
+    const runtime = this.#options.runtime;
+    if (runtime === undefined) {
+      return undefined;
+    }
+    const hello = runtime.hello();
+    if (hello !== undefined) {
+      this.#lastHello = hello;
+    }
+    return hello;
+  }
+
+  /**
+   * Current safe snapshot as an internal read-only view, or undefined when no
+   * Runtime is ready. Once a Runtime was seen, a vanished hello isolates its
+   * stale snapshot: the facade never serves Runtime state that belongs to a
+   * lost epoch.
+   *
+   * This is the zero-copy seam: the returned object is the committed
+   * publication snapshot (`RuntimePublicationStore` hands that same object to
+   * every consumer and requires it to be treated as frozen). Internal code may
+   * read fields from it, but it must never mutate it and must never hand it to
+   * a caller outside the facade. External boundaries copy once through
+   * {@link HarnessHostClientFacade.#snapshotCopy}; cloning per read made every
+   * streamed conversation event deep-copy the whole operator pack (agents,
+   * jobs, telemetry) two or three times.
+   */
+  #currentSnapshotRef(): OperatorStateSnapshot | undefined {
+    const runtime = this.#options.runtime;
+    if (runtime === undefined) {
+      return undefined;
+    }
+    if (this.#deriveHello() === undefined && this.#lastHello !== undefined) {
+      return undefined;
+    }
+    return runtime.snapshot?.() ?? runtime.session?.publication()?.snapshot;
+  }
+
+  /** Narrow existence check: no snapshot copy, no field reads. */
+  #hasSnapshot(): boolean {
+    return this.#currentSnapshotRef() !== undefined;
+  }
+
+  /** Narrow epoch read for the epoch fence on forwarded Runtime events. */
+  #currentRuntimeEpoch(): RuntimeEpoch | undefined {
+    return this.#currentSnapshotRef()?.runtimeEpoch;
+  }
+
+  /**
+   * The single external copy of the current snapshot. Call it only where the
+   * value leaves the facade (query results, bootstrap); internal reads use
+   * {@link HarnessHostClientFacade.#currentSnapshotRef} so one logical path
+   * never copies the operator pack twice.
+   */
+  #snapshotCopy(): OperatorStateSnapshot | undefined {
+    const snapshot = this.#currentSnapshotRef();
+    return snapshot === undefined ? undefined : structuredClone(snapshot);
+  }
+
+  #currentConnection(): RuntimeConnection {
+    const runtime = this.#options.runtime;
+    if (runtime === undefined) {
+      return this.#unavailableConnection();
+    }
+    const hello = this.#deriveHello();
+    if (hello === undefined) {
+      if (runtime.startupState?.() === "connecting") {
+        return { status: "connecting", classification: "unavailable" };
+      }
+      const last = this.#lastHello;
+      if (last === undefined) {
+        return this.#unavailableConnection();
+      }
+      const lost = readDisconnect(runtime);
+      if (lost !== undefined) {
+        // Runtime lost: keep the last known identity so clients can isolate
+        // its epoch; nothing else is claimed.
+        const runtimeId = last.runtimeId as RuntimeId;
+        const runtimeEpoch = last.runtimeEpoch as RuntimeEpoch;
+        return {
+          status: "disconnected",
+          classification: last.classification,
+          runtimeId,
+          runtimeEpoch,
+          ...(last.backend === undefined ? {} : { backend: last.backend }),
+          ...(last.runtimeVersion === undefined ? {} : { runtimeVersion: last.runtimeVersion }),
+          ...(last.upstreamVersion === undefined ? {} : { upstreamVersion: last.upstreamVersion }),
+          ...(last.upstreamCommit === undefined ? {} : { upstreamCommit: last.upstreamCommit }),
+          disconnectCode: lost.code,
+          disconnectReason: lost.reason,
+          ...(lost.occurredAt === undefined ? {} : { disconnectedAt: lost.occurredAt }),
+          ...(lost.autoRespawn === undefined ? {} : { autoRespawn: lost.autoRespawn }),
+        };
+      }
+      const unavailable = readUnavailable(runtime);
+      if (unavailable !== undefined) {
+        return {
+          status: "unavailable",
+          classification: "unavailable",
+          unavailableCode: unavailable.code,
+          unavailableReason: unavailable.reason,
+        };
+      }
+      // No disconnect and no unavailable facts: the Host runtime environment is ready
+      // and managed (e.g. read-only dormant workspace or between session attaches).
+      return {
+        status: "connected",
+        classification: last.classification,
+        runtimeId: last.runtimeId as RuntimeId,
+        runtimeEpoch: last.runtimeEpoch as RuntimeEpoch,
+        ...(last.backend === undefined ? {} : { backend: last.backend }),
+        ...(last.runtimeVersion === undefined ? {} : { runtimeVersion: last.runtimeVersion }),
+        ...(last.upstreamVersion === undefined ? {} : { upstreamVersion: last.upstreamVersion }),
+        ...(last.upstreamCommit === undefined ? {} : { upstreamCommit: last.upstreamCommit }),
+      };
+    }
+    const hasSnapshot = this.#hasSnapshot();
+    const runtimeId = hello.runtimeId as RuntimeId;
+    const runtimeEpoch = hello.runtimeEpoch as RuntimeEpoch;
+    return {
+      status: hasSnapshot ? "connected" : "connecting",
+      classification: hello.classification,
+      runtimeId,
+      runtimeEpoch,
+      ...(hello.backend === undefined ? {} : { backend: hello.backend }),
+      ...(hello.runtimeVersion === undefined ? {} : { runtimeVersion: hello.runtimeVersion }),
+      ...(hello.upstreamVersion === undefined ? {} : { upstreamVersion: hello.upstreamVersion }),
+      ...(hello.upstreamCommit === undefined ? {} : { upstreamCommit: hello.upstreamCommit }),
+    };
+  }
+
+  #unavailableConnection(): RuntimeConnection {
+    const facts = readUnavailable(this.#options.runtime);
+    return {
+      status: "unavailable",
+      classification: "unavailable",
+      ...(facts === undefined
+        ? {}
+        : {
+            unavailableCode: facts.code,
+            unavailableReason: facts.reason,
+          }),
+    };
+  }
+
+  /**
+   * Detect Runtime connection transitions and mirror them as
+   * `runtime.changed` events so the client reducer can mark pending
+   * commands outcome_unknown on loss/epoch change (§8.3.5).
+   */
+  #syncRuntimeEvents(): void {
+    const next = this.#currentConnection();
+    const prev = this.#lastEmittedConnection;
+    this.#lastEmittedConnection = next;
+    if (prev === undefined || connectionEquals(prev, next)) {
+      return;
+    }
+    if (prev.status !== "connected" || next.status !== "connected") {
+      this.#snapshotReplayRequired = true;
+      this.#lastGuiInteractionKey = undefined;
+    }
+    this.#bus.emit({
+      kind: "runtime.changed",
+      connection: next,
+      ...(next.runtimeEpoch === undefined ? {} : { runtimeEpoch: next.runtimeEpoch }),
+    });
+    if (
+      next.status === "disconnected" ||
+      next.status === "unavailable"
+    ) {
+      const lossChanged =
+        prev.status !== next.status ||
+        prev.disconnectCode !== next.disconnectCode ||
+        prev.autoRespawn !== next.autoRespawn ||
+        prev.unavailableCode !== next.unavailableCode;
+      if (lossChanged) this.#recordRuntimeLossDiagnostic(next);
+    }
+  }
+
+  #recordRuntimeLossDiagnostic(connection: RuntimeConnection): void {
+    const now = this.#options.diagnostics.now();
+    const diagnostic =
+      connection.status === "disconnected"
+        ? disconnectDiagnostic(
+            connection.disconnectCode === undefined
+              ? undefined
+              : {
+                  code: connection.disconnectCode,
+                  reason: connection.disconnectReason ?? "",
+                  ...(connection.disconnectedAt === undefined ? {} : { occurredAt: connection.disconnectedAt }),
+                  ...(connection.autoRespawn === undefined ? {} : { autoRespawn: connection.autoRespawn }),
+                },
+          )
+        : unavailableDiagnostic(
+            connection.unavailableCode === undefined
+              ? undefined
+              : { code: connection.unavailableCode, reason: connection.unavailableReason ?? "" },
+          );
+    const occurredAt = connection.disconnectedAt ?? now;
+    const last = this.#runtimeLossDiagnostics[this.#runtimeLossDiagnostics.length - 1];
+    const nextEntry: DiagnosticEntry = {
+      entryId: this.#options.diagnostics.newEntryId(),
+      scope: "host",
+      level: connection.status === "unavailable" ? "warning" : "error",
+      message: diagnostic.message,
+      ...(diagnostic.detail === undefined ? {} : { detail: diagnostic.detail }),
+      occurredAt,
+    };
+    if (last !== undefined && last.detail?.code === nextEntry.detail?.code && last.occurredAt === occurredAt) {
+      this.#runtimeLossDiagnostics[this.#runtimeLossDiagnostics.length - 1] = nextEntry;
+    } else {
+      this.#runtimeLossDiagnostics.push(nextEntry);
+      if (this.#runtimeLossDiagnostics.length > 8) this.#runtimeLossDiagnostics.shift();
+    }
+    this.#bus.emit({ kind: "diagnostics.changed" });
+  }
+
+  #onPublication(publication: RuntimePublication): void {
+    const snapshot = publication.snapshot;
+    // A resident Worker may be re-selected with an older per-Worker epoch.
+    // Publish the connection change first so the Client resets its active
+    // Runtime fence before receiving that Worker's snapshot.
+    this.#syncRuntimeEvents();
+    const version = snapshot.stateVersion;
+    const currentConnection = this.#lastEmittedConnection;
+    const ready = currentConnection?.status === "connected"
+      && currentConnection.runtimeId === snapshot.runtimeId
+      && currentConnection.runtimeEpoch === snapshot.runtimeEpoch;
+    const identityChanged =
+      this.#lastPublishedRuntimeId !== snapshot.runtimeId ||
+      this.#lastPublishedEpoch !== snapshot.runtimeEpoch;
+    if (ready && identityChanged) {
+      const hadIdentity = this.#lastPublishedRuntimeId !== undefined;
+      this.#lastPublishedRuntimeId = snapshot.runtimeId;
+      this.#lastPublishedEpoch = snapshot.runtimeEpoch;
+      this.#lastPublishedVersion = undefined;
+      // First publication is not a Runtime switch; keep a live-event key so
+      // the follow-up snapshot of the same lease does not toast again.
+      if (hadIdentity) {
+        this.#lastGuiInteractionKey = undefined;
+      }
+    }
+    let publishedSnapshot = false;
+    if (ready && (this.#lastPublishedVersion === undefined
+      || Number(version) > Number(this.#lastPublishedVersion)
+      || (this.#snapshotReplayRequired && version === this.#lastPublishedVersion))) {
+      this.#lastPublishedVersion = version;
+      this.#snapshotReplayRequired = false;
+      publishedSnapshot = true;
+      this.#bus.emit({
+        kind: "snapshot",
+        snapshot,
+        runtimeEpoch: snapshot.runtimeEpoch,
+        stateVersion: version,
+      });
+    }
+    if (publishedSnapshot) {
+      const pending = snapshot.pendingInteraction;
+      if (pending?.owner === "gui") {
+        const requestId = this.#runtimeSession()?.requestIdForCommandId?.(pending.request.commandId) as CommandRequestId | undefined;
+        const mapped = mapRemoteInteractionToClient(
+          pending.request,
+          snapshot.sessionId as SessionId,
+          pending.leaseGeneration,
+          requestId,
+        );
+        if (mapped !== undefined) {
+          this.#emitGuiRequiredOnce(mapped, snapshot.runtimeEpoch, version);
+        }
+      } else {
+        this.#lastGuiInteractionKey = undefined;
+      }
+    }
+    for (const entry of publication.terminalOutcomes) {
+      this.#emitLedgerReceipt(entry);
+    }
+  }
+
+  #bindConversation(): void {
+    const runtime = this.#options.runtime;
+    if (runtime === undefined) {
+      return;
+    }
+    if (runtime.onConversationEvent !== undefined) {
+      this.#unsubscribeConversation = runtime.onConversationEvent((event) => this.#onConversationForward(event));
+      if (runtime.onConversationResync !== undefined) {
+        this.#unsubscribeConversationResync = runtime.onConversationResync((reason) => this.#onConversationResync(reason));
+      }
+      return;
+    }
+    const session = this.#runtimeSession();
+    if (session === undefined) {
+      return;
+    }
+    this.#unsubscribeConversation = session.onConversationEvent((event) => this.#onConversationForward(event));
+    this.#unsubscribeConversationResync = session.onConversationResync((reason) => this.#onConversationResync(reason));
+  }
+
+  #bindTelemetry(): void {
+    const runtime = this.#options.runtime;
+    if (runtime === undefined) return;
+    if (runtime.onTelemetryEvent !== undefined) {
+      this.#unsubscribeTelemetry = runtime.onTelemetryEvent((event) => this.#onTelemetryForward(event));
+      return;
+    }
+    const session = this.#runtimeSession();
+    if (session?.onTelemetryEvent !== undefined) {
+      this.#unsubscribeTelemetry = session.onTelemetryEvent((event) => this.#onTelemetryForward(event));
+    }
+  }
+
+  #onTelemetryForward(forward: HarnessTelemetryForward): void {
+    this.#syncRuntimeEvents();
+    const snapshot = this.#currentSnapshotRef();
+    if (snapshot === undefined) return;
+    const envelope = forward.envelope;
+    if (envelope.runtimeEpoch !== snapshot.runtimeEpoch) return;
+    const event = envelope.event;
+    if (event.sessionId !== snapshot.sessionId || event.telemetry.sessionId !== snapshot.sessionId) return;
+    this.#bus.emit({
+      kind: "telemetry.changed",
+      runtimeEpoch: envelope.runtimeEpoch,
+      stateVersion: envelope.stateVersion,
+      occurredAt: envelope.occurredAt,
+      sessionId: event.sessionId as SessionId,
+      telemetry: event.telemetry,
+    });
+    this.#options.telemetryStore?.record(event.sessionId, event.telemetry);
+  }
+
+  async #requireComputerCapability(kind: string): Promise<void> {
+    const manifest = await this.#queryCapabilities();
+    if (!manifest.capabilities.some(capability => capability.id === kind && capability.grade !== "unavailable")) {
+      throw clientError("CAPABILITY_UNAVAILABLE", kind + " is not supported by this Runtime");
+    }
+  }
+
+  #bindComputer(): void {
+    const runtime = this.#options.runtime;
+    if (runtime?.onComputerEvent) {
+      this.#unsubscribeComputer = runtime.onComputerEvent(event => this.#onComputerForward(event));
+    } else {
+      this.#unsubscribeComputer = this.#runtimeSession()?.onComputerEvent?.(event => this.#onComputerForward(event));
+    }
+  }
+
+  #onComputerForward({ envelope }: HarnessComputerForward): void {
+    this.#syncRuntimeEvents();
+    const snapshot = this.#currentSnapshotRef();
+    if (!snapshot || envelope.runtimeEpoch !== snapshot.runtimeEpoch || envelope.event.sessionId !== snapshot.sessionId) return;
+    this.#bus.emit({
+      kind: "computer.changed",
+      runtimeEpoch: envelope.runtimeEpoch,
+      stateVersion: envelope.stateVersion,
+      occurredAt: envelope.occurredAt,
+      change: envelope.event,
+    });
+  }
+
+  #bindBtw(): void {
+    const runtime = this.#options.runtime;
+    if (runtime === undefined) return;
+    if (runtime.onBtwEvent !== undefined) {
+      this.#unsubscribeBtw = runtime.onBtwEvent((event) => this.#onBtwForward(event));
+      return;
+    }
+    const session = this.#runtimeSession();
+    if (session?.onBtwEvent !== undefined) {
+      this.#unsubscribeBtw = session.onBtwEvent((event) => this.#onBtwForward(event));
+    }
+  }
+
+  /**
+   * Attach the current session identity to a BTW delta. The Runtime scopes the
+   * side-channel to the live session implicitly, so unlike telemetry there is
+   * no sessionId on the wire to cross-check; a snapshot-less or epoch-mismatched
+   * forward is dropped rather than attributed to whatever session is current.
+   */
+  #onBtwForward(forward: HarnessBtwForward): void {
+    this.#syncRuntimeEvents();
+    const snapshot = this.#currentSnapshotRef();
+    if (snapshot === undefined) return;
+    const envelope = forward.envelope;
+    if (envelope.runtimeEpoch !== snapshot.runtimeEpoch) return;
+    this.#bus.emit({
+      kind: "btw.changed",
+      runtimeEpoch: envelope.runtimeEpoch,
+      stateVersion: envelope.stateVersion,
+      occurredAt: envelope.occurredAt,
+      sessionId: snapshot.sessionId as SessionId,
+      eventSeq: Number(envelope.eventSeq),
+      snapshot: envelope.event.snapshot,
+    });
+  }
+
+  #bindInteraction(): void {
+    const runtime = this.#options.runtime;
+    if (runtime?.onInteractionEvent === undefined) {
+      return;
+    }
+    this.#unsubscribeInteraction = runtime.onInteractionEvent((event) => this.#onInteractionForward(event));
+  }
+
+  #onInteractionForward(forward: HarnessInteractionForward): void {
+    this.#syncRuntimeEvents();
+    const snapshot = this.#currentSnapshotRef();
+    if (snapshot === undefined) {
+      return;
+    }
+    const envelope = forward.envelope;
+    if (envelope.runtimeEpoch !== snapshot.runtimeEpoch) {
+      return;
+    }
+    const event = envelope.event;
+    if (event.kind === "interaction.resolved") {
+      if (this.#lastGuiInteractionKey === guiInteractionKey(event.interactionId, event.leaseGeneration)) {
+        this.#lastGuiInteractionKey = undefined;
+      }
+      this.#bus.emit({
+        kind: "interaction.resolved",
+        runtimeEpoch: envelope.runtimeEpoch,
+        stateVersion: envelope.stateVersion,
+        occurredAt: envelope.occurredAt,
+        interactionId: event.interactionId,
+        leaseGeneration: event.leaseGeneration,
+        outcome: event.outcome,
+      });
+      return;
+    }
+    if (event.owner === "tui") {
+      this.#recordConversationDiagnostic("A terminal-owned interaction is pending; handle it in the TUI");
+      return;
+    }
+    const requestId = forward.clientRequestId as CommandRequestId | undefined;
+    const mapped = mapRemoteInteractionToClient(
+      event.request,
+      snapshot.sessionId as SessionId,
+      event.leaseGeneration,
+      requestId,
+    );
+    if (mapped === undefined) {
+      this.#recordConversationDiagnostic("Dropped an interaction with an unsupported kind");
+      return;
+    }
+    this.#emitGuiRequiredOnce(mapped, envelope.runtimeEpoch, envelope.stateVersion, envelope.occurredAt);
+  }
+
+  #emitGuiRequiredOnce(
+    interaction: ClientInteraction,
+    runtimeEpoch: RuntimeEpoch,
+    stateVersion: StateVersion,
+    occurredAt?: string,
+  ): void {
+    const key = guiInteractionKey(interaction.interactionId, interaction.leaseGeneration);
+    if (this.#lastGuiInteractionKey === key) {
+      return;
+    }
+    this.#lastGuiInteractionKey = key;
+    this.#bus.emit({
+      kind: "interaction.required",
+      runtimeEpoch,
+      stateVersion,
+      ...(occurredAt === undefined ? {} : { occurredAt }),
+      interaction,
+    });
+  }
+
+  #runtimeSession() {
+    return this.#options.runtime?.currentSession?.() ?? this.#options.runtime?.session;
+  }
+
+  #onConversationResync(reason: string): void {
+    this.#syncRuntimeEvents();
+    this.#bus.emit({ kind: "resync.required", reason });
+  }
+
+  #onConversationForward(forward: HarnessConversationForward): void {
+    this.#syncRuntimeEvents();
+    // Hottest Host path: one epoch read per streamed event, no snapshot copy.
+    const runtimeEpoch = this.#currentRuntimeEpoch();
+    if (runtimeEpoch === undefined) {
+      return;
+    }
+    const envelope = forward.envelope;
+    if (envelope.runtimeEpoch !== runtimeEpoch) {
+      return;
+    }
+    let update;
+    try {
+      update = parseConversationRuntimeEvent(envelope.event);
+    } catch {
+      this.#recordConversationDiagnostic("Dropped a malformed conversation event; transcript resync is required");
+      this.#bus.emit({
+        kind: "resync.required",
+        reason: "conversation mapping failed; re-read open transcripts",
+      });
+      return;
+    }
+    this.#bus.emit({
+      kind: "conversation.changed",
+      runtimeEpoch: envelope.runtimeEpoch,
+      stateVersion: envelope.stateVersion,
+      occurredAt: envelope.occurredAt,
+      sessionId: update.sessionId as SessionId,
+      streamSeq: forward.streamSeq,
+      eventSeq: Number(envelope.eventSeq),
+      update,
+    });
+  }
+
+  #recordConversationDiagnostic(message: string): void {
+    this.#conversationDiagnostics.push({
+      entryId: this.#options.diagnostics.newEntryId(),
+      scope: "runtime",
+      level: "warning",
+      message,
+      occurredAt: this.#options.diagnostics.now(),
+    });
+    if (this.#conversationDiagnostics.length > 8) {
+      this.#conversationDiagnostics.shift();
+    }
+    this.#bus.emit({ kind: "diagnostics.changed" });
+  }
+
+  /**
+   * Mirror Host ledger terminal outcomes (runtime loss, runtime-driven
+   * failures) as client receipts for commands this facade issued. Only
+   * statuses that need no result payload are mapped; `completed` results
+   * arrive through the facade-driven command path.
+   */
+  #emitLedgerReceipt(entry: CommandLedgerEntry): void {
+    const requestId = entry.requestId as CommandRequestId;
+    const ledgerKey = `${entry.requestId}:${entry.commandId}:${entry.status}:${entry.terminalAt ?? ""}`;
+    if (this.#ledgerReceiptKeys.has(ledgerKey)) {
+      return;
+    }
+    if (this.#terminalEmitted.has(requestId)) {
+      return;
+    }
+    const registration = this.#registry.getByRequestId(requestId);
+    if (registration === undefined) {
+      return;
+    }
+    const receipt = receiptFromLedgerEntry(entry, registration.commandName, this.#options.diagnostics.now());
+    if (receipt === undefined) {
+      return;
+    }
+    this.#ledgerReceiptKeys.add(ledgerKey);
+    evictOldestKeys(this.#ledgerReceiptKeys, DEDUPE_KEY_CAPACITY);
+    this.#terminalEmitted.add(requestId);
+    evictOldestKeys(this.#terminalEmitted, DEDUPE_KEY_CAPACITY);
+    this.#registry.recordTerminal(requestId, receipt);
+    this.#bus.emit({ kind: "command.receipt", receipt, runtimeEpoch: entry.runtimeEpoch });
+  }
+
+  // ------------------------------------------------------------------
+  // Queries
+  // ------------------------------------------------------------------
+
+  async #queryEnvironment(): Promise<EnvironmentReadModel> {
+    this.#syncRuntimeEvents();
+    const installed = await this.#currentInstalledManifest();
+    return {
+      platform: this.#options.platform,
+      arch: this.#options.arch,
+      authority: { ...this.#options.authority },
+      runtime: this.#currentConnection(),
+      installer: await this.#installState(installed),
+    };
+  }
+
+  async #queryCapabilities(): Promise<CapabilityManifest> {
+    return this.#resolveManifest(this.#options.capabilityManifest, () =>
+      neutralCapabilityManifest(this.#options.diagnostics.now()),
+    );
+  }
+
+  async #queryCommandManifest(): Promise<OperatorCommandManifest> {
+    return this.#resolveManifest(this.#options.commandManifest, () =>
+      neutralCommandManifest(this.#options.diagnostics.now()),
+    );
+  }
+
+  async #queryDiagnostics(): Promise<DiagnosticReadModel> {
+    this.#syncRuntimeEvents();
+    const now = this.#options.diagnostics.now();
+    const connection = this.#currentConnection();
+    const installed = await this.#currentInstalledManifest();
+    const installer = await this.#installState(installed);
+    const entries: DiagnosticEntry[] = [];
+    if (installer.status === "update-available") {
+      entries.push({
+        entryId: this.#options.diagnostics.newEntryId(),
+        scope: "installer",
+        level: "warning",
+        message: "A newer trusted Runtime artifact is available locally",
+        detail: {
+          ...(installer.version === undefined ? {} : { version: installer.version }),
+          ...(installer.availableVersion === undefined ? {} : { availableVersion: installer.availableVersion }),
+        },
+        occurredAt: now,
+      });
+    } else if (installed === undefined) {
+      entries.push({
+        entryId: this.#options.diagnostics.newEntryId(),
+        scope: "installer",
+        level: "warning",
+        message: "No trusted Runtime is installed",
+        occurredAt: now,
+      });
+    } else {
+      entries.push({
+        entryId: this.#options.diagnostics.newEntryId(),
+        scope: "installer",
+        level: "info",
+        message: "Trusted Runtime is installed",
+        detail: { version: installed.manifest.runtimeVersion },
+        occurredAt: now,
+      });
+    }
+    switch (connection.status) {
+      case "unavailable": {
+        const diagnostic = unavailableDiagnostic(
+          connection.unavailableCode === undefined
+            ? undefined
+            : {
+                code: connection.unavailableCode,
+                reason: connection.unavailableReason ?? "",
+              },
+        );
+        entries.push({
+          entryId: this.#options.diagnostics.newEntryId(),
+          scope: "host",
+          level: "warning",
+          message: diagnostic.message,
+          ...(diagnostic.detail === undefined ? {} : { detail: diagnostic.detail }),
+          occurredAt: now,
+        });
+        break;
+      }
+      case "connecting":
+        entries.push({
+          entryId: this.#options.diagnostics.newEntryId(),
+          scope: "host",
+          level: "info",
+          message: "Runtime is connecting",
+          occurredAt: now,
+        });
+        break;
+      case "disconnected": {
+        const diagnostic = disconnectDiagnostic(readDisconnect(this.#options.runtime));
+        entries.push({
+          entryId: this.#options.diagnostics.newEntryId(),
+          scope: "host",
+          level: "error",
+          message: diagnostic.message,
+          ...(diagnostic.detail === undefined ? {} : { detail: diagnostic.detail }),
+          occurredAt: connection.disconnectedAt ?? now,
+        });
+        break;
+      }
+      case "connected":
+        entries.push({
+          entryId: this.#options.diagnostics.newEntryId(),
+          scope: "runtime",
+          level: "info",
+          message: "Runtime is connected",
+          detail: {
+            runtimeEpoch: Number(connection.runtimeEpoch),
+            ...(connection.runtimeVersion === undefined ? {} : { runtimeVersion: connection.runtimeVersion }),
+            ...(connection.upstreamVersion === undefined ? {} : { upstreamVersion: connection.upstreamVersion }),
+          },
+          occurredAt: now,
+        });
+        break;
+    }
+    const currentCode = connection.disconnectCode ?? connection.unavailableCode;
+    const currentAt = connection.disconnectedAt;
+    for (const past of this.#runtimeLossDiagnostics) {
+      const sameCurrentLoss =
+        (connection.status === "disconnected" || connection.status === "unavailable") &&
+        past.detail?.code === currentCode &&
+        (currentAt === undefined || past.occurredAt === currentAt);
+      if (sameCurrentLoss) continue;
+      entries.push(past);
+    }
+    entries.push(...this.#conversationDiagnostics);
+    return buildDiagnosticsReadModel(now, { ...this.#options.authority }, entries);
+  }
+
+  async #queryHistory(input: {
+    readonly limit?: number;
+    readonly status?: SessionHistoryStatus;
+    readonly workspaceId?: WorkspaceId;
+  }): Promise<SessionHistoryReadModel> {
+    const requested = input.limit ?? HISTORY_DEFAULT_LIMIT;
+    if (!Number.isSafeInteger(requested) || requested < 1) {
+      throw clientError("INVALID_ARGUMENT", "history limit must be a positive integer");
+    }
+    if (input.status !== undefined && input.status !== "active" && input.status !== "archived" && input.status !== "closed") {
+      throw clientError("INVALID_ARGUMENT", "history status must be active, archived or closed");
+    }
+    const limit = Math.min(requested, HISTORY_MAX_LIMIT);
+    const catalog = await this.#options.catalog.list(
+      input.workspaceId === undefined ? undefined : { workspaceId: input.workspaceId },
+    );
+    const visible = catalog.filter(entry => !this.#options.evaluations?.sessionIds().has(entry.sessionId));
+    const filtered = input.status === undefined ? visible : visible.filter((entry) => entry.status === input.status);
+    const sorted = [...filtered].sort(
+      (left, right) =>
+        Number(right.pinned === true) - Number(left.pinned === true) ||
+        right.modifiedAt.localeCompare(left.modifiedAt) ||
+        left.sessionId.localeCompare(right.sessionId),
+    );
+    const entries = sorted.map((entry) => this.#mapHistoryEntry(entry));
+    return { entries: entries.slice(0, limit), total: entries.length };
+  }
+
+  #mapHistoryEntry(entry: HostCatalogEntry): SessionHistoryEntry {
+    const title = sanitizeDisplayText(entry.title, 120);
+    const summary = sanitizeDisplayText(entry.summary, 200);
+    // Boundary: the catalog's opaque session identity becomes the client
+    // SessionId brand; the id itself is never a path.
+    const sessionId = entry.sessionId as SessionId;
+    return {
+      historyId: historyIdFor(entry.sessionId),
+      threadId: threadIdFor(entry.sessionId),
+      environmentId: environmentIdFor(this.#options.authority.authorityId),
+      ...(entry.sessionId.length === 0 ? {} : { sessionId }),
+      ...(title === undefined ? {} : { title }),
+      ...(summary === undefined ? {} : { summary }),
+      startedAt: entry.createdAt ?? entry.modifiedAt,
+      lastActiveAt: entry.modifiedAt,
+      messageCount: entry.messageCount,
+      status: entry.status,
+      ...(entry.pinned === undefined ? {} : { pinned: entry.pinned }),
+    };
+  }
+
+  #querySessionState(): OperatorStateSnapshot {
+    // Query results leave the facade: copy the operator pack exactly once here.
+    const snapshot = this.#snapshotCopy();
+    if (snapshot === undefined) {
+      throw unavailableError("session.state requires a Runtime snapshot");
+    }
+    return snapshot;
+  }
+
+  async #queryHome(): Promise<HomeReadModel> {
+    const snapshot = this.#currentSnapshotRef();
+    if (snapshot === undefined) {
+      throw unavailableError("home.get requires a Runtime snapshot");
+    }
+    const catalog = await this.#options.catalog.list();
+    // Archived sessions are not resumable; the home page only offers live threads.
+    const recentThreads = [...catalog]
+      .filter((entry) => entry.status !== "archived")
+      .sort(
+        (left, right) => right.modifiedAt.localeCompare(left.modifiedAt) || left.sessionId.localeCompare(right.sessionId),
+      )
+      .slice(0, HOME_RECENT_THREADS)
+      .map((entry) => {
+        const title = sanitizeDisplayText(entry.title, 120);
+        return {
+          threadId: threadIdFor(entry.sessionId),
+          ...(title === undefined ? {} : { title }),
+          lastActiveAt: entry.modifiedAt,
+        };
+      });
+    const workspaces = this.#options.workspaces;
+    const recentWorkspaces =
+      workspaces === undefined ? undefined : (await workspaces.list()).workspaces.slice(0, HOME_RECENT_WORKSPACES);
+    return {
+      authority: { ...this.#options.authority },
+      runtime: this.#currentConnection(),
+      // External boundary: copy the snapshot read at the start of this query.
+      snapshot: structuredClone(snapshot),
+      recentThreads,
+      ...(recentWorkspaces === undefined ? {} : { recentWorkspaces }),
+    };
+  }
+
+  async #queryProjects(): Promise<WorkspaceListReadModel> {
+    const service = this.#options.workspaces;
+    if (service === undefined) {
+      return { workspaces: [] };
+    }
+    const model = await service.list();
+    this.#lastWorkspaceModel = model;
+    return model;
+  }
+
+  async #queryUsage(): Promise<TokenUsageReadModel> {
+    const service = this.#options.usage;
+    if (service === undefined) {
+      return {
+        generatedAt: this.#options.diagnostics.now(),
+        days: [],
+        models: [],
+        byModel: [],
+        hours: [],
+        unavailableReason: "Host 未接入用量适配器。",
+      };
+    }
+    return service.get();
+  }
+
+  async #queryTranscript(input: {
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<ConversationTranscriptPage> {
+    if (!this.#hasSnapshot()) {
+      throw unavailableError("session.transcript.read requires a connected Runtime");
+    }
+    const reader = this.#options.runtime?.readTranscript;
+    const session = this.#runtimeSession();
+    if (reader === undefined && session === undefined) {
+      throw unavailableError("session.transcript.read requires a connected Runtime");
+    }
+    const raw = reader === undefined ? await session!.readTranscript(input) : await reader(input);
+    let page: ConversationTranscriptPage;
+    try {
+      page = parseConversationTranscriptPage(raw);
+    } catch (error) {
+      throw clientError(
+        "INTERNAL_ERROR",
+        error instanceof Error ? error.message : "malformed transcript page",
+      );
+    }
+    const current = this.#currentSnapshotRef();
+    if (current === undefined) {
+      throw unavailableError("session.transcript.read requires a connected Runtime");
+    }
+    if (page.runtimeEpoch !== current.runtimeEpoch) {
+      throw clientError("STALE_EPOCH", "transcript page runtime epoch does not match the current session");
+    }
+    if (page.sessionId !== current.sessionId) {
+      throw clientError("CURSOR_STALE", "transcript page session does not match the current session");
+    }
+    return page;
+  }
+
+  async #queryConversationOpen(
+    input: ClientQueryRequest<"conversation.open">["input"],
+  ): Promise<ConversationOpenResult> {
+    const session = this.#runtimeSession();
+    if (session === undefined) {
+      throw unavailableError("conversation.open requires a connected Runtime session");
+    }
+    try {
+      return parseConversationOpenResult(await session.openConversation(input));
+    } catch (error) {
+      throw toClientError(error);
+    }
+  }
+
+  async #queryArchiveTranscript(input: {
+    readonly sessionId: SessionId;
+    readonly agentId?: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<ConversationTranscriptReadPage> {
+    const archive = this.#options.archive;
+    if (archive === undefined) {
+      throw unavailableError("session.transcript.readPage is not available");
+    }
+    try {
+      return await archive.readPage(input, this.#readLifetime.signal);
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code === "SESSION_NOT_FOUND" || code === "AGENT_NOT_FOUND") {
+        throw unavailableError(error instanceof Error ? error.message : "session is not available");
+      }
+      throw toClientError(error);
+    }
+  }
+
+  async #queryPersistedAgents(input: {
+    readonly sessionId: SessionId;
+  }): Promise<{ readonly sessionId: SessionId; readonly agents: readonly HarnessAgentSnapshot[] }> {
+    const archive = this.#options.archive;
+    if (archive === undefined || archive.listPersistedAgents === undefined) {
+      throw unavailableError("session.agents.list is not available");
+    }
+    try {
+      const agents = await archive.listPersistedAgents(input.sessionId);
+      return { sessionId: input.sessionId, agents: [...agents] };
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code === "SESSION_NOT_FOUND") {
+        throw unavailableError("session is not available");
+      }
+      throw toClientError(error);
+    }
+  }
+
+  async #queryAgentTranscript(input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<AgentTranscriptPage> {
+    if (!this.#hasSnapshot()) {
+      throw unavailableError("agent.transcript.read requires a connected Runtime");
+    }
+    const reader = this.#options.runtime?.readAgentTranscript;
+    const session = this.#runtimeSession();
+    if (reader === undefined && (session === undefined || session.readAgentTranscript === undefined)) {
+      throw unavailableError("agent.transcript.read requires a connected Runtime");
+    }
+    const run =
+      reader === undefined
+        ? session!.readAgentTranscript!.bind(session!)
+        : () => reader(input);
+    try {
+      return await run(input);
+    } catch (error) {
+      throw toClientError(error);
+    }
+  }
+
+  async #queryAgentConversation(input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<ConversationTranscriptPage> {
+    if (!this.#hasSnapshot()) {
+      throw unavailableError("agent.conversation.read requires a connected Runtime");
+    }
+    const reader = this.#options.runtime?.readAgentConversation;
+    const session = this.#runtimeSession();
+    if (reader === undefined && (session === undefined || session.readAgentConversation === undefined)) {
+      throw unavailableError("agent.conversation.read requires a connected Runtime");
+    }
+    const run =
+      reader === undefined
+        ? session!.readAgentConversation!.bind(session!)
+        : () => reader(input);
+    try {
+      return await run(input);
+    } catch (error) {
+      throw toClientError(error);
+    }
+  }
+
+  /**
+   * Read-only session telemetry with provenance. Priority: live Runtime
+   * snapshot → persisted "last observed" record (exact archive revision) →
+   * one-shot OMP probe over a temporary transcript copy. The probe copy and
+   * any absolute path stay Host-internal.
+   */
+  async #querySessionTelemetry(input: { readonly sessionId: SessionId; readonly refresh?: boolean }): Promise<SessionTelemetryReadResult> {
+    const archive = this.#options.archive;
+    if (archive === undefined || archive.readRevision === undefined || archive.createProbeCopy === undefined) {
+      throw unavailableError("session.telemetry.read requires the session archive");
+    }
+    const liveSnapshot = this.#currentSnapshotRef();
+    if (liveSnapshot !== undefined && liveSnapshot.sessionId === input.sessionId && liveSnapshot.telemetry !== undefined) {
+      // The published snapshot owns this telemetry object; the read result is an
+      // external boundary, so copy the payload (not the whole operator pack).
+      return this.#telemetryReadResult(input.sessionId, "live", "current-live", structuredClone(liveSnapshot.telemetry));
+    }
+    let revision: { sessionId: string; transcriptRevision: string };
+    try {
+      revision = await archive.readRevision(input.sessionId);
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code === "SESSION_NOT_FOUND") {
+        throw unavailableError("session is not available");
+      }
+      throw toClientError(error);
+    }
+    if (revision.sessionId !== input.sessionId) {
+      throw unavailableError("session is not available");
+    }
+    const store = this.#options.telemetryStore;
+    if (store !== undefined && !input.refresh) {
+      const persisted = await this.#readPersistedTelemetry(store, input.sessionId, revision.transcriptRevision);
+      if (persisted !== undefined) {
+        return this.#telemetryReadResult(input.sessionId, "persisted", "last-observed", persisted);
+      }
+    }
+    const run = (signal: AbortSignal) => this.#probeSessionTelemetry(input.sessionId, revision.transcriptRevision, signal);
+    const probed = this.#options.archiveTelemetry
+      ? await this.#options.archiveTelemetry.read(`${this.#options.workspaceCwd?.()}\0${input.sessionId}\0${revision.transcriptRevision}`, this.#readLifetime.signal, run, input.refresh)
+      : await run(this.#readLifetime.signal);
+    const latest = this.#currentSnapshotRef();
+    if (latest?.sessionId === input.sessionId && latest.telemetry) return this.#telemetryReadResult(input.sessionId, "live", "current-live", latest.telemetry);
+    if (probed !== undefined) return probed;
+    throw unavailableError("session telemetry is not available for this session");
+  }
+
+  async #readPersistedTelemetry(
+    store: { read(sessionId: string, revision: string): Promise<unknown> },
+    sessionId: SessionId,
+    revision: string,
+  ): Promise<SessionTelemetrySnapshot | undefined> {
+    try {
+      const record = (await store.read(sessionId, revision)) as { telemetry?: unknown } | undefined;
+      if (record === undefined || record.telemetry === undefined) return undefined;
+      const telemetry = parseSessionTelemetrySnapshot(record.telemetry);
+      return telemetry.sessionId === sessionId ? telemetry : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async #probeSessionTelemetry(sessionId: SessionId, transcriptRevision: string, signal: AbortSignal): Promise<SessionTelemetryReadResult | undefined> {
+    const probe = this.#options.telemetryProbe;
+    const workspace = this.#options.telemetryProbeWorkspace;
+    const archive = this.#options.archive;
+    const allowedCwd = this.#options.workspaceCwd?.();
+    if (
+      probe === undefined ||
+      workspace === undefined ||
+      archive?.createProbeCopy === undefined ||
+      allowedCwd === undefined ||
+      allowedCwd.length === 0
+    ) {
+      return undefined;
+    }
+    let directory: string | undefined;
+    try {
+      signal.throwIfAborted();
+      directory = await workspace.create();
+      signal.throwIfAborted();
+      const copy = await archive.createProbeCopy(sessionId, directory);
+      if (copy.transcriptRevision !== transcriptRevision) return undefined;
+      signal.throwIfAborted();
+      const outcome = await probe.run({
+        sessionId,
+        sessionFile: copy.temporarySessionFile,
+        allowedCwd,
+        signal,
+      });
+      if (!outcome.ok) return undefined;
+      const telemetry = parseSessionTelemetrySnapshot(outcome.telemetry);
+      if (telemetry.sessionId !== sessionId) return undefined;
+      return this.#telemetryReadResult(sessionId, "archive-recomputed", "current-environment-recomputed", telemetry);
+    } catch {
+      return undefined;
+    } finally {
+      if (directory !== undefined) await workspace.remove(directory).catch(() => {});
+    }
+  }
+
+  #telemetryReadResult(
+    sessionId: SessionId,
+    source: "live" | "persisted" | "archive-recomputed",
+    semantics: "current-live" | "last-observed" | "current-environment-recomputed",
+    telemetry: unknown,
+  ): SessionTelemetryReadResult {
+    const snapshot = parseSessionTelemetrySnapshot(telemetry);
+    if (snapshot.sessionId !== sessionId) {
+      throw unavailableError("session telemetry identity mismatch");
+    }
+    return parseSessionTelemetryReadResult({ sessionId, source, semantics, telemetry: snapshot });
+  }
+
+  #sharedProjectRead<T>(name: string, run: () => T | Promise<T>): Promise<T> {
+    return this.#options.projectReads?.read(`${this.#options.workspaceCwd?.()}\0${name}`, run) ?? Promise.resolve(run());
+  }
+
+  async #querySkills(): Promise<ExtensibilityReadModel> {
+    const service = this.#options.extensibility;
+    if (service === undefined) {
+      return {
+        skills: [],
+        plugins: [],
+        warnings: [],
+        generatedAt: this.#options.diagnostics.now(),
+        unavailableReason: "Host 未接入技能 / 插件适配器。",
+      };
+    }
+    return this.#sharedProjectRead("skills", service.get.bind(service));
+  }
+
+  async #queryMcp(): Promise<McpReadModel> {
+    const service = this.#options.mcp;
+    if (service === undefined) {
+      return {
+        servers: [],
+        warnings: [],
+        generatedAt: this.#options.diagnostics.now(),
+        unavailableReason: "Host 未接入 MCP 适配器。",
+      };
+    }
+    return service.get();
+  }
+
+  async #queryMcpLogs(input: { readonly name: string }): Promise<McpLogsReadModel> {
+    const service = this.#options.mcp;
+    if (service === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", "mcp.logs.get is not available: no MCP adapter is wired");
+    }
+    return service.logs(input);
+  }
+
+  async #queryAgentDefinitions(): Promise<AgentDefinitionsReadModel> {
+    const service = this.#options.agentDefinitions;
+    if (service === undefined) {
+      return {
+        agents: [],
+        warnings: [],
+        builtinToolNames: [],
+        roleAliases: [],
+        projectScopeAvailable: false,
+        generatedAt: this.#options.diagnostics.now(),
+        unavailableReason: "Host 未接入子代理定义适配器。",
+      };
+    }
+    return service.get();
+  }
+
+  async #queryModels(): Promise<ModelConfigReadModel> {
+    const service = this.#options.models;
+    if (service === undefined) {
+      return {
+        providers: [],
+        presets: [],
+        roles: [],
+        cycleOrder: [],
+        availableModels: [],
+        loginProviders: [],
+        generatedModelsYml: "providers: {}\n",
+        generatedConfigYml: "modelRoles: {}\n",
+        runtimeEffectHint: "Host 未接入模型配置适配器。",
+        loginAvailable: false,
+        ompAvailable: false,
+        unavailableReason: "Host 未接入模型配置适配器。",
+        modelRoleStorage: "global",
+        projectScopeAvailable: false,
+        modelProviderOrder: [],
+        fallbackChains: {},
+        fallbackRevertPolicy: "cooldown-expiry",
+        webSearch: {
+          enabled: true,
+          order: [],
+          exclude: [],
+          timeoutSeconds: 60,
+          geminiModel: "",
+          providers: [],
+          advanced: { searxng: { endpoint: "", tokenSet: false, basicUsername: "", passwordSet: false }, exa: { enabled: true, searchDelayMs: 1000 } },
+        },
+      };
+    }
+    return this.#sharedProjectRead("models", service.get.bind(service));
+  }
+
+  async #currentInstalledManifest(): Promise<{ readonly manifest: RuntimeInstallationManifest } | undefined> {
+    try {
+      return await this.#options.backend.installer.currentManifest();
+    } catch {
+      return undefined;
+    }
+  }
+
+  async #installState(installed: { readonly manifest: RuntimeInstallationManifest } | undefined): Promise<RuntimeInstallState> {
+    if (this.#installInFlight) {
+      return { status: "installing", signature: "unknown" };
+    }
+    const probe = this.#options.installProbe;
+    if (probe !== undefined) {
+      return await probe();
+    }
+    if (installed !== undefined) {
+      return { status: "installed", version: installed.manifest.runtimeVersion, signature: "verified" };
+    }
+    return { status: "not-installed", signature: "unknown" };
+  }
+
+  // ------------------------------------------------------------------
+  // Commands
+  // ------------------------------------------------------------------
+
+  async #commandInstall(request: ClientCommandRequest<"runtime.install">): Promise<ClientCommandAccepted<"runtime.install">> {
+    validateEnvelope(request);
+    const channel = request.input.channel;
+    if (channel !== undefined && channel !== "stable" && channel !== "canary") {
+      throw clientError("INVALID_ARGUMENT", "runtime.install channel must be 'stable' or 'canary'");
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: "runtime.install", requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted: ClientCommandAccepted<"runtime.install"> = {
+      commandName: "runtime.install",
+      requestId: request.requestId,
+      status: "accepted",
+      acceptedAt,
+    };
+    this.#installInFlight = true;
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runInstall(channel, request.requestId);
+    return accepted;
+  }
+
+  async #commandEnsure(request: ClientCommandRequest<"runtime.ensure">): Promise<ClientCommandAccepted<"runtime.ensure">> {
+    validateEnvelope(request);
+    if (request.input === null || typeof request.input !== "object" || Array.isArray(request.input)) {
+      throw clientError("INVALID_ARGUMENT", "runtime.ensure input must be an object");
+    }
+    const keys = Object.keys(request.input);
+    if (keys.some((key) => key !== "force")) {
+      throw clientError("INVALID_ARGUMENT", "runtime.ensure input only accepts force");
+    }
+    if (request.input.force !== undefined && typeof request.input.force !== "boolean") {
+      throw clientError("INVALID_ARGUMENT", "runtime.ensure force must be boolean");
+    }
+    const ensure = this.#options.runtime?.ensure;
+    if (ensure === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", "runtime.ensure is not available: no Runtime session port is wired");
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: "runtime.ensure", requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted: ClientCommandAccepted<"runtime.ensure"> = {
+      commandName: "runtime.ensure",
+      requestId: request.requestId,
+      status: "accepted",
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    const force = request.input.force === true;
+    void this.#runEnsure(ensure, request.requestId, force);
+    return accepted;
+  }
+
+  async #runEnsure(
+    ensure: (input?: { readonly force?: boolean }) => Promise<void>,
+    requestId: CommandRequestId,
+    force: boolean,
+  ): Promise<void> {
+    try {
+      await ensure(force ? { force: true } : {});
+      this.#syncRuntimeEvents();
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName: "runtime.ensure",
+        status: "completed",
+        result: this.#currentConnection(),
+        observedAt: this.#options.diagnostics.now(),
+      });
+    } catch (error) {
+      this.#syncRuntimeEvents();
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName: "runtime.ensure",
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      });
+    }
+  }
+
+  async #commandResume(request: ClientCommandRequest<"session.resume">): Promise<ClientCommandAccepted<"session.resume">> {
+    return this.#commandSemantic(request, "session.resume");
+  }
+
+  async #commandCreate(request: ClientCommandRequest<"session.create">): Promise<ClientCommandAccepted<"session.create">> {
+    return this.#commandSemantic(request, "session.create");
+  }
+
+  async #commandDrop(request: ClientCommandRequest<"session.drop">): Promise<ClientCommandAccepted<"session.drop">> {
+    return this.#commandSemantic(request, "session.drop");
+  }
+
+  /**
+   * `session.archive` / `session.unarchive`: Host-owned cold-archive moves.
+   * Unarchive never touches the Runtime. Archive of a live resident session
+   * first aborts a streaming turn and switches the Runtime off that file.
+   * Like the other semantic commands they need an explicit injected service
+   * and fail closed without one.
+   */
+  async #commandArchiveToggle(
+    request: ClientCommandRequest<"session.archive" | "session.unarchive">,
+  ): Promise<ClientCommandAccepted<"session.archive" | "session.unarchive">> {
+    validateEnvelope(request);
+    const service = this.#options.commands;
+    if (service === undefined) {
+      throw clientError(
+        "CAPABILITY_UNAVAILABLE",
+        `${request.commandName} is not available: no semantic command service is wired`,
+      );
+    }
+    const run = request.commandName === "session.archive" ? service.archive : service.unarchive;
+    if (run === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available`);
+    }
+    if (!isThreadCommandInput(request.input)) {
+      throw clientError("INVALID_ARGUMENT", `${request.commandName} threadId must not be empty`);
+    }
+    const threadId = request.input.threadId;
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted = {
+      commandName: request.commandName,
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runArchiveToggle(() => run({ threadId }), request.requestId, request.commandName);
+    return accepted;
+  }
+
+  async #runArchiveToggle(
+    run: () => ConfigWriteResult | Promise<ConfigWriteResult>,
+    requestId: CommandRequestId,
+    commandName: "session.archive" | "session.unarchive" | "session.delete",
+  ): Promise<void> {
+    try {
+      const result = await run();
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  /**
+   * `session.delete`: destructive Host-owned removal of the thread's session
+   * files and every related local artifact. Like archive it needs an explicit
+   * injected service and fails closed without one; the Renderer must confirm
+   * before issuing this command.
+   */
+  async #commandDelete(request: ClientCommandRequest<"session.delete">): Promise<ClientCommandAccepted<"session.delete">> {
+    validateEnvelope(request);
+    const service = this.#options.commands;
+    if (service?.delete === undefined) {
+      throw clientError(
+        "CAPABILITY_UNAVAILABLE",
+        "session.delete is not available: no delete capability is wired on the semantic command service",
+      );
+    }
+    if (!isThreadCommandInput(request.input)) {
+      throw clientError("INVALID_ARGUMENT", "session.delete threadId must not be empty");
+    }
+    if (request.input.deleteManagedArtifacts !== undefined && typeof request.input.deleteManagedArtifacts !== "boolean") throw clientError("INVALID_ARGUMENT", "Invalid managed artifact deletion choice");
+    const threadId = request.input.threadId;
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: "session.delete", requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted: ClientCommandAccepted<"session.delete"> = {
+      commandName: "session.delete",
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runArchiveToggle(() => service.delete!({ threadId, ...(request.input.deleteManagedArtifacts === undefined ? {} : { deleteManagedArtifacts: request.input.deleteManagedArtifacts }) }), request.requestId, "session.delete");
+    return accepted;
+  }
+
+  async #commandRespond(request: ClientCommandRequest<"interaction.respond">): Promise<ClientCommandAccepted<"interaction.respond">> {
+    return this.#commandSemantic(request, "interaction.respond");
+  }
+
+  /**
+   * `permissions.mode.set`: session-exclusive approval mode sync (plan §5.4).
+   * Requires a live Runtime snapshot and the injected semantic service.
+   * A live turn records the mode immediately and writes it on the next user
+   * turn. The receipt carries the sync statistics — never a fabricated
+   * "complete".
+   */
+  async #commandSetApprovalMode(
+    request: ClientCommandRequest<"permissions.mode.set">,
+  ): Promise<ClientCommandAccepted<"permissions.mode.set">> {
+    validateEnvelope(request);
+    const service = this.#options.commands;
+    if (service?.setApprovalMode === undefined) {
+      throw clientError(
+        "CAPABILITY_UNAVAILABLE",
+        "permissions.mode.set is not available: no semantic command service is wired",
+      );
+    }
+    if (!this.#hasSnapshot()) {
+      throw unavailableError("permissions.mode.set requires a Runtime snapshot");
+    }
+    const mode = request.input.mode;
+    if (mode !== "always-ask" && mode !== "always-ask-cached" && mode !== "write" && mode !== "yolo") {
+      throw clientError("INVALID_ARGUMENT", "permissions.mode.set mode must be always-ask, always-ask-cached, write or yolo");
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: "permissions.mode.set", requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted: ClientCommandAccepted<"permissions.mode.set"> = {
+      commandName: "permissions.mode.set",
+      requestId: request.requestId,
+      status: "accepted",
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runSetApprovalMode(() => service.setApprovalMode!({ mode }), request.requestId);
+    return accepted;
+  }
+
+  async #runSetApprovalMode(
+    run: () =>
+      | {
+          readonly mode: "always-ask" | "always-ask-cached" | "write" | "yolo";
+          readonly syncStatus: "complete" | "partial";
+          readonly appliedSessions: number;
+          readonly failedSessions: number;
+        }
+      | Promise<{
+          readonly mode: "always-ask" | "always-ask-cached" | "write" | "yolo";
+          readonly syncStatus: "complete" | "partial";
+          readonly appliedSessions: number;
+          readonly failedSessions: number;
+        }>,
+    requestId: CommandRequestId,
+  ): Promise<void> {
+    try {
+      const result = await run();
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName: "permissions.mode.set",
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName: "permissions.mode.set",
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  async #commandModels(
+    request: ClientCommandRequest<ModelsCommandName>,
+  ): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const service = this.#options.models;
+    if (service === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available: no models adapter is wired`);
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted = {
+      commandName: request.commandName,
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runModelsCommand(request, service);
+    return accepted;
+  }
+
+  async #runModelsCommand(
+    request: ClientCommandRequest<ModelsCommandName>,
+    service: HostModelsService,
+  ): Promise<void> {
+    try {
+      let result: ConfigWriteResult | ModelProviderTestResult | ModelDiscoveryResult | import("@juling-harness/client-contract").ModelCatalogRefreshResult;
+      switch (request.commandName) {
+        case "models.provider.upsert":
+          result = await service.upsertProvider(request.input as never);
+          break;
+        case "models.provider.delete":
+          result = await service.deleteProvider(request.input as { readonly id: string; readonly expectedHash?: string });
+          break;
+        case "models.provider.setEnabled":
+          result = await service.setProviderEnabled(request.input as never);
+          break;
+        case "models.roles.set":
+          result = await service.setRole(request.input as { readonly roleId: string; readonly selector: string });
+          break;
+        case "models.roles.write":
+          result = await service.writeRoles(request.input as never);
+          break;
+        case "models.roles.create":
+          result = await service.createRole(request.input as never);
+          break;
+        case "models.roles.delete":
+          result = await service.deleteRole(request.input as { readonly roleId: string });
+          break;
+        case "models.roleStorage.set":
+          result = await service.setRoleStorage(request.input as { readonly storage: "global" | "project" });
+          break;
+        case "models.fallback.set":
+          result = await service.setFallback(request.input as never);
+          break;
+        case "models.providerOrder.set":
+          result = await service.setProviderOrder(request.input as { readonly order: ReadonlyArray<string> });
+          break;
+        case "models.yml.write":
+          result = await service.writeModelsYml(request.input as never);
+          break;
+        case "models.login.start":
+          result = await service.startLogin(request.input as { readonly providerId: string; readonly loginId?: string });
+          break;
+        case "models.login.logout":
+          result = await service.logout(request.input as { readonly providerId: string });
+          break;
+        case "models.provider.test":
+          result = await service.testProvider(request.input as { readonly providerId?: string; readonly api?: string; readonly endpointUrl?: string; readonly apiKey?: string });
+          break;
+        case "models.provider.probe":
+          result = await service.probeProvider(request.input as never);
+          break;
+        case "models.catalog.refresh":
+          if (!service.refreshCatalog) throw clientError("CAPABILITY_UNAVAILABLE", "Model catalog updates are unavailable");
+          result = await service.refreshCatalog();
+          break;
+        case "models.discovery.refresh":
+          result = await service.refreshDiscovery();
+          break;
+        case "models.cycleOrder.set":
+          result = await service.setCycleOrder(request.input as { readonly order: ReadonlyArray<string> });
+          break;
+        case "models.webSearch.set":
+          result = await service.setWebSearch(request.input as never);
+          break;
+        case "models.webSearch.credential.set":
+          result = await service.setWebSearchApiKey(request.input as never);
+          break;
+        case "models.webSearch.credential.remove":
+          result = await service.removeWebSearchApiKey(request.input as never);
+          break;
+      }
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  /**
+   * Shared gate for the whole-package/whole-skill toggles: an explicit
+   * injected extensibility service is required before anything is accepted;
+   * a missing seam fails closed with CAPABILITY_UNAVAILABLE and no fake
+   * completion is ever published. Like `models.*`, these are Host-owned
+   * disk mutations and never require a Runtime snapshot.
+   */
+  async #commandExtensibility(
+    request: ClientCommandRequest<"plugins.setEnabled" | "skills.setEnabled" | "skills.reveal" | "skills.revealRoot">,
+  ): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const service = this.#options.extensibility;
+    if (
+      service?.setEnabled === undefined
+      || service.setSkillEnabled === undefined
+      || service.revealSkill === undefined
+      || service.revealSkillRoot === undefined
+    ) {
+      throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available: no extensibility adapter is wired`);
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt } as ClientCommandAccepted;
+    }
+    const accepted = {
+      commandName: request.commandName,
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runExtensibilityCommand(request, service);
+    return accepted;
+  }
+
+  async #runExtensibilityCommand(
+    request: ClientCommandRequest<"plugins.setEnabled" | "skills.setEnabled" | "skills.reveal" | "skills.revealRoot">,
+    service: HostExtensibilityService,
+  ): Promise<void> {
+    try {
+      const result =
+        request.commandName === "plugins.setEnabled"
+          ? await service.setEnabled(request.input as never)
+          : request.commandName === "skills.setEnabled"
+            ? await service.setSkillEnabled(request.input as never)
+            : request.commandName === "skills.reveal"
+              ? await service.revealSkill(request.input as never)
+              : await service.revealSkillRoot(request.input as never);
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  /**
+   * MCP enable/disable, refresh, and one-shot probe: Host-owned; no Runtime required.
+   */
+  async #commandMcp(
+    request: ClientCommandRequest<"mcp.setEnabled" | "mcp.setInstructions" | "mcp.refresh" | "mcp.test">,
+  ): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const service = this.#options.mcp;
+    if (service === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available: no MCP adapter is wired`);
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt } as ClientCommandAccepted;
+    }
+    const accepted = {
+      commandName: request.commandName,
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runMcpCommand(request, service);
+    return accepted;
+  }
+
+  async #runMcpCommand(
+    request: ClientCommandRequest<"mcp.setEnabled" | "mcp.setInstructions" | "mcp.refresh" | "mcp.test">,
+    service: HostMcpService,
+  ): Promise<void> {
+    try {
+      let result: ConfigWriteResult | McpTestResult;
+      switch (request.commandName) {
+        case "mcp.setInstructions":
+          if (!service.setInstructions) throw clientError("CAPABILITY_UNAVAILABLE", "MCP instructions are unavailable in this Host");
+          result = await service.setInstructions(request.input as never);
+          break;
+        case "mcp.setEnabled":
+          result = await service.setEnabled(request.input as never);
+          break;
+        case "mcp.refresh":
+          result = await service.refresh(request.input as never);
+          break;
+        case "mcp.test":
+          result = await service.test(request.input as never);
+          break;
+      }
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  /**
+   * Shared gate for task-agent definition mutations: an explicit injected
+   * service is required before anything is accepted; a missing seam fails
+   * closed with CAPABILITY_UNAVAILABLE. These are Host-owned disk writes
+   * and never require a Runtime snapshot.
+   */
+  async #commandAgentDefinitions(
+    request: ClientCommandRequest<AgentDefinitionsCommandName>,
+  ): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const service = this.#options.agentDefinitions;
+    if (service === undefined) {
+      throw clientError(
+        "CAPABILITY_UNAVAILABLE",
+        `${request.commandName} is not available: no agent-definitions adapter is wired`,
+      );
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt } as ClientCommandAccepted;
+    }
+    const accepted = {
+      commandName: request.commandName,
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runAgentDefinitionsCommand(request, service);
+    return accepted;
+  }
+
+  async #runAgentDefinitionsCommand(
+    request: ClientCommandRequest<AgentDefinitionsCommandName>,
+    service: HostAgentDefinitionsService,
+  ): Promise<void> {
+    try {
+      let result: ConfigWriteResult;
+      switch (request.commandName) {
+        case "agents.definition.upsert":
+          result = await service.upsert(request.input as never);
+          break;
+        case "agents.definition.delete":
+          result = await service.delete(request.input as never);
+          break;
+        case "agents.definition.configure":
+          result = await service.configure(request.input as never);
+          break;
+      }
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  /**
+   * Shared gate for the two workspace commands: an explicit injected
+   * service is required before anything is accepted; a missing seam fails
+   * closed with CAPABILITY_UNAVAILABLE and no fake completion is published.
+   * User cancellation of `workspace.pick` surfaces as a failed receipt,
+   * never as a fabricated success.
+   */
+  async #commandWorkspace(
+    request: ClientCommandRequest<"workspace.open" | "workspace.pick">,
+  ): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const service = this.#options.workspaces;
+    if (service === undefined) {
+      throw clientError(
+        "CAPABILITY_UNAVAILABLE",
+        `${request.commandName} is not available: no workspaces adapter is wired`,
+      );
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted = {
+      commandName: request.commandName,
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runWorkspaceCommand(request, service);
+    return accepted;
+  }
+
+  async #commandWorkspaceFile(
+    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">,
+  ): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const service = this.#options.workspaceFiles;
+    if (service === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available: no workspace file adapter is wired`);
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted = { commandName: request.commandName, requestId: request.requestId, status: "accepted" as const, acceptedAt };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runWorkspaceFileCommand(request, service);
+    return accepted;
+  }
+
+  async #runWorkspaceFileCommand(
+    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">,
+    service: HostWorkspaceFileService,
+  ): Promise<void> {
+    try {
+      const input = request.input as { readonly workspaceId: WorkspaceId; readonly path: string };
+      if (request.commandName === "workspace.file.writeText" && !service.writeText) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持文件保存，请更新 Host");
+      const result = request.commandName === "workspace.file.writeText"
+        ? await service.writeText!(request.input as import("@juling-harness/client-contract").WorkspaceFileWrite)
+        : request.commandName === "workspace.file.create" ? await service.createFile(input) : await service.createDirectory(input);
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  async #runWorkspaceCommand(
+    request: ClientCommandRequest<"workspace.open" | "workspace.pick">,
+    service: HostWorkspaceService,
+  ): Promise<void> {
+    try {
+      const result =
+        request.commandName === "workspace.open"
+          ? await service.open(request.input as { readonly workspaceId: WorkspaceId })
+          : await service.pick(request.input as { readonly name?: string });
+      this.#lastWorkspaceModel = result;
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  async #commandUsage(request: ClientCommandRequest<"usage.openDashboard">): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const service = this.#options.usage;
+    if (service === undefined) {
+      throw clientError(
+        "CAPABILITY_UNAVAILABLE",
+        `${request.commandName} is not available: no usage adapter is wired`,
+      );
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted = {
+      commandName: request.commandName,
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runUsageCommand(request, service);
+    return accepted;
+  }
+
+  async #runUsageCommand(
+    request: ClientCommandRequest<"usage.openDashboard">,
+    service: HostUsageService,
+  ): Promise<void> {
+    try {
+      const result = await service.openDashboard();
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  /**
+   * Shared gate for the semantic session/interaction commands: an explicit injected
+   * service is required before anything is accepted. `session.drop` and
+   * `interaction.respond` also need a live Runtime snapshot.
+   * `session.create` / `session.resume` must not: they start or rebind a
+   * Runtime even when no snapshot exists yet.
+   * Missing pieces fail closed with CAPABILITY_UNAVAILABLE / UNAVAILABLE
+   * and no fake completion is ever published.
+   */
+  async #commandSemantic<TName extends "session.create" | "session.resume" | "session.drop" | "interaction.respond">(
+    request: ClientCommandRequest<TName>,
+    commandName: TName,
+  ): Promise<ClientCommandAccepted<TName>> {
+    validateEnvelope(request);
+    const service = this.#options.commands;
+    if (service === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", `${commandName} is not available: no semantic command service is wired`);
+    }
+    if (commandName === "session.create" && service.create === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", "session.create is not available");
+    }
+    if (commandName !== "session.create" && commandName !== "session.resume" && !this.#hasSnapshot()) {
+      throw unavailableError(`${commandName} requires a Runtime snapshot`);
+    }
+    this.#validateSemanticInput(commandName, request.input);
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted: ClientCommandAccepted<TName> = {
+      commandName,
+      requestId: request.requestId,
+      status: "accepted",
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    const input = request.input;
+    switch (commandName) {
+      case "session.create":
+        void this.#runSemanticCommand(() => service.create!(input as { noContextFiles?: boolean }), request.requestId, commandName);
+        break;
+      case "session.resume":
+      case "session.drop": {
+        // Re-narrow with the same guard used for validation so the typed
+        // fields become readable (TS cannot narrow CommandInput<TName>).
+        if (!isThreadCommandInput(input)) {
+          throw clientError("INVALID_ARGUMENT", `${commandName} threadId must not be empty`);
+        }
+        const threadId = input.threadId;
+        if (commandName === "session.resume") {
+          void this.#runSemanticCommand(() => service.resume({ threadId, ...(input.model === undefined ? {} : { model: input.model }) }), request.requestId, commandName);
+        } else {
+          void this.#runSemanticCommand(
+            () => service.drop({ threadId, requestId: request.requestId }),
+            request.requestId,
+            commandName,
+          );
+        }
+        break;
+      }
+      case "interaction.respond": {
+        if (!isInteractionCommandInput(input)) {
+          throw clientError("INVALID_ARGUMENT", "interaction.respond interactionId/decision are invalid");
+        }
+        const interactionId = input.interactionId;
+        const leaseGeneration = input.leaseGeneration;
+        const decision = input.decision;
+        void this.#runSemanticCommand(
+          () =>
+            service.respond({
+              interactionId,
+              leaseGeneration,
+              decision,
+              ...(input.value === undefined ? {} : { value: input.value }),
+            }),
+          request.requestId,
+          commandName,
+        );
+        break;
+      }
+    }
+    return accepted;
+  }
+
+  #validateSemanticInput(
+    commandName: "session.create" | "session.resume" | "session.drop" | "interaction.respond",
+    input: unknown,
+  ): void {
+    if (commandName === "session.create") {
+      if (input === null || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => key !== "noContextFiles") || ("noContextFiles" in input && typeof input.noContextFiles !== "boolean")) {
+        throw clientError("INVALID_ARGUMENT", "Choose a boolean noContextFiles startup option");
+      }
+      return;
+    }
+    if (commandName === "session.resume" || commandName === "session.drop") {
+      if (!isThreadCommandInput(input)) {
+        throw clientError("INVALID_ARGUMENT", `${commandName} threadId must not be empty`);
+      }
+      if (commandName === "session.resume" && input.model !== undefined && (typeof input.model !== "string" || input.model.length > 512 || !/^[^\s\u0000-\u001f-][^\u0000-\u001f]*\/[^\u0000-\u001f]+$/u.test(input.model))) throw clientError("INVALID_ARGUMENT", "Recovery requires a provider/model selector");
+      return;
+    }
+    if (!isInteractionCommandInput(input)) {
+      throw clientError("INVALID_ARGUMENT", "interaction.respond interactionId/decision are invalid");
+    }
+    validateInteractionValue(input.value);
+  }
+
+  async #runInstall(channel: RuntimeChannel | undefined, requestId: CommandRequestId): Promise<void> {
+    this.#installInFlight = true;
+    try {
+      const state = await this.#options.install(channel);
+      const result = { ...state };
+      this.#lastInstallResult = result;
+      if (state.status === "failed") {
+        this.#emitTerminal(requestId, {
+          requestId,
+          commandName: "runtime.install",
+          status: "failed",
+          error: clientError("INTERNAL_ERROR", state.message ?? "Runtime installation failed"),
+          observedAt: this.#options.diagnostics.now(),
+        });
+        return;
+      }
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName: "runtime.install",
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      });
+    } catch (error) {
+      const err = toClientError(error);
+      this.#lastInstallResult = { status: "failed", signature: "unknown", message: err.message };
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName: "runtime.install",
+        status: "failed",
+        error: err,
+        observedAt: this.#options.diagnostics.now(),
+      });
+    } finally {
+      this.#installInFlight = false;
+    }
+  }
+
+  async #runSemanticCommand(
+    run: () => OperatorStateSnapshot | Promise<OperatorStateSnapshot>,
+    requestId: CommandRequestId,
+    commandName: "session.create" | "session.resume" | "session.drop" | "interaction.respond",
+  ): Promise<void> {
+    try {
+      const result = await run();
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      });
+    } catch (error) {
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      });
+    }
+  }
+
+  /** Publish a terminal receipt exactly once per requestId. */
+  #emitTerminal(requestId: CommandRequestId, receipt: CommandReceipt): void {
+    if (this.#terminalEmitted.has(requestId)) {
+      return;
+    }
+    if (receipt.status === "completed" && /^(models\.|skills\.|plugins\.|runtime\.install|config\.)/.test(receipt.commandName)) {
+      this.#options.projectReads?.invalidate();
+      this.#options.archiveTelemetry?.invalidate();
+    }
+    this.#terminalEmitted.add(requestId);
+    evictOldestKeys(this.#terminalEmitted, DEDUPE_KEY_CAPACITY);
+    this.#registry.recordTerminal(requestId, receipt);
+    this.#bus.emit({ kind: "command.receipt", receipt });
+  }
+
+  /** Replay a stored terminal receipt under the caller's new correlation id. */
+  #replayTerminal(entry: RegistryEntry, requestId: CommandRequestId): void {
+    const terminal = entry.terminal;
+    if (terminal === undefined) {
+      return;
+    }
+    const receipt: CommandReceipt = { ...terminal, requestId };
+    this.#bus.emit({ kind: "command.receipt", receipt });
+  }
+}
+import { validatePredictionQuery } from "@juling-harness/harness-protocol";
+import type { SharedProjectReads, SharedArchiveTelemetry } from "./shared-reads.js";

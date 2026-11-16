@@ -1,0 +1,339 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import {
+  CONVERSATION_LIMITS,
+  isParsedConversationRuntimeEvent,
+  parseConversationRuntimeEvent,
+  type ConversationRuntimeEvent,
+  type RuntimeEpoch,
+  type SessionId,
+  type StateVersion,
+  type HarnessEventEnvelope,
+  utf8ByteLength,
+} from "@juling-harness/harness-protocol";
+
+import {
+  CONVERSATION_REPLAY_EVENT_LIMIT,
+  CONVERSATION_REPLAY_MAX_BYTES,
+  CONVERSATION_REPLAY_SESSION_LIMIT,
+  ConversationEventFanout,
+  type HarnessConversationForward,
+} from "../src/conversation-events.js";
+
+const SESSION_ID = "session-live-replay" as SessionId;
+const CREATED_AT = "2026-08-24T00:00:00.000Z";
+
+test("W04 incremental replay matches the legacy path for mixed updates and lifecycle events", () => {
+  const legacy = new ConversationEventFanout({ incrementalToolReplay: false });
+  const incremental = new ConversationEventFanout({ incrementalToolReplay: true });
+  let seed = 42;
+  const pieces = ['a\n"\\', '中文', '\ud83d', '\ude80', '\ud800', '', 'x'.repeat(32 * 1024)];
+  for (let seq = 1; seq <= 1500; seq++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const sessionId = `session-${seq % 3}` as SessionId;
+    const turnId = `turn-${Math.floor(seq / 200)}`;
+    const base = { sessionId, turnId };
+    let event: ConversationRuntimeEvent;
+    if (seq % 101 === 0) event = { ...base, kind: "conversation.turn.aborted" };
+    else if (seq % 103 === 0) event = { ...base, kind: "conversation.turn.completed" };
+    else if (seq % 53 === 0) event = { ...base, kind: "conversation.tool.completed", toolCallId: "tool", completedAt: CREATED_AT,
+      result: { type: "toolResult", toolCallId: "tool", toolName: "bash", isError: true } };
+    else event = { ...base, kind: "conversation.tool.updated", toolCallId: "tool", updateMode: seed % 13 === 0 ? "replace" : "append",
+      ...(seed % 7 === 0 ? {} : { output: pieces[seed % pieces.length]! }), ...(seed % 11 === 0 ? { truncated: true } : {}) };
+    const input = envelope(seq, event);
+    assert.equal(incremental.forward(input), legacy.forward(input));
+    const actual = incremental.snapshot(sessionId);
+    assert.deepEqual(actual, legacy.snapshot(sessionId), `seq=${seq}`);
+    assert.equal(incremental.getDiagnostics().replayBytes, legacy.getDiagnostics().replayBytes);
+    // A replay consumer cannot mutate later snapshots.
+    (actual.events as HarnessConversationForward[]).splice(0, 1);
+    assert.deepEqual(incremental.snapshot(sessionId), legacy.snapshot(sessionId));
+  }
+  incremental.dispose();
+  assert.deepEqual(incremental.getDiagnostics(), { listeners: 0, replaySessions: 0, replayEvents: 0, replayBytes: 0, toolChunks: 0, pendingItems: 0, pendingBytes: 0 });
+});
+
+function envelope(eventSeq: number, event: ConversationRuntimeEvent): HarnessEventEnvelope {
+  return {
+    type: "harness.event",
+    runtimeEpoch: 1 as RuntimeEpoch,
+    eventSeq: eventSeq as never,
+    stateVersion: 1 as StateVersion,
+    occurredAt: CREATED_AT,
+    event,
+  };
+}
+
+test("replay reconstructs an open thinking message from bounded live state", () => {
+  const fanout = new ConversationEventFanout();
+  fanout.forward(envelope(1, {
+    kind: "conversation.message.started",
+    sessionId: SESSION_ID,
+    turnId: "turn-1",
+    messageId: "message-1",
+    role: "assistant",
+    createdAt: CREATED_AT,
+  }));
+  fanout.forward(envelope(2, {
+    kind: "conversation.message.delta",
+    sessionId: SESSION_ID,
+    turnId: "turn-1",
+    messageId: "message-1",
+    blockId: "thinking-0",
+    blockType: "thinking",
+    delta: "正在",
+  }));
+  fanout.forward(envelope(3, {
+    kind: "conversation.message.delta",
+    sessionId: SESSION_ID,
+    turnId: "turn-1",
+    messageId: "message-1",
+    blockId: "thinking-0",
+    blockType: "thinking",
+    delta: "思考",
+  }));
+
+  const replayed: HarnessConversationForward[] = [];
+  fanout.replay(SESSION_ID, (event) => replayed.push(event));
+
+  assert.deepEqual(replayed.map((item) => item.envelope.event.kind), [
+    "conversation.message.started",
+    "conversation.message.delta",
+  ]);
+  const delta = replayed[1]?.envelope.event;
+  assert.equal(delta?.kind, "conversation.message.delta");
+  if (delta?.kind === "conversation.message.delta") assert.equal(delta.delta, "正在思考");
+});
+
+test("terminal turn remains recoverable until the next turn starts", () => {
+  const fanout = new ConversationEventFanout();
+  fanout.forward(envelope(1, {
+    kind: "conversation.message.started",
+    sessionId: SESSION_ID,
+    turnId: "turn-1",
+    messageId: "message-1",
+    role: "assistant",
+    createdAt: CREATED_AT,
+  }));
+  fanout.forward(envelope(2, {
+    kind: "conversation.turn.completed",
+    sessionId: SESSION_ID,
+    turnId: "turn-1",
+  }));
+
+  const replayed: HarnessConversationForward[] = [];
+  fanout.replay(SESSION_ID, (event) => replayed.push(event));
+  assert.deepEqual(replayed.map((item) => item.envelope.event.kind), [
+    "conversation.message.started",
+    "conversation.turn.completed",
+  ]);
+  assert.deepEqual(replayed.map((item) => item.streamSeq), [1, 2]);
+});
+
+test("target-local watermarks are independent of interleaved Runtime eventSeq", () => {
+  const fanout = new ConversationEventFanout();
+  fanout.forward(envelope(40, {
+    kind: "conversation.message.started",
+    sessionId: SESSION_ID,
+    turnId: "turn-1",
+    messageId: "message-1",
+    role: "assistant",
+    createdAt: CREATED_AT,
+  }));
+  fanout.forward(envelope(41, {
+    kind: "conversation.message.started",
+    sessionId: "child-session" as SessionId,
+    turnId: "turn-child",
+    messageId: "message-child",
+    role: "assistant",
+    createdAt: CREATED_AT,
+  }));
+  fanout.forward(envelope(42, {
+    kind: "conversation.message.delta",
+    sessionId: SESSION_ID,
+    turnId: "turn-1",
+    messageId: "message-1",
+    blockId: "text-0",
+    blockType: "text",
+    delta: "ok",
+  }));
+
+  assert.equal(fanout.snapshot(SESSION_ID).watermark, 2);
+  assert.equal(fanout.snapshot("child-session" as SessionId).watermark, 1);
+});
+
+test("control notices inside the open race are retained through the watermark", () => {
+  const fanout = new ConversationEventFanout();
+  fanout.forward(envelope(1, {
+    kind: "conversation.notice",
+    sessionId: SESSION_ID,
+    level: "warning",
+    message: "provider is retrying",
+  }));
+  const snapshot = fanout.snapshot(SESSION_ID);
+  assert.equal(snapshot.status, "complete");
+  assert.equal(snapshot.watermark, 1);
+  assert.equal(snapshot.events[0]?.envelope.event.kind, "conversation.notice");
+});
+
+test("byte overflow fails closed with an explicit resync result", () => {
+  const fanout = new ConversationEventFanout();
+  const chunk = "x".repeat(32 * 1024);
+  let seq = 1;
+  for (let block = 0; block < Math.ceil(CONVERSATION_REPLAY_MAX_BYTES / (256 * 1024)) + 2; block += 1) {
+    for (let index = 0; index < 8; index += 1) {
+      fanout.forward(envelope(seq, {
+        kind: "conversation.message.delta",
+        sessionId: SESSION_ID,
+        turnId: "turn-byte-overflow",
+        messageId: "message-1",
+        blockId: `block-${block}`,
+        blockType: "text",
+        delta: chunk,
+      }));
+      seq += 1;
+    }
+  }
+  const snapshot = fanout.snapshot(SESSION_ID);
+  assert.equal(snapshot.status, "resyncRequired");
+  assert.deepEqual(snapshot.events, []);
+  assert.ok(snapshot.watermark > 0);
+});
+
+/**
+ * Streaming appends account bytes incrementally (previously recorded size plus
+ * the appended UTF-8 bytes) instead of re-serializing the coalesced block per
+ * token, so the accounted budget undercounts exact serialization by the JSON
+ * escaping of the blocks still being appended to. A truncated block is
+ * re-measured exactly, which stops that drift from accumulating across the
+ * whole turn: two delta blocks bound it (measured ~33KiB on this fixture, whose
+ * chunks are ~10% escaped — far more than real prose).
+ */
+const ACCOUNTING_TOLERANCE_BYTES = 2 * CONVERSATION_LIMITS.DELTA_MAX_BYTES;
+
+test("incremental delta accounting stays within a bounded tolerance of full serialization", () => {
+  // ~10% of the chunk is JSON-escaped, which is what the increment cannot see.
+  const chunk = `${'"\n\t'.repeat(128)}${"a".repeat(4096 - 384)}`;
+  const streamDeltas = (deltas: number): ConversationEventFanout => {
+    const fanout = new ConversationEventFanout();
+    for (let index = 0; index < deltas; index += 1) {
+      fanout.forward(envelope(index + 1, {
+        kind: "conversation.message.delta",
+        sessionId: SESSION_ID,
+        turnId: "turn-accounting",
+        messageId: "message-1",
+        // One block caps at TEXT_BLOCK_MAX_BYTES, so the stream has to move on.
+        blockId: `block-${Math.floor(index / 32)}`,
+        blockType: "text",
+        delta: chunk,
+      }));
+    }
+    return fanout;
+  };
+  const overflows = (deltas: number): boolean =>
+    streamDeltas(deltas).snapshot(SESSION_ID).status === "resyncRequired";
+
+  let retained = 1;
+  let overflowed = 2048;
+  assert.ok(overflows(overflowed), "2048 4KiB deltas must exceed the replay byte cap");
+  while (retained + 1 < overflowed) {
+    const mid = Math.floor((retained + overflowed) / 2);
+    if (overflows(mid)) overflowed = mid;
+    else retained = mid;
+  }
+
+  const snapshot = streamDeltas(retained).snapshot(SESSION_ID);
+  assert.equal(snapshot.status, "complete");
+  const exactBytes = snapshot.events.reduce((total, event) => total + utf8ByteLength(JSON.stringify(event)), 0);
+  assert.ok(
+    exactBytes <= CONVERSATION_REPLAY_MAX_BYTES + ACCOUNTING_TOLERANCE_BYTES,
+    `retained ${exactBytes} bytes exceeds the cap by more than the tolerance`,
+  );
+  assert.ok(
+    exactBytes >= CONVERSATION_REPLAY_MAX_BYTES - ACCOUNTING_TOLERANCE_BYTES,
+    `retained ${exactBytes} bytes overflows far below the cap; accounting overcounts`,
+  );
+});
+
+test("global LRU eviction bounds many child sessions and never returns a false empty replay", () => {
+  const fanout = new ConversationEventFanout();
+  for (let index = 0; index <= CONVERSATION_REPLAY_SESSION_LIMIT; index += 1) {
+    fanout.forward(envelope(index + 1, {
+      kind: "conversation.message.started",
+      sessionId: `child-session-${index}` as SessionId,
+      turnId: `turn-${index}`,
+      messageId: `message-${index}`,
+      role: "assistant",
+      createdAt: CREATED_AT,
+    }));
+  }
+  const evicted = fanout.snapshot("child-session-0" as SessionId);
+  const newest = fanout.snapshot(`child-session-${CONVERSATION_REPLAY_SESSION_LIMIT}` as SessionId);
+  assert.equal(evicted.status, "resyncRequired");
+  assert.deepEqual(evicted.events, []);
+  assert.equal(newest.status, "complete");
+  assert.equal(newest.events.length, 1);
+});
+
+test("replay is session-scoped and fails closed when the bounded cache overflows", () => {
+  const fanout = new ConversationEventFanout();
+  for (let index = 0; index <= CONVERSATION_REPLAY_EVENT_LIMIT; index += 1) {
+    fanout.forward(envelope(index + 1, {
+      kind: "conversation.message.started",
+      sessionId: SESSION_ID,
+      turnId: "turn-overflow",
+      messageId: `message-${index}`,
+      role: "assistant",
+      createdAt: CREATED_AT,
+    }));
+  }
+
+  const replayed: HarnessConversationForward[] = [];
+  const resync: string[] = [];
+  fanout.onResync((reason) => resync.push(reason));
+  fanout.replay("another-session" as SessionId, (event) => replayed.push(event));
+  assert.equal(replayed.length, 0);
+  assert.equal(resync.length, 0);
+
+  fanout.replay(SESSION_ID, (event) => replayed.push(event));
+  assert.equal(replayed.length, 0);
+  assert.equal(resync.length, 1);
+});
+
+test("W05 the forwarded event is a parser-owned object, so the facade and IPC re-check reuse it", () => {
+  const fanout = new ConversationEventFanout();
+  const forwarded: HarnessConversationForward[] = [];
+  fanout.onEvent((event) => forwarded.push(event));
+  const raw: ConversationRuntimeEvent = {
+    kind: "conversation.tool.updated",
+    sessionId: SESSION_ID,
+    turnId: "turn-1",
+    toolCallId: "call-1",
+    updateMode: "append",
+    output: "line\n",
+  };
+  fanout.forward(envelope(1, raw));
+
+  const update = forwarded[0]?.envelope.event;
+  assert.ok(update !== undefined);
+  // The fan-out never forwards the Bridge's own object: it forwards what the
+  // parser built and registered.
+  assert.notEqual(update, raw);
+  assert.equal(isParsedConversationRuntimeEvent(update), true);
+  assert.equal(isParsedConversationRuntimeEvent(raw), false);
+  // Facade (#onConversationForward) and the outbound IPC check both call the
+  // parser again on this same object; both must get it back without a walk.
+  assert.equal(parseConversationRuntimeEvent(update), update);
+  assert.equal(parseConversationRuntimeEvent(update), update);
+  // The Bridge's input object is untouched and still caller-owned.
+  assert.equal(Object.isFrozen(raw), false);
+
+  // Replay events are structured clones, so they lose that identity on purpose
+  // and are validated in full again.
+  const replayed = fanout.snapshot(SESSION_ID);
+  assert.equal(replayed.status, "complete");
+  const replayedUpdate = replayed.events[0]?.envelope.event;
+  assert.ok(replayedUpdate !== undefined);
+  assert.equal(isParsedConversationRuntimeEvent(replayedUpdate), false);
+});

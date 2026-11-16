@@ -1,0 +1,1274 @@
+/**
+ * Desktop Host composition contract tests (FRONTEND_INTEGRATION.md §9.2).
+ *
+ * Fakes prove: initialization order, no-runtime read-only bootstrap,
+ * trusted-resolution session creation, second-owner rejection, reload
+ * preservation, and shutdown ordering with fail-closed error behavior.
+ * Nothing here spawns a process or touches real user state; the profile
+ * directory is a throwaway temp directory.
+ */
+
+import assert from "node:assert/strict";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
+import { PassThrough } from "node:stream";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { mock, test } from "node:test";
+
+import type { ClientBootstrap, ClientError, CommandRequestId, EventCursor, IdempotencyKey, ResidentsReadModel, WorkspaceId } from "@juling-harness/client-contract";
+import { privateEndpoint, type PlatformPort } from "@juling-harness/platform";
+import { AuthorityAlreadyOwnedError } from "@juling-harness/platform-win32";
+import {
+  FULL_PARITY_REQUIRED_CAPABILITIES,
+  type OperatorCommandManifest,
+  type OperatorStateSnapshot,
+  type RequestId,
+  type RuntimeEpoch,
+  type RuntimeId,
+  type RuntimeInstanceId,
+  type SessionId,
+  type StateVersion,
+  type HarnessHelloResponse,
+} from "@juling-harness/harness-protocol";
+import type { HostRuntimeHelloView } from "@juling-harness/host-client-api";
+import type { RuntimeProbePort, HarnessRuntimeSessionController } from "@juling-harness/harness-host";
+
+import {
+  createDesktopHostComposition,
+  type DesktopAuthorityLock,
+  type DesktopPrivateEndpoint,
+  type DesktopRuntimeSession,
+  type DesktopRuntimeSessionContext,
+  type DesktopRuntimeSessionPort,
+} from "../src/host-composition.js";
+import type { DesktopHostComposition } from "../src/types.js";
+import { createDesktopRuntimeSessionPort } from "../src/runtime-session.js";
+import { InMemorySessionLeaseStore } from "@juling-harness/harness-host";
+import { runtimeEntrypointFor } from "@juling-harness/runtime-installer";
+import { UpdateRestartBlockedError } from "../src/update-restart.js";
+import { completeDesktopRuntimeTrial } from "../src/runtime-startup.js";
+
+const UPSTREAM_COMMIT = "0123456789abcdef0123456789abcdef01234567";
+const T0 = "2026-08-12T00:00:00.000Z";
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const SNAPSHOT: OperatorStateSnapshot = {
+  runtimeId: "rt-0001" as RuntimeId,
+  runtimeEpoch: 1 as RuntimeEpoch,
+  stateVersion: 1 as StateVersion,
+  sessionId: "sess-0001" as SessionId,
+  isStreaming: false,
+  isCompacting: false,
+  activeMode: "normal", approvalMode: "yolo",
+  pendingMessages: 0,
+  activeCommandIds: [],
+  agentsRevision: 0,
+  jobsRevision: 0,
+  agents: [],
+  jobs: [],
+};
+
+const HELLO_VIEW: HostRuntimeHelloView = {
+  runtimeId: "rt-0001",
+  runtimeEpoch: 1,
+  classification: "compatible-system",
+  backend: "harness-host",
+  runtimeVersion: "1.2.3",
+  upstreamVersion: "0.9.0",
+  upstreamCommit: UPSTREAM_COMMIT,
+};
+
+const HELLO: HarnessHelloResponse = {
+  type: "harness.hello.result",
+  requestId: "probe-req-1" as RequestId,
+  selectedProtocolVersion: 1,
+  runtimeVersion: "1.2.3",
+  upstreamVersion: "0.9.0",
+  upstreamCommit: UPSTREAM_COMMIT,
+  runtimeInstanceId: "rt-inst-0001" as RuntimeInstanceId,
+  runtimeEpoch: 1 as RuntimeEpoch,
+  capabilityManifest: {
+    profile: "full-parity-v1",
+    generatedAt: T0,
+    hash: "cap-hash-0001",
+    capabilities: FULL_PARITY_REQUIRED_CAPABILITIES.map((id) => ({
+      id,
+      grade: "stable" as const,
+      version: 1,
+      evidence: "probed",
+    })),
+  },
+  commandManifestHash: "cmd-hash-0001",
+  stateVersion: 1 as StateVersion,
+  challengeProof: "proof-0001",
+};
+
+const COMMAND_MANIFEST: OperatorCommandManifest = {
+  generatedAt: T0,
+  upstreamCommit: UPSTREAM_COMMIT,
+  hash: "cmd-hash-0001",
+  commands: [],
+  unclassifiedBuiltins: [],
+};
+
+function fullParityProbe(): RuntimeProbePort {
+  return {
+    async probe() {
+      return {
+        hello: HELLO,
+        commandManifest: COMMAND_MANIFEST,
+        smoke: "passed" as const,
+        shutdown: "passed" as const,
+      };
+    },
+  };
+}
+
+function fakePlatform(profileDirectory: string): { port: PlatformPort; calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    port: {
+      platform: "win32",
+      appDataDirectory: async () => {
+        calls.push("appDataDirectory");
+        return profileDirectory;
+      },
+      runtimeExecutableName: () => "omp.exe",
+      createPrivateEndpoint: async () => {
+        throw new Error("unused in composition tests");
+      },
+      createProcessContainment: () => {
+        throw new Error("unused in composition tests");
+      },
+      revealPath: async () => {},
+      openExternal: async () => {},
+    },
+  };
+}
+
+function fakeAuthorityLock(acquireError?: Error): { port: DesktopAuthorityLock; calls: string[]; released: boolean } {
+  const calls: string[] = [];
+  let released = false;
+  return {
+    calls,
+    get released() {
+      return released;
+    },
+    port: {
+      async acquire() {
+        calls.push("acquire");
+        if (acquireError !== undefined) {
+          throw acquireError;
+        }
+        return {
+          authorityId: "auth-0001",
+          epoch: "epoch-0001",
+          release: async () => {
+            calls.push("lease.release");
+            released = true;
+          },
+        };
+      },
+    },
+  };
+}
+
+function fakePrivateEndpoint(options: { fail?: boolean; releaseError?: Error } = {}): {
+  port: DesktopPrivateEndpoint;
+  calls: string[];
+} {
+  const calls: string[] = [];
+  return {
+    calls,
+    port: {
+      async createCurrentUserOnly() {
+        calls.push("endpoint.create");
+        if (options.fail) {
+          throw new Error("endpoint creation failed");
+        }
+        return {
+          endpoint: privateEndpoint("in-memory", "authority-0001"),
+          release: async () => {
+            calls.push("endpoint.release");
+            if (options.releaseError !== undefined) {
+              throw options.releaseError;
+            }
+          },
+        };
+      },
+    },
+  };
+}
+
+function fakeSessionPort(options: {
+  ready?: boolean;
+  startError?: Error;
+  stopError?: Error;
+  snapshot?: OperatorStateSnapshot;
+  listResidents?: () => ResidentsReadModel;
+} = {}): {
+  port: DesktopRuntimeSessionPort;
+  calls: string[];
+  contexts: DesktopRuntimeSessionContext[];
+  beforeStop: (hook: () => void) => void;
+} {
+  const calls: string[] = [];
+  const contexts: DesktopRuntimeSessionContext[] = [];
+  let beforeStop: (() => void) | undefined;
+  return {
+    calls,
+    contexts,
+    beforeStop(hook) {
+      beforeStop = hook;
+    },
+    port: {
+      async start(context) {
+        calls.push("session.start");
+        if (options.startError !== undefined) {
+          throw options.startError;
+        }
+        contexts.push(context);
+        if (!options.ready) {
+          return undefined;
+        }
+        const snapshot = options.snapshot ?? SNAPSHOT;
+        const session: DesktopRuntimeSession = {
+          controller: {
+            refresh: async () => ({ commitSeq: 1, publishedAt: T0, snapshot, terminalOutcomes: [] }),
+            invoke: async () => {
+              throw new Error("unused in composition tests");
+            },
+            runtimeLost: () => [],
+            replayConversationEvents: () => [],
+            publication: () => ({ commitSeq: 1, publishedAt: T0, snapshot, terminalOutcomes: [] }),
+            dispose: () => {},
+          } as unknown as HarnessRuntimeSessionController,
+          hello: () => HELLO_VIEW,
+          capabilityManifest: () => undefined,
+          commandManifest: () => undefined,
+          onPublication: () => () => {},
+        };
+        return session;
+      },
+      async stop() {
+        calls.push("session.stop");
+        if (beforeStop !== undefined) {
+          await beforeStop();
+        }
+        if (options.stopError !== undefined) {
+          throw options.stopError;
+        }
+      },
+      ...(options.listResidents === undefined ? {} : { listResidents: options.listResidents }),
+    },
+  };
+}
+
+async function withTempProfile(run: (profileDirectory: string) => Promise<void>): Promise<void> {
+  const profileDirectory = await mkdtemp(join(tmpdir(), "omp-desktop-profile-"));
+  try {
+    await run(profileDirectory);
+  } finally {
+    await rm(profileDirectory, { recursive: true, force: true });
+  }
+}
+
+async function withTempExecutable(run: (executablePath: string) => Promise<void>): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "omp-desktop-exe-"));
+  const executablePath = join(directory, "omp-test.exe");
+  await writeFile(executablePath, "fake runtime payload for fingerprinting");
+  try {
+    await run(executablePath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+function assertWithoutSnapshot(bootstrap: ClientBootstrap): void {
+  assert.equal(bootstrap.runtime.status, "unavailable");
+  assert.equal(bootstrap.runtime.classification, "unavailable");
+  assert.equal("snapshot" in bootstrap, false);
+  assert.equal("stateVersion" in bootstrap, false);
+  assert.equal("cursor" in bootstrap, false);
+}
+
+function assertWithSnapshot(bootstrap: ClientBootstrap): asserts bootstrap is ClientBootstrap & { snapshot: OperatorStateSnapshot; stateVersion: StateVersion; cursor: EventCursor } {
+  assert.ok("snapshot" in bootstrap);
+}
+
+/**
+ * Assert a rejection matches the closed-facade contract: a structured
+ * ClientError object with code "TRANSPORT_ERROR" and a message mentioning "closed".
+ */
+function assertClosedFacadeError(error: unknown): void {
+  assert.equal(typeof error, "object");
+  assert.notEqual(error, null);
+  const clientError = error as ClientError;
+  assert.equal(clientError.code, "TRANSPORT_ERROR");
+  assert.match(clientError.message, /closed/u);
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function withPendingStartup(run: (fixture: {
+  composition: DesktopHostComposition;
+  resolveProbe(): void;
+  session: ReturnType<typeof fakeSessionPort>;
+  lock: ReturnType<typeof fakeAuthorityLock>;
+  endpoint: ReturnType<typeof fakePrivateEndpoint>;
+  workspace: { workspaceId: string; cwd: string };
+}) => Promise<void>, customize?: (port: DesktopRuntimeSessionPort) => void): Promise<void> {
+  await withTempProfile(async profileDirectory => {
+    await withTempExecutable(async executablePath => {
+      const gate = deferred<void>();
+      const session = fakeSessionPort({ ready: true });
+      customize?.(session.port);
+      const lock = fakeAuthorityLock();
+      const endpoint = fakePrivateEndpoint();
+      const workspace = { workspaceId: "ws-a", cwd: profileDirectory };
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: lock.port,
+        privateEndpoint: endpoint.port,
+        runtimeSession: session.port,
+        deferredRuntime: true,
+        resolver: { probe: { probe: async (...args) => { await gate.promise; return fullParityProbe().probe(...args); } } },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+        facade: { getActiveWorkspace: () => workspace },
+      });
+      try { await run({ composition, resolveProbe: () => gate.resolve(), session, lock, endpoint, workspace }); }
+      finally { gate.resolve(); await composition.whenRuntimeReady?.(); await composition.shutdown(); }
+    });
+  });
+}
+
+test("deferred bootstrap is honest connecting and the same facade connects without ensure relaunch", async () => {
+  let ensures = 0;
+  await withPendingStartup(async ({ composition, resolveProbe, session }) => {
+    const facade = composition.facade;
+    const initial = await facade.bootstrap();
+    assert.equal(initial.runtime.status, "connecting");
+    assert.equal(initial.runtime.runtimeId, undefined);
+    assert.equal("snapshot" in initial, false);
+    const environment = await facade.query({ queryName: "environment.get", input: {} });
+    assert.ok(environment.ok);
+    assert.equal(environment.result.runtime.status, "connecting");
+    const connections: string[] = [];
+    const receipts: string[] = [];
+    facade.subscribe({ scope: "all" }, event => {
+      if (event.kind === "runtime.changed") connections.push(event.connection.status);
+      if (event.kind === "command.receipt") receipts.push(event.receipt.status);
+    });
+    await Promise.all(["ensure-a", "ensure-b"].map(id => facade.command({
+      commandName: "runtime.ensure", input: {}, requestId: id as CommandRequestId, idempotencyKey: id as IdempotencyKey,
+    })));
+    assert.equal(ensures, 0);
+    resolveProbe();
+    await composition.whenRuntimeReady?.();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(composition.facade, facade);
+    assert.equal((await facade.bootstrap()).runtime.status, "connected");
+    assert.deepEqual(session.calls, ["session.start"]);
+    assert.equal(ensures, 0);
+    assert.deepEqual(connections, ["connected"]);
+    assert.equal(receipts.length, 2);
+  }, port => { port.ensure = async () => { ensures++; return undefined; }; });
+});
+
+test("deferred startup failure publishes unavailable without a publication", async () => {
+  await withPendingStartup(async ({ composition, resolveProbe }) => {
+    const states: string[] = [];
+    composition.facade.subscribe({ scope: "all" }, event => {
+      if (event.kind === "runtime.changed") states.push(event.connection.status);
+    });
+    assert.equal((await composition.facade.bootstrap()).runtime.status, "connecting");
+    resolveProbe();
+    await composition.whenRuntimeReady?.();
+    const failed = await composition.facade.bootstrap();
+    assert.equal(failed.runtime.status, "unavailable");
+    assert.equal(failed.runtime.unavailableCode, "launch-failed");
+    assert.deepEqual(states, ["unavailable"]);
+  }, port => { port.start = async () => { throw new Error("test Runtime failure"); }; });
+});
+
+test("shutdown waits for in-flight launch and stops it before releasing authority", async () => {
+  const launched = deferred<void>();
+  const finishLaunch = deferred<void>();
+  await withPendingStartup(async ({ composition, resolveProbe, session, lock, endpoint }) => {
+    const connections: string[] = [];
+    composition.facade.subscribe({ scope: "all" }, event => { if (event.kind === "runtime.changed") connections.push(event.connection.status); });
+    resolveProbe();
+    await launched.promise;
+    const closing = composition.shutdown();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(lock.released, false);
+    assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+    finishLaunch.resolve();
+    await closing;
+    assert.ok(session.calls.includes("session.stop"));
+    assert.equal(lock.released, true);
+    assert.deepEqual(connections, []);
+  }, port => {
+    const start = port.start;
+    port.start = async context => { launched.resolve(); await finishLaunch.promise; return start(context); };
+  });
+});
+
+test("workspace switch during launch cannot bind the old bootstrap target", async () => {
+  const launched = deferred<void>();
+  const finishLaunch = deferred<void>();
+  let rebinds = 0;
+  await withPendingStartup(async ({ composition, resolveProbe, workspace }) => {
+    const ids: Array<string | undefined> = [];
+    composition.facade.subscribe({ scope: "all" }, event => { if (event.kind === "runtime.changed") ids.push(event.connection.runtimeId); });
+    resolveProbe();
+    await launched.promise;
+    const switching = composition.rebindWorkspace({ workspaceId: "ws-b", cwd: workspace.cwd }, { launchIfMissing: false });
+    finishLaunch.resolve();
+    await switching;
+    assert.equal(rebinds, 1);
+    assert.equal((await composition.facade.bootstrap()).runtime.runtimeId, undefined);
+    assert.ok(!ids.includes(HELLO_VIEW.runtimeId));
+  }, port => {
+    const start = port.start;
+    port.start = async context => { launched.resolve(); await finishLaunch.promise; return start(context); };
+    port.rebind = async () => { rebinds++; return undefined; };
+  });
+});
+
+test("session switches queued for an obsolete workspace fail instead of selecting it", async () => {
+  let switches = 0;
+  await withPendingStartup(async ({ composition, resolveProbe, workspace }) => {
+    const receipts: Array<{ requestId: string; status: string }> = [];
+    composition.facade.subscribe({ scope: "all" }, event => {
+      if (event.kind === "command.receipt") receipts.push(event.receipt);
+    });
+    await composition.facade.command({ commandName: "session.create", input: {}, requestId: "old-create" as CommandRequestId, idempotencyKey: "old-create" as IdempotencyKey });
+    await new Promise(resolve => setImmediate(resolve));
+    const changing = composition.rebindWorkspace({ workspaceId: "ws-b", cwd: workspace.cwd }, { launchIfMissing: false });
+    resolveProbe(); await changing;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(switches, 0);
+    assert.ok(receipts.some(receipt => receipt.requestId === "old-create" && receipt.status === "failed"));
+  }, port => { port.switchSession = async () => { switches++; return undefined; }; port.rebind = async () => undefined; });
+});
+
+test("Runtime maintenance waits for startup before resolving the installed version", async () => {
+  await withPendingStartup(async ({ composition, resolveProbe }) => {
+    let settled = false;
+    const rollback = composition.rollbackRuntime!().then(() => { settled = true; }, () => { settled = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(settled, false);
+    resolveProbe();
+    await rollback;
+    assert.equal(settled, true);
+  });
+});
+
+test("Runtime trial waits for startup terminal success or failure", async () => {
+  for (const fail of [false, true]) {
+    await withPendingStartup(async ({ composition, resolveProbe }) => {
+      const outcomes: boolean[] = [];
+      const trial = completeDesktopRuntimeTrial(composition, async ready => { outcomes.push(ready); }, true);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(outcomes, []);
+      resolveProbe();
+      assert.equal(await trial, fail);
+      assert.deepEqual(outcomes, [!fail]);
+    }, fail ? port => { port.start = async () => { throw new Error("trial failed"); }; } : undefined);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Initialization order + no-runtime read-only bootstrap
+// ---------------------------------------------------------------------------
+
+test("separate conversation contexts keep their selected sessions and closing one preserves the shared Host", async () => {
+  await withTempProfile(async profileDirectory => withTempExecutable(async executablePath => {
+    const first = fakeSessionPort({ ready: true, snapshot: { ...SNAPSHOT, sessionId: "context-a" as SessionId } });
+    const second = fakeSessionPort({ ready: true, snapshot: { ...SNAPSHOT, sessionId: "context-b" as SessionId } });
+    const dummy = { profileDirectory } as DesktopRuntimeSessionContext;
+    const a = (await first.port.start(dummy))!, b = (await second.port.start(dummy))!;
+    let evaluationWorkers = 0, releasedEvaluations = 0;
+    a.capabilityManifest = () => ({ ...HELLO.capabilityManifest, capabilities: [
+      { id: "evaluation.runtime.start", grade: "stable", version: 1, evidence: "test" },
+    ] });
+    a.controller.invoke = async () => ({ status: "completed", result: { models: [] } }) as Awaited<ReturnType<HarnessRuntimeSessionController["invoke"]>>;
+    const sessions = new Map([["context-a", a], ["context-b", b]]);
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port, authorityLock: fakeAuthorityLock().port,
+      privateEndpoint: fakePrivateEndpoint().port,
+      resolver: { probe: fullParityProbe() }, preference: { kind: "system", executable: executablePath, allowLimited: false },
+      runtimeSession: { ...first.port, ensure: async () => a, sessionFor: id => sessions.get(id), openContextSession: async (_workspace, intent) => intent.kind === "resume" ? sessions.get(intent.sessionId) : undefined,
+        openEvaluation: async () => { evaluationWorkers++; return a; }, releaseEvaluation: async () => { releasedEvaluations++; } },
+      facade: { resolveImportWorkspace: async id => id === "workspace-a" || id === "workspace-b" ? profileDirectory : undefined },
+    });
+    try {
+      const one = await composition.transport.openContext!({ workspaceId: "workspace-a" as WorkspaceId, sessionId: "context-a" as SessionId });
+      const two = await composition.transport.openContext!({ workspaceId: "workspace-b" as WorkspaceId, sessionId: "context-b" as SessionId });
+      const aState = await one.bootstrap(), bState = await two.bootstrap();
+      assert.equal(aState.snapshot?.sessionId, "context-a"); assert.equal(bState.snapshot?.sessionId, "context-b");
+      assert.equal(aState.selected?.workspaceId, "workspace-a"); assert.equal(bState.selected?.workspaceId, "workspace-b");
+      const evaluationContext = { queryName: "evaluations.context" as const, input: { workspaceId: "workspace-a" } };
+      const reads = await Promise.all([composition.transport.query(evaluationContext), one.query(evaluationContext)]);
+      for (const read of reads) { assert.equal(read.ok, true); if (read.ok) assert.equal(read.result.available, true, read.result.reason); }
+      assert.equal(evaluationWorkers, 1, "concurrent conversation facades share one evaluation service");
+      await one.close();
+      assert.equal(releasedEvaluations, 0, "closing a conversation must not release Host-owned evaluations");
+      assert.equal((await two.bootstrap()).snapshot?.sessionId, "context-b");
+      assert.equal(first.calls.includes("session.stop"), false);
+      await two.close();
+    } finally { await composition.shutdown(); }
+    assert.equal(releasedEvaluations, 1, "Host shutdown releases the shared prepared evaluation Worker");
+  }));
+});
+
+test("composition follows the P1 initialization order and bootstraps read-only without a runtime", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    const platform = fakePlatform(profileDirectory);
+    const lock = fakeAuthorityLock();
+    const endpoint = fakePrivateEndpoint();
+    const session = fakeSessionPort();
+    const composition = await createDesktopHostComposition({
+      platform: platform.port,
+      authorityLock: lock.port,
+      privateEndpoint: endpoint.port,
+      runtimeSession: session.port,
+      resolver: { probe: fullParityProbe() },
+    });
+
+    try {
+      // Managed preference with nothing installed resolves to rejected: the
+      // session port must never be invoked and the composition is read-only.
+      assert.deepEqual(session.calls, []);
+      assert.equal(composition.status, "read-only");
+      assert.deepEqual(platform.calls, ["appDataDirectory"]);
+      assert.deepEqual(lock.calls, ["acquire"]);
+      assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+      assert.deepEqual(session.contexts, []);
+
+      const bootstrap = await composition.facade.bootstrap();
+      assertWithoutSnapshot(bootstrap);
+      assert.equal(bootstrap.runtime.unavailableCode, "resolution-rejected");
+      assert.equal(bootstrap.authority.authorityId, "auth-0001");
+      assert.equal(typeof bootstrap.authority.authorityEpoch, "number");
+      assert.ok(bootstrap.authority.authorityEpoch >= 1);
+      assert.equal(lock.released, false);
+      assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+    } finally { await composition.shutdown(); }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Trusted resolution -> ready composition
+// ---------------------------------------------------------------------------
+
+test("a trusted resolution creates the runtime session and bootstraps ready", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const platform = fakePlatform(profileDirectory);
+      const lock = fakeAuthorityLock();
+      const endpoint = fakePrivateEndpoint();
+      const session = fakeSessionPort({ ready: true });
+      const composition = await createDesktopHostComposition({
+        platform: platform.port,
+        authorityLock: lock.port,
+        privateEndpoint: endpoint.port,
+        runtimeSession: session.port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+      });
+
+      try {
+        assert.equal(composition.status, "ready");
+        // Order: profile directory -> lock -> endpoint -> session.
+        assert.deepEqual(platform.calls, ["appDataDirectory"]);
+        assert.deepEqual(lock.calls, ["acquire"]);
+        assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+        assert.deepEqual(session.calls, ["session.start"]);
+        assert.equal(session.contexts.length, 1);
+        const context = session.contexts[0];
+        assert.ok(context);
+        assert.equal(context.resolution.classification, "compatible-system");
+        assert.equal(context.endpoint.kind, "in-memory");
+        assert.equal(context.profileDirectory, profileDirectory);
+        assert.equal(context.runtimeInstallDirectory, join(profileDirectory, "runtimes"));
+
+        const bootstrap = await composition.facade.bootstrap();
+        assert.equal(bootstrap.runtime.status, "connected");
+        assert.equal(bootstrap.runtime.classification, "compatible-system");
+        assert.equal(bootstrap.runtime.runtimeId, "rt-0001");
+        assertWithSnapshot(bootstrap);
+        assert.equal(bootstrap.stateVersion, 1);
+        assert.equal(lock.released, false);
+        assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+      } finally { await composition.shutdown(); }
+    });
+  });
+});
+
+test("isBusy reports streaming residents first and falls back to the current snapshot", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const baseOptions = () => ({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: fakeAuthorityLock().port,
+        privateEndpoint: fakePrivateEndpoint().port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system" as const, executable: executablePath, allowLimited: false },
+      });
+
+      const residentsWith = (phase: "running" | "compacting" | "waiting" | "idle"): ResidentsReadModel => ({
+        residents: [
+          {
+            sessionId: "sess-0002" as SessionId,
+            workspaceId: "ws-0001" as WorkspaceId,
+            phase,
+            pendingMessages: 0,
+            lastActivityAt: T0,
+          },
+        ],
+        activeSessionId: "sess-0002" as SessionId,
+        generatedAt: T0,
+      });
+
+      const withResidents = async (phase: "running" | "compacting" | "waiting" | "idle"): Promise<DesktopHostComposition> =>
+        createDesktopHostComposition({
+          ...baseOptions(),
+          runtimeSession: fakeSessionPort({ ready: true, listResidents: () => residentsWith(phase) }).port,
+        });
+
+      const assertBusy = async (opening: Promise<DesktopHostComposition>, expected: boolean) => {
+        const composition = await opening;
+        try { assert.equal(composition.isBusy(), expected); }
+        finally { await composition.shutdown(); }
+      };
+      // Residents read model is authoritative when the port exposes one.
+      await assertBusy(withResidents("running"), true);
+      await assertBusy(withResidents("compacting"), true);
+      await assertBusy(withResidents("waiting"), false);
+      await assertBusy(withResidents("idle"), false);
+
+      // Without a broker view the current session snapshot decides.
+      const withSnapshot = async (snapshot: OperatorStateSnapshot): Promise<DesktopHostComposition> =>
+        createDesktopHostComposition({
+          ...baseOptions(),
+          runtimeSession: fakeSessionPort({ ready: true, snapshot }).port,
+        });
+      await assertBusy(withSnapshot({ ...SNAPSHOT, isStreaming: true }), true);
+      await assertBusy(withSnapshot({ ...SNAPSHOT, isCompacting: true }), true);
+      await assertBusy(withSnapshot(SNAPSHOT), false);
+    });
+  });
+});
+
+test("managed install directory and trust are handed to the initial runtime session", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const installDirectory = await mkdtemp(join(tmpdir(), "omp-live-runtime-"));
+      try {
+        const session = fakeSessionPort({ ready: true });
+        const trustedKeys = { "test-key": "test-public-key" };
+        const composition = await createDesktopHostComposition({
+          platform: fakePlatform(profileDirectory).port,
+          authorityLock: fakeAuthorityLock().port,
+          privateEndpoint: fakePrivateEndpoint().port,
+          runtimeSession: session.port,
+          resolver: { probe: fullParityProbe() },
+          preference: { kind: "system", executable: executablePath, allowLimited: false },
+          managedInstall: { installDirectory },
+          installer: { trustedKeys },
+        });
+        assert.equal(session.contexts[0]?.runtimeInstallDirectory, installDirectory);
+        assert.deepEqual(session.contexts[0]?.installer?.trustedKeys, trustedKeys);
+        await composition.shutdown();
+      } finally {
+        await rm(installDirectory, { recursive: true, force: true });
+      }
+    });
+  });
+});
+
+test("a not-ready session port yields a read-only composition without a fake snapshot", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const session = fakeSessionPort({ ready: false });
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: fakeAuthorityLock().port,
+        privateEndpoint: fakePrivateEndpoint().port,
+        runtimeSession: session.port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+      });
+      try {
+        assert.equal(composition.status, "read-only");
+        assert.deepEqual(session.calls, ["session.start"]);
+        const bootstrap = await composition.facade.bootstrap();
+        assertWithoutSnapshot(bootstrap);
+        assert.equal(bootstrap.runtime.unavailableCode, "no-workspace");
+      } finally { await composition.shutdown(); }
+    });
+  });
+});
+
+test("without a runtime session port the composition stays read-only even with a trusted resolution", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: fakeAuthorityLock().port,
+        privateEndpoint: fakePrivateEndpoint().port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+      });
+      try {
+        assert.equal(composition.status, "read-only");
+        const bootstrap = await composition.facade.bootstrap();
+        assertWithoutSnapshot(bootstrap);
+        assert.equal(bootstrap.runtime.unavailableCode, "not-wired");
+      } finally { await composition.shutdown(); }
+    });
+  });
+});
+
+test("managedInstall without trusted keys fails closed instead of reporting installed", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port,
+      authorityLock: fakeAuthorityLock().port,
+      privateEndpoint: fakePrivateEndpoint().port,
+      managedInstall: {},
+      installer: {},
+    });
+    const events: Array<{ kind: string; receipt?: { status: string; error?: { message: string } } }> = [];
+    composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+    const accepted = await composition.facade.command({
+      commandName: "runtime.install",
+      input: {},
+      idempotencyKey: "idem-install-keys" as IdempotencyKey,
+      requestId: "req-install-keys" as CommandRequestId,
+    });
+    assert.equal(accepted.status, "accepted");
+    const started = Date.now();
+    while (!events.some((event) => event.kind === "command.receipt") && Date.now() - started < 2000) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    const receipt = events.find((event) => event.kind === "command.receipt");
+    assert.equal(receipt?.receipt?.status, "failed");
+    assert.match(receipt?.receipt?.error?.message ?? "", /OMP_RUNTIME_TRUSTED_PUBLIC_KEY/u);
+    await composition.shutdown();
+  });
+});
+
+/** A Runtime artifact signed by a fresh "test-key", for the managed lookup on this host platform. */
+async function writeSignedRuntimeArtifact(profileDirectory: string) {
+  const artifact = join(profileDirectory, "artifact");
+  await mkdir(artifact);
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  // The managed lookup matches the host platform, so the fixture follows it.
+  const hostPlatform = `${process.platform}-${process.arch}`, entrypoint = runtimeEntrypointFor(hostPlatform);
+  const payload = "test executable; never executed";
+  const manifest = JSON.stringify({
+    runtimeVersion: HELLO.runtimeVersion, upstreamVersion: HELLO.upstreamVersion,
+    upstreamCommit: UPSTREAM_COMMIT, patchsetVersion: "0.1.0", harnessProtocol: { min: 1, max: 1 },
+    profile: "full-parity-v1", capabilityHash: HELLO.capabilityManifest.hash,
+    commandManifestHash: HELLO.commandManifestHash, platform: hostPlatform, entrypoint, channel: "stable",
+  });
+  const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+  const checksums = JSON.stringify({ algorithm: "sha256", files: { [entrypoint]: digest(payload), "runtime-manifest.json": digest(manifest) } });
+  const signed = Buffer.concat([Buffer.from(manifest), Buffer.from("\0"), Buffer.from(checksums)]);
+  await Promise.all([
+    writeFile(join(artifact, entrypoint), payload),
+    writeFile(join(artifact, "runtime-manifest.json"), manifest),
+    writeFile(join(artifact, "checksums.json"), checksums),
+    writeFile(join(artifact, "runtime-signature.json"), JSON.stringify({ algorithm: "ed25519", keyId: "test-key", payloadSha256: digest(signed), signature: sign(null, signed, privateKey).toString("base64url") })),
+  ]);
+  return { artifact, publicKey };
+}
+
+test("startup exposes activation failure and quarantine path through bootstrap diagnostics", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    const { artifact, publicKey } = await writeSignedRuntimeArtifact(profileDirectory);
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port,
+      authorityLock: fakeAuthorityLock().port,
+      privateEndpoint: fakePrivateEndpoint().port,
+      installer: { trustedKeys: { "test-key": publicKey.export({ type: "spki", format: "pem" }) } },
+      managedInstall: {
+        seedOnStart: true, installDirectory: join(profileDirectory, "runtime"), locateArtifact: async () => artifact,
+        activateOptions: { selfCheck: { run: async () => { throw Error("spawn EACCES: Runtime is not executable"); } } },
+      },
+    });
+    try {
+      const bootstrap = await composition.facade.bootstrap();
+      assert.match(bootstrap.runtime.unavailableReason ?? "", /EACCES/);
+      assert.match(bootstrap.runtime.unavailableReason ?? "", /\.quarantine-/);
+    } finally { await composition.shutdown(); }
+  });
+});
+
+for (const rejectedContext of [false, true]) {
+  test(`managed install initializes and refreshes the coordinator launch context (stale rejected context=${rejectedContext})`, async () => {
+    await withTempProfile(async (profileDirectory) => {
+      const { artifact, publicKey } = await writeSignedRuntimeArtifact(profileDirectory);
+      const launches: DesktopRuntimeSessionContext[] = [];
+      const port = createDesktopRuntimeSessionPort({
+        sessionLeaseStore: new InMemorySessionLeaseStore(),
+        workerPortFactory: () => {
+          const worker = fakeSessionPort({ ready: true }).port;
+          return { ...worker, start: async (context) => {
+            assert.equal(context.resolution.classification, "managed");
+            launches.push(context);
+            return worker.start(context);
+          } };
+        },
+      });
+      if (rejectedContext) {
+        await port.start({ resolution: { classification: "rejected" } as never, profileDirectory,
+          runtimeInstallDirectory: join(profileDirectory, "runtime"), endpoint: privateEndpoint("in-memory", "authority-0001") });
+      }
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: fakeAuthorityLock().port,
+        privateEndpoint: fakePrivateEndpoint().port,
+        runtimeSession: port,
+        installer: { trustedKeys: { "test-key": publicKey.export({ type: "spki", format: "pem" }) } },
+        resolver: { probe: fullParityProbe() },
+        managedInstall: { installDirectory: join(profileDirectory, "runtime"), locateArtifact: async () => artifact, activateOptions: { selfCheck: { run: async () => undefined } } },
+        facade: { getActiveWorkspace: () => ({ workspaceId: "ws-0001", cwd: profileDirectory }), openUrl: async () => {} },
+      });
+      const events: Array<{ kind: string; receipt?: { status: string; error?: { message: string } } }> = [];
+      composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+      try {
+        await composition.facade.command({ commandName: "runtime.install", input: {}, requestId: "install" as CommandRequestId, idempotencyKey: "install" as IdempotencyKey });
+        assert.equal(composition.isBusy(), true);
+        const installingFacade = composition.facade;
+        await composition.reload();
+        assert.equal(composition.facade, installingFacade);
+        assert.equal(composition.isBusy(), true);
+        const deadline = Date.now() + 5000;
+        while (!events.some((event) => event.kind === "command.receipt") && Date.now() < deadline) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        const receipt = events.find((event) => event.kind === "command.receipt")?.receipt;
+        assert.equal(receipt?.status, "completed", receipt?.error?.message);
+        assert.equal(launches.length, 1);
+        assert.equal((await composition.facade.bootstrap()).runtime.status, "connected");
+        assert.equal(composition.isBusy(), false);
+        // Login must use the just-installed Runtime, even with no system omp.
+        const loginEvents: typeof events = [];
+        const off = composition.facade.subscribe({ scope: "all" }, event => loginEvents.push(event));
+        const spawn = mock.method(childProcess, "spawn", ((exe: string, args: string[]) => {
+          assert.ok(exe.startsWith(profileDirectory));
+          assert.equal(basename(exe), runtimeEntrypointFor(`${process.platform}-${process.arch}`));
+          assert.deepEqual(args, ["--mode", "rpc"]);
+          const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), kill: () => true });
+          child.stdin.on("data", data => {
+            assert.equal(JSON.parse(String(data)).providerId, "openai-codex");
+            child.stdout.write(JSON.stringify({ type: "response", command: "login", success: true }) + "\n");
+          });
+          queueMicrotask(() => child.stdout.write(JSON.stringify({ type: "ready" }) + "\n"));
+          return child;
+        }) as unknown as typeof childProcess.spawn);
+        syncBuiltinESMExports();
+        try {
+          await composition.facade.command({ commandName: "models.login.start", input: { providerId: "openai-codex" }, requestId: "login" as CommandRequestId, idempotencyKey: "login" as IdempotencyKey });
+          const deadline = Date.now() + 2000;
+          while (!loginEvents.some(event => event.kind === "command.receipt") && Date.now() < deadline) await new Promise<void>(resolve => setImmediate(resolve));
+          assert.equal(loginEvents.find(event => event.kind === "command.receipt")?.receipt?.status, "completed");
+          assert.equal(spawn.mock.callCount(), 1);
+        } finally { spawn.mock.restore(); syncBuiltinESMExports(); off(); }
+      } finally { await composition.shutdown(); }
+    });
+  });
+}
+
+test("managedInstall.prepareStaging reaches the installer when the keys come from the packaged directory", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    const { artifact, publicKey } = await writeSignedRuntimeArtifact(profileDirectory);
+    const keys = join(profileDirectory, "runtime-keys");
+    await mkdir(keys);
+    await writeFile(join(keys, "trusted-public.pem"), publicKey.export({ type: "spki", format: "pem" }));
+    await writeFile(join(keys, "trusted-keys.json"), JSON.stringify({ schema: 1, activeKeyId: "test-key", keys: { "test-key": "trusted-public.pem" } }));
+    const staged: string[] = [];
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port,
+      authorityLock: fakeAuthorityLock().port,
+      privateEndpoint: fakePrivateEndpoint().port,
+      runtimeSession: createDesktopRuntimeSessionPort({
+        sessionLeaseStore: new InMemorySessionLeaseStore(),
+        workerPortFactory: () => fakeSessionPort({ ready: true }).port,
+      }),
+      resolver: { probe: fullParityProbe() },
+      managedInstall: {
+        installDirectory: join(profileDirectory, "runtime"),
+        trustedKeysDirectory: keys,
+        environmentTrustedKeys: false,
+        locateArtifact: async () => artifact,
+        activateOptions: { selfCheck: { run: async () => undefined } },
+        prepareStaging: async (directory) => { staged.push(directory); },
+      },
+      facade: { getActiveWorkspace: () => ({ workspaceId: "ws-0001", cwd: profileDirectory }) },
+    });
+    const events: Array<{ kind: string; receipt?: { status: string; error?: { message: string } } }> = [];
+    composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+    try {
+      await composition.facade.command({ commandName: "runtime.install", input: {}, requestId: "install-staging" as CommandRequestId, idempotencyKey: "install-staging" as IdempotencyKey });
+      const deadline = Date.now() + 5000;
+      while (!events.some((event) => event.kind === "command.receipt") && Date.now() < deadline) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      const receipt = events.find((event) => event.kind === "command.receipt")?.receipt;
+      assert.equal(receipt?.status, "completed", receipt?.error?.message);
+      assert.equal(staged.length, 1);
+      assert.match(basename(staged[0]!), /^\.staging-/u);
+    } finally { await composition.shutdown(); }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Second owner fails closed
+// ---------------------------------------------------------------------------
+
+test("a second owner rejects without creating an endpoint or releasing anything", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    const lock = fakeAuthorityLock(new AuthorityAlreadyOwnedError("desktop", T0));
+    const endpoint = fakePrivateEndpoint();
+    const session = fakeSessionPort();
+    await assert.rejects(
+      createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: lock.port,
+        privateEndpoint: endpoint.port,
+        runtimeSession: session.port,
+      }),
+      (error: unknown) => error instanceof AuthorityAlreadyOwnedError,
+    );
+    assert.deepEqual(lock.calls, ["acquire"]);
+    assert.deepEqual(endpoint.calls, []);
+    assert.deepEqual(session.calls, []);
+    assert.equal(lock.released, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reload preservation
+// ---------------------------------------------------------------------------
+
+test("reload returns the same composition, swaps the facade and leaves Host/Runtime alive", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const lock = fakeAuthorityLock();
+      const endpoint = fakePrivateEndpoint();
+      const session = fakeSessionPort({ ready: true });
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: lock.port,
+        privateEndpoint: endpoint.port,
+        runtimeSession: session.port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+      });
+      try {
+        const oldFacade = composition.facade;
+
+        const reloaded: DesktopHostComposition = await composition.reload();
+
+        assert.equal(reloaded, composition);
+        assert.notEqual(composition.facade, oldFacade);
+        assert.deepEqual(session.calls, ["session.start"]);
+        assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+        assert.deepEqual(lock.calls, ["acquire"]);
+        assert.equal(lock.released, false);
+
+        // The old client session is closed; the new one serves a fresh bootstrap.
+        await assert.rejects(
+          () => oldFacade.bootstrap(),
+          (error: unknown) => {
+            assertClosedFacadeError(error);
+            return true;
+          },
+        );
+        const bootstrap = await composition.facade.bootstrap();
+        assert.equal(bootstrap.runtime.status, "connected");
+        assert.equal("snapshot" in bootstrap, true);
+      } finally { await composition.shutdown(); }
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shutdown ordering and fail-closed behavior
+// ---------------------------------------------------------------------------
+
+test("shutdown orders facade close, runtime stop, endpoint release, lease release", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const lock = fakeAuthorityLock();
+      const endpoint = fakePrivateEndpoint();
+      const session = fakeSessionPort({ ready: true });
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: lock.port,
+        privateEndpoint: endpoint.port,
+        runtimeSession: session.port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+      });
+      // The facade client session must be closed before the runtime stops.
+      session.beforeStop(async () => {
+        await assert.rejects(
+          () => composition.facade.bootstrap(),
+          (error: unknown) => {
+            assertClosedFacadeError(error);
+            return true;
+          },
+        );
+      });
+
+      await composition.shutdown();
+
+      assert.deepEqual(session.calls, ["session.start", "session.stop"]);
+      assert.deepEqual(endpoint.calls, ["endpoint.create", "endpoint.release"]);
+      assert.deepEqual(lock.calls, ["acquire", "lease.release"]);
+      assert.equal(lock.released, true);
+      await assert.rejects(
+        () => composition.facade.bootstrap(),
+        (error: unknown) => {
+          assertClosedFacadeError(error);
+          return true;
+        },
+      );
+      // A second shutdown is a no-op.
+      await composition.shutdown();
+      assert.deepEqual(lock.calls, ["acquire", "lease.release"]);
+    });
+  });
+});
+
+test("shutdown failure fails closed and never releases a lease it owns", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const lock = fakeAuthorityLock();
+      const endpoint = fakePrivateEndpoint({ releaseError: new Error("endpoint release failed") });
+      const session = fakeSessionPort({ ready: true });
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: lock.port,
+        privateEndpoint: endpoint.port,
+        runtimeSession: session.port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+      });
+
+      await assert.rejects(() => composition.shutdown(), /endpoint release failed/u);
+
+      // Runtime was stopped but the authority lease stays held (fail closed).
+      assert.deepEqual(session.calls, ["session.start", "session.stop"]);
+      assert.deepEqual(endpoint.calls, ["endpoint.create", "endpoint.release"]);
+      assert.deepEqual(lock.calls, ["acquire"]);
+      assert.equal(lock.released, false);
+    });
+  });
+});
+
+test("update restart rechecks commands accepted while the restore intent is being saved", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const session = fakeSessionPort({ ready: true });
+      let finishOpen!: (value: { workspaces: [] }) => void;
+      let acceptDuringPrepare = true;
+      let began = false;
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: fakeAuthorityLock().port,
+        privateEndpoint: fakePrivateEndpoint().port,
+        runtimeSession: session.port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+        facade: { workspaces: {
+          list: () => ({ workspaces: [] }),
+          open: () => new Promise(resolve => { finishOpen = resolve; }),
+          pick: async () => ({ workspaces: [] }),
+        } },
+      });
+      session.port.prepareRestart = async beforeStop => {
+        // The real port yields while persisting the restore intent.
+        await new Promise<void>(resolve => setImmediate(resolve));
+        if (acceptDuringPrepare) await composition.facade.command({
+          commandName: "workspace.open", input: { workspaceId: "ws-0001" as WorkspaceId },
+          requestId: "restart-workspace" as CommandRequestId, idempotencyKey: "restart-workspace" as IdempotencyKey,
+        });
+        await beforeStop?.();
+        await session.port.stop();
+      };
+      try {
+        await assert.rejects(() => composition.prepareUpdateRestart!(() => { began = true; }),
+          error => error instanceof UpdateRestartBlockedError && /命令/.test(error.message));
+        assert.equal(began, false);
+        assert.equal(composition.isBusy(), false);
+        assert.match(composition.updateRestartBlocker!()!, /命令/);
+        assert.deepEqual(session.calls, ["session.start"]);
+        assert.equal((await composition.facade.bootstrap()).runtime.status, "connected");
+
+        finishOpen({ workspaces: [] });
+        await new Promise<void>(resolve => setImmediate(resolve));
+        assert.equal(composition.updateRestartBlocker!(), undefined);
+        acceptDuringPrepare = false;
+        session.beforeStop(async () => {
+          assert.equal(began, true);
+          await assert.rejects(() => composition.facade.bootstrap(), error => {
+            assertClosedFacadeError(error);
+            return true;
+          });
+        });
+        await composition.prepareUpdateRestart!(() => { began = true; });
+        assert.equal(began, true);
+        assert.deepEqual(session.calls, ["session.start", "session.stop"]);
+        await assert.rejects(() => composition.facade.command({
+          commandName: "workspace.open", input: { workspaceId: "ws-0001" as WorkspaceId },
+          requestId: "after-restart" as CommandRequestId, idempotencyKey: "after-restart" as IdempotencyKey,
+        }), error => { assertClosedFacadeError(error); return true; });
+      } finally { finishOpen?.({ workspaces: [] }); await composition.shutdown(); }
+    });
+  });
+});
+
+test("update restart reports shutdown started before a later Host cleanup failure", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const session = fakeSessionPort({ ready: true });
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: fakeAuthorityLock().port,
+        privateEndpoint: fakePrivateEndpoint({ releaseError: new Error("endpoint release failed") }).port,
+        runtimeSession: session.port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+      });
+      let began = false;
+      session.port.prepareRestart = async beforeStop => {
+        await beforeStop?.();
+        assert.equal(began, true);
+        await session.port.stop();
+      };
+      await composition.prepareUpdateRestart!(() => { began = true; });
+      await assert.rejects(() => composition.shutdown(), /endpoint release failed/);
+      assert.equal(began, true);
+      assert.ok(session.calls.includes("session.stop"));
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Creation failure cleanup
+// ---------------------------------------------------------------------------
+
+test("creation failure releases every acquired resource without masking the original error", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    const lock = fakeAuthorityLock();
+    const endpoint = fakePrivateEndpoint({ fail: true });
+    await assert.rejects(
+      createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: lock.port,
+        privateEndpoint: endpoint.port,
+      }),
+      /endpoint creation failed/u,
+    );
+    assert.deepEqual(lock.calls, ["acquire", "lease.release"]);
+    assert.equal(lock.released, true);
+    assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+  });
+});
+
+test("a session start failure keeps a read-only Host facade", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const lock = fakeAuthorityLock();
+      const endpoint = fakePrivateEndpoint();
+      const session = fakeSessionPort({ startError: new Error("runtime failed to start") });
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: lock.port,
+        privateEndpoint: endpoint.port,
+        runtimeSession: session.port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+      });
+      assert.equal(composition.status, "read-only");
+      const bootstrap = await composition.facade.bootstrap();
+      assertWithoutSnapshot(bootstrap);
+      assert.equal(bootstrap.runtime.unavailableCode, "launch-failed");
+      assert.match(bootstrap.runtime.unavailableReason ?? "", /runtime failed to start/u);
+      assert.deepEqual(session.calls, ["session.start", "session.stop"]);
+      assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+      assert.deepEqual(lock.calls, ["acquire"]);
+      assert.equal(lock.released, false);
+      await composition.shutdown();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Authority identity stability
+// ---------------------------------------------------------------------------
+
+test("the authority identity is stable across reloads for one lease", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    const lock = fakeAuthorityLock();
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port,
+      authorityLock: lock.port,
+      privateEndpoint: fakePrivateEndpoint().port,
+    });
+    try {
+      const first = await composition.facade.bootstrap();
+      await composition.reload();
+      const second = await composition.facade.bootstrap();
+      assert.deepEqual(first.authority, second.authority);
+      assert.ok(first.authority.authorityEpoch >= 1);
+    } finally { await composition.shutdown(); }
+  });
+});
+
+test("Runtime maintenance rejects missing rollback targets and active residents", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    let busy = false;
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port,
+      authorityLock: fakeAuthorityLock().port,
+      privateEndpoint: fakePrivateEndpoint().port,
+      runtimeSession: fakeSessionPort({
+        listResidents: () => ({
+          residents: busy ? [{ phase: "running", sessionId: "session-test" as ResidentsReadModel["residents"][number]["sessionId"], workspaceId: "workspace-test" as WorkspaceId, pendingMessages: 0, lastActivityAt: T0 }] : [],
+          generatedAt: T0,
+        } as ResidentsReadModel),
+      }).port,
+    });
+    try {
+      assert.ok(composition.rollbackRuntime);
+      assert.ok(composition.pruneRuntimes);
+      await assert.rejects(() => composition.rollbackRuntime!(), /No previous Runtime/);
+      await composition.pruneRuntimes();
+      busy = true;
+      await assert.rejects(() => composition.rollbackRuntime!(), /Finish active sessions/);
+      await assert.rejects(() => composition.pruneRuntimes!(), /Finish active sessions/);
+    } finally {
+      await composition.shutdown();
+    }
+  });
+});

@@ -1,0 +1,125 @@
+import { expect, test } from "bun:test";
+import { Agent, type CustomMessage } from "@oh-my-pi/pi-agent-core";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { ModelRegistry } from "../src/config/model-registry";
+import { Settings } from "../src/config/settings";
+import { AgentSession } from "../src/session/agent-session";
+import { SessionManager } from "../src/session/session-manager";
+import { HarnessSessionGuiService } from "../src/harness/services/session-gui-service";
+import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+
+test("identical queue text has independent stable IDs and removes all skill companions", async () => {
+	const auth = createInMemoryAuthStorage();
+	const agent = new Agent({
+		initialState: { model: getBundledModel("anthropic", "claude-sonnet-4-5")!, tools: [], systemPrompt: ["Test"] },
+		streamFn: (() => {
+			throw Error("No paid calls");
+		}) as never,
+	});
+	const session = new AgentSession({
+		agent,
+		sessionManager: SessionManager.inMemory(),
+		settings: Settings.isolated(),
+		modelRegistry: new ModelRegistry(auth),
+	});
+	agent.state.isStreaming = true;
+	try {
+		const prelude = (content: string): CustomMessage => ({
+			role: "custom",
+			customType: "skill-prompt",
+			content,
+			display: true,
+			attribution: "user",
+			timestamp: Date.now(),
+		});
+		await session.followUp("same", undefined, { prependMessages: [prelude("first")] });
+		await session.followUp("same", undefined, { prependMessages: [prelude("second")] });
+		const first = session.getHarnessQueueSnapshot();
+		expect(first).toHaveLength(2);
+		expect(session.getQueuedMessageEntries().map(row => row.id)).toEqual(first.map(row => row.id));
+		expect(session.getQueuedMessages().followUp).toEqual(["same", "same"]);
+		expect(first[0]!.id).not.toBe(first[1]!.id);
+		expect(session.getHarnessQueueSnapshot()).toEqual(first);
+		expect(session.steerHarnessQueuedMessage(first[1]!.id)).toBe(true);
+		expect(session.getHarnessQueueSnapshot().find(row => row.id === first[1]!.id)?.queue).toBe("steering");
+		expect(agent.peekSteeringQueue()).toHaveLength(2);
+		expect(session.removeQueuedMessage({ id: first[1]!.id }, "steering")).toBe(true);
+		expect(agent.peekSteeringQueue()).toHaveLength(0);
+		expect(session.getHarnessQueueSnapshot().map(row => row.id)).toEqual([first[0]!.id]);
+		expect(agent.peekFollowUpQueue()).toHaveLength(2);
+		expect(session.removeHarnessQueuedMessage(first[1]!.id)).toBe(false);
+		const service = new HarnessSessionGuiService(session);
+		expect(
+			await service.execute({ kind: "session.queue.takeback", sessionId: session.sessionId, id: first[0]!.id }),
+		).toEqual({ removed: true, recoveryId: first[0]!.id, text: "same", images: [] });
+		expect(agent.peekFollowUpQueue()).toHaveLength(0);
+		// A failed Host transfer can retry the same ID without re-enqueuing anything.
+		expect(
+			await service.execute({ kind: "session.queue.takeback", sessionId: session.sessionId, id: first[0]!.id }),
+		).toEqual({ removed: true, recoveryId: first[0]!.id, text: "same", images: [] });
+		const recoveryList = (await service.execute({ kind: "session.queue.list", sessionId: session.sessionId })) as {
+			items: Array<{ state: string }>;
+		};
+		expect(recoveryList.items[0]!.state).toBe("recovering");
+		expect(
+			await service.execute({ kind: "session.queue.ack", sessionId: session.sessionId, id: first[0]!.id }),
+		).toEqual({ removed: true });
+		expect(
+			await service.execute({ kind: "session.queue.takeback", sessionId: session.sessionId, id: first[0]!.id }),
+		).toEqual({ removed: false, images: [] });
+		expect(await service.execute({ kind: "session.queue.list", sessionId: "stale" }).catch(error => error.code)).toBe(
+			"INVALID_ARGUMENT",
+		);
+	} finally {
+		agent.state.isStreaming = false;
+		await session.dispose();
+		auth.close();
+	}
+});
+
+test("image takeback retains one transfer until explicit acknowledgement", async () => {
+	let queued = true,
+		exports = 0,
+		cleanups = 0;
+	const item = { id: "message", queue: "followUp", state: "pending", text: "with image", imageCount: 1 };
+	const asset = {
+		artifactId: "11111111-1111-1111-1111-111111111111",
+		kind: "image",
+		name: "a.png",
+		mimeType: "image/png",
+		bytes: 1,
+		sha256: "a".repeat(64),
+	};
+	const session = {
+		sessionId: "s",
+		getHarnessQueueSnapshot: () => (queued ? [item] : []),
+		getHarnessQueueDraft: () =>
+			queued ? { text: "with image", images: [{ mimeType: "image/png", data: "YQ==" }] } : undefined,
+		removeHarnessQueuedMessage: () => {
+			const found = queued;
+			queued = false;
+			return found;
+		},
+	};
+	const files = {
+		outputBytes: async () => {
+			exports++;
+			return asset;
+		},
+		removeJob: async () => {
+			cleanups++;
+		},
+	};
+	const service = new HarnessSessionGuiService(session as never, files as never);
+	const operation = { kind: "session.queue.takeback" as const, sessionId: "s", id: "message" };
+	const first = await service.execute(operation);
+	expect(queued).toBe(false);
+	expect(exports).toBe(1);
+	// Simulate lost receipt/failed Host promotion: a new request reuses the transfer.
+	expect(await service.execute(operation)).toEqual(first);
+	expect(exports).toBe(1);
+	expect(cleanups).toBe(0);
+	await service.execute({ kind: "session.queue.ack", sessionId: "s", id: "message" });
+	expect(cleanups).toBe(1);
+	expect(await service.execute(operation)).toEqual({ removed: false, images: [] });
+});

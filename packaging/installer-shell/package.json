@@ -1,0 +1,10 @@
+{
+  "name": "juling-harness-installer-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron host shell for the Juling Harness installer UI",
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "node ../../node_modules/electron/cli.js ."
+  }
+}

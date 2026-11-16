@@ -1,0 +1,326 @@
+import { randomUUID } from "node:crypto";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AssistantMessage, Judge } from "@oh-my-pi/pi-ai";
+import { prompt } from "@oh-my-pi/pi-utils";
+import type { Rule } from "../../capability/rule";
+import {
+	buildOmfgRuleForPath,
+	extractGeneratedRuleJson,
+	historyOutputs,
+	type OmfgRuleSourceLevel,
+	type ParsedGeneratedRule,
+	parseGeneratedRule,
+	sanitizeRuleName,
+	validateParsedRuleAgainstAssistantHistory,
+} from "../../modes/controllers/omfg-rule";
+import { TtsrToolInspector, type TtsrTool } from "../../session/ttsr-outputs";
+import omfgUserPrompt from "../../prompts/system/omfg-user.md" with { type: "text" };
+
+const DEFAULT_MAX_INPUT_LENGTH = 64 * 1024;
+const DEFAULT_MAX_CANDIDATE_BYTES = 1024 * 1024;
+
+export type HarnessOmfgScope = OmfgRuleSourceLevel;
+
+export interface HarnessOmfgCandidate {
+	candidateId: string;
+	ruleName: string;
+	fileContent: string;
+	validated: boolean;
+	repairedCondition: boolean;
+}
+
+export interface HarnessOmfgModelPort {
+	runEphemeralTurn(args: {
+		promptText: string;
+		dedupeReply?: boolean;
+		signal?: AbortSignal;
+	}): Promise<{ replyText: string; assistantMessage: AssistantMessage }>;
+	getMessages(): readonly AgentMessage[];
+	getTools?(): readonly TtsrTool[];
+	getCwd?(): string;
+	ruleJudge?(): Judge | undefined;
+}
+
+export interface HarnessOmfgStoragePort {
+	resolveRulePath(scope: HarnessOmfgScope, ruleName: string): string;
+	exists(filePath: string): Promise<boolean>;
+	write(filePath: string, content: string): Promise<void>;
+	writeAtomic?(filePath: string, content: string): Promise<void>;
+}
+
+export interface HarnessOmfgLivePort {
+	register(rule: Rule): boolean | Promise<boolean>;
+	reload?(rule: Rule): void | Promise<void>;
+}
+
+export interface HarnessOmfgInteractionPort {
+	confirm(input: { commandId: string; title: string; message: string; destructive: true }): Promise<boolean>;
+}
+
+export interface HarnessOmfgServiceOptions {
+	idGenerator?: () => string;
+	rollback?: (filePath: string) => void | Promise<void>;
+	finalize?: (filePath: string) => void | Promise<void>;
+	maxInputLength?: number;
+	maxCandidateBytes?: number;
+}
+
+export type HarnessOmfgCommitResult =
+	| { committed: true; scope: HarnessOmfgScope; ruleName: string }
+	| { committed: false; reason: "cancelled"; scope: HarnessOmfgScope; ruleName: string };
+
+export class HarnessOmfgError extends Error {
+	constructor(
+		readonly code: "INVALID_ARGUMENT" | "INTERACTION_STALE" | "COMMAND_BLOCKED" | "INTERNAL_ERROR",
+		message: string,
+		readonly partial = false,
+	) {
+		super(message);
+		this.name = "HarnessOmfgError";
+	}
+}
+
+interface CandidateRecord {
+	candidateId: string;
+	complaint: string;
+	candidate: ParsedGeneratedRule;
+	validated: boolean;
+	repairedCondition: boolean;
+}
+
+/** Presentation-neutral, one-candidate OMFG workflow. */
+export class HarnessOmfgService {
+	readonly #idGenerator: () => string;
+	readonly #rollback: ((filePath: string) => void | Promise<void>) | undefined;
+	readonly #finalize: ((filePath: string) => void | Promise<void>) | undefined;
+	readonly #maxInputLength: number;
+	readonly #maxCandidateBytes: number;
+	#candidate: CandidateRecord | undefined;
+	#running = false;
+
+	constructor(
+		private readonly model: HarnessOmfgModelPort,
+		private readonly storage: HarnessOmfgStoragePort,
+		private readonly live: HarnessOmfgLivePort,
+		private readonly interaction: HarnessOmfgInteractionPort,
+		options: HarnessOmfgServiceOptions = {},
+	) {
+		this.#idGenerator = options.idGenerator ?? randomUUID;
+		this.#rollback = options.rollback;
+		this.#finalize = options.finalize;
+		this.#maxInputLength = options.maxInputLength ?? DEFAULT_MAX_INPUT_LENGTH;
+		this.#maxCandidateBytes = options.maxCandidateBytes ?? DEFAULT_MAX_CANDIDATE_BYTES;
+		if (!Number.isSafeInteger(this.#maxInputLength) || this.#maxInputLength < 1) {
+			throw new RangeError("OMFG input limit must be a positive integer");
+		}
+		if (!Number.isSafeInteger(this.#maxCandidateBytes) || this.#maxCandidateBytes < 1) {
+			throw new RangeError("OMFG candidate limit must be a positive integer");
+		}
+	}
+
+	async generate(complaint: string): Promise<HarnessOmfgCandidate> {
+		const normalized = this.#requireInput(complaint, "OMFG complaint");
+		return this.#generateCandidate(normalized, prompt.render(omfgUserPrompt, { complaint: normalized }));
+	}
+
+	async amend(candidateId: string, feedback: string): Promise<HarnessOmfgCandidate> {
+		const current = this.#require(candidateId);
+		const normalized = this.#requireInput(feedback, "OMFG amendment feedback");
+		return this.#generateCandidate(
+			current.complaint,
+			prompt.render(omfgUserPrompt, {
+				complaint: current.complaint,
+				feedback: `User requested this amendment before saving:\n${normalized}`,
+				previousRule: current.candidate.fileContent,
+			}),
+			current.candidateId,
+		);
+	}
+
+	async commit(
+		candidateId: string,
+		scope: HarnessOmfgScope,
+		overwrite: boolean,
+		commandId: string,
+	): Promise<HarnessOmfgCommitResult> {
+		const current = this.#require(candidateId);
+		if (scope !== "project" && scope !== "user") {
+			throw new HarnessOmfgError("INVALID_ARGUMENT", "OMFG commit scope must be project or user");
+		}
+		const ruleName = sanitizeRuleName(current.candidate.rule.name);
+		const filePath = this.#resolvePath(scope, ruleName);
+		if ((await this.#targetExists(filePath)) && !overwrite) {
+			const approved = await this.#confirmOverwrite(ruleName, commandId);
+			if (!approved) return { committed: false, reason: "cancelled", scope, ruleName };
+		}
+
+		await this.#write(filePath, current.candidate.fileContent);
+		const rule = buildOmfgRuleForPath(ruleName, current.candidate.fileContent, filePath, scope);
+		await this.#register(rule, filePath);
+		try {
+			await this.#reload(rule);
+		} finally {
+			await this.#finalizeWrite(filePath);
+		}
+		this.#candidate = undefined;
+		return { committed: true, scope, ruleName };
+	}
+
+	#requireInput(value: string, label: string): string {
+		const normalized = value.trim();
+		if (normalized.length === 0) throw new HarnessOmfgError("INVALID_ARGUMENT", `${label} must not be empty`);
+		if (normalized.length > this.#maxInputLength) {
+			throw new HarnessOmfgError("INVALID_ARGUMENT", `${label} is too long`);
+		}
+		return normalized;
+	}
+
+	async #generateCandidate(complaint: string, promptText: string, candidateId?: string): Promise<HarnessOmfgCandidate> {
+		if (this.#running) throw new HarnessOmfgError("COMMAND_BLOCKED", "An OMFG generation is already running");
+		this.#running = true;
+		try {
+			const replyText = (await this.model.runEphemeralTurn({ promptText, dedupeReply: false })).replyText;
+			return await this.#acceptCandidate(complaint, replyText, candidateId);
+		} catch (error) {
+			if (error instanceof HarnessOmfgError) throw error;
+			throw new HarnessOmfgError("INTERNAL_ERROR", "OMFG generation failed");
+		} finally {
+			this.#running = false;
+		}
+	}
+
+	async #acceptCandidate(
+		complaint: string,
+		replyText: string,
+		candidateId = this.#idGenerator(),
+	): Promise<HarnessOmfgCandidate> {
+		const parsed = parseGeneratedRule(replyText);
+		if ("error" in parsed) {
+			const message = extractGeneratedRuleJson(replyText)
+				? "The model returned an invalid rule; the current candidate was kept"
+				: "The model did not return a rule; the current candidate was kept";
+			throw new HarnessOmfgError("COMMAND_BLOCKED", message);
+		}
+		if (Buffer.byteLength(parsed.fileContent, "utf8") > this.#maxCandidateBytes) {
+			throw new HarnessOmfgError(
+				"COMMAND_BLOCKED",
+				"The generated rule is too large; the current candidate was kept",
+			);
+		}
+
+		let validation: Awaited<ReturnType<typeof validateParsedRuleAgainstAssistantHistory>>;
+		try {
+			const inspector = new TtsrToolInspector(
+				() => this.model.getTools?.() ?? [],
+				() => this.model.getCwd?.() ?? process.cwd(),
+			);
+			validation = await validateParsedRuleAgainstAssistantHistory(
+				parsed,
+				historyOutputs(this.model.getMessages(), inspector),
+				parsed.rule.question ? this.model.ruleJudge?.() : undefined,
+			);
+		} catch {
+			throw new HarnessOmfgError("INTERNAL_ERROR", "OMFG rule validation failed");
+		}
+		const record: CandidateRecord = {
+			candidateId,
+			complaint,
+			candidate: validation.candidate,
+			validated: validation.validation.matched,
+			repairedCondition: validation.repairedCondition,
+		};
+		this.#candidate = record;
+		return this.#dto(record);
+	}
+
+	#require(candidateId: string): CandidateRecord {
+		if (this.#candidate === undefined || this.#candidate.candidateId !== candidateId) {
+			throw new HarnessOmfgError("INTERACTION_STALE", "OMFG candidate is stale or unknown");
+		}
+		return this.#candidate;
+	}
+
+	#resolvePath(scope: HarnessOmfgScope, ruleName: string): string {
+		try {
+			return this.storage.resolveRulePath(scope, ruleName);
+		} catch {
+			throw new HarnessOmfgError("INTERNAL_ERROR", "The rule target could not be resolved");
+		}
+	}
+
+	async #targetExists(filePath: string): Promise<boolean> {
+		try {
+			return await this.storage.exists(filePath);
+		} catch {
+			throw new HarnessOmfgError("INTERNAL_ERROR", "The rule target could not be checked");
+		}
+	}
+
+	async #confirmOverwrite(ruleName: string, commandId: string): Promise<boolean> {
+		try {
+			return await this.interaction.confirm({
+				commandId,
+				title: "Overwrite TTSR rule?",
+				message: `${ruleName} already exists. Overwrite it?`,
+				destructive: true,
+			});
+		} catch {
+			throw new HarnessOmfgError("INTERNAL_ERROR", "OMFG overwrite confirmation failed");
+		}
+	}
+
+	async #write(filePath: string, content: string): Promise<void> {
+		try {
+			if (this.storage.writeAtomic) await this.storage.writeAtomic(filePath, content);
+			else await this.storage.write(filePath, content);
+		} catch {
+			throw new HarnessOmfgError("INTERNAL_ERROR", "The rule could not be written");
+		}
+	}
+
+	async #register(rule: Rule, filePath: string): Promise<void> {
+		let registered = false;
+		try {
+			registered = await this.live.register(rule);
+		} catch {
+			registered = false;
+		}
+		if (registered) return;
+		if (this.#rollback) {
+			try {
+				await this.#rollback(filePath);
+			} catch {}
+		}
+		throw new HarnessOmfgError(
+			"INTERNAL_ERROR",
+			"The rule was written but could not be registered for live use",
+			true,
+		);
+	}
+
+	async #reload(rule: Rule): Promise<void> {
+		if (!this.live.reload) return;
+		try {
+			await this.live.reload(rule);
+		} catch {
+			throw new HarnessOmfgError("INTERNAL_ERROR", "The rule was committed but live reload failed", true);
+		}
+	}
+
+	async #finalizeWrite(filePath: string): Promise<void> {
+		if (!this.#finalize) return;
+		try {
+			await this.#finalize(filePath);
+		} catch {}
+	}
+
+	#dto(record: CandidateRecord): HarnessOmfgCandidate {
+		return structuredClone({
+			candidateId: record.candidateId,
+			ruleName: sanitizeRuleName(record.candidate.rule.name),
+			fileContent: record.candidate.fileContent,
+			validated: record.validated,
+			repairedCondition: record.repairedCondition,
+		});
+	}
+}

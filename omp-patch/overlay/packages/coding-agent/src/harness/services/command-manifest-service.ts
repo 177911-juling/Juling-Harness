@@ -1,0 +1,325 @@
+import * as crypto from "node:crypto";
+import { buildSkillPromptMessage, parseSkillInvocation } from "../../extensibility/skills";
+import { renderFileSlashCommand, type FileSlashCommand } from "../../extensibility/slash-commands";
+import type { AgentSession } from "../../session/agent-session";
+import { SKILL_PROMPT_MESSAGE_TYPE } from "../../session/messages";
+import { BUILTIN_SLASH_COMMANDS_INTERNAL, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
+import type { SlashCommandRuntime } from "../../slash-commands/types";
+
+export interface HarnessOperatorCommand {
+	side?: boolean;
+	id: string;
+	name: string;
+	aliases: string[];
+	description: string;
+	source: "builtin" | "skill" | "extension" | "prompt-template" | "file-command";
+	implementation: "shared-service" | "headless-handle" | "tui-compatibility" | "extension-command";
+	interactionKinds: Array<"confirm" | "select" | "input" | "editor" | "approval" | "ask">;
+	presentation: "generic-form" | "terminal" | "native";
+	availability: "available";
+	argumentSchema?: { type: "string"; hint?: string };
+	risk: "normal" | "sensitive" | "destructive";
+	effect: "read" | "session" | "workspace" | "process" | "external";
+	contractTestId: string;
+}
+
+export interface HarnessOperatorCommandManifest {
+	generatedAt: string;
+	upstreamCommit: string;
+	hash: string;
+	commands: HarnessOperatorCommand[];
+	unclassifiedBuiltins: string[];
+}
+
+const UPSTREAM_COMMIT = "b5a6b2f7e5b6606b6562e678ead83f21738f34a0";
+const HARNESS_SESSION_TITLE_ENSURE_ID = "harness.session-title.ensure";
+const DESTRUCTIVE = new Set(["delete", "drop", "clear", "fork"]);
+const READ_ONLY = new Set(["help", "version", "stats", "models", "tree", "branch", "goal"]);
+
+export class HarnessCommandManifestError extends Error {
+	constructor(
+		readonly code: "COMMAND_UNKNOWN" | "INVALID_ARGUMENT" | "TERMINAL_REQUIRED",
+		message: string,
+		readonly details?: Record<string, unknown>,
+	) {
+		super(message);
+		this.name = "HarnessCommandManifestError";
+	}
+}
+
+export class HarnessCommandManifestService {
+	#current: HarnessOperatorCommandManifest;
+	#commandsById = new Map<string, HarnessOperatorCommand>();
+
+	constructor(private readonly session: AgentSession) {
+		this.#current = this.#replace(baselineCommands());
+	}
+
+	manifest(): HarnessOperatorCommandManifest {
+		return structuredClone(this.#current);
+	}
+
+	manifestHash(): string {
+		return this.#current.hash;
+	}
+
+	async refresh(): Promise<HarnessOperatorCommandManifest> {
+		const { buildAvailableSlashCommands } = await import("../../slash-commands/available-commands");
+		const commands = baselineCommands();
+		const availableSession = {
+			extensionRunner: this.session.extensionRunner,
+			customCommands: this.session.customCommands ?? [],
+			mcpPromptCommands: this.session.mcpPromptCommands ?? [],
+			skills: this.session.skills ?? [],
+			skillsSettings: this.session.skillsSettings,
+			setSlashCommands: (commands: FileSlashCommand[]) => this.session.setSlashCommands?.(commands),
+			sessionManager: this.session.sessionManager,
+		};
+		for (const command of await buildAvailableSlashCommands(availableSession)) {
+			if (command.source === "builtin") continue;
+			commands.push({
+				id: `${manifestSource(command.source)}.${command.name}`,
+				name: command.name,
+				aliases: [...(command.aliases ?? [])],
+				description: command.description ?? `/${command.name}`,
+				source: manifestSource(command.source),
+				...(command.source === "file" && this.session.slashCommands?.find(file => file.name === command.name)?.side
+					? { side: true }
+					: {}),
+				implementation:
+					command.source === "extension"
+						? "extension-command"
+						: command.source === "skill"
+							? "shared-service"
+							: "headless-handle",
+				interactionKinds: [],
+				presentation: command.source === "extension" ? "generic-form" : "native",
+				availability: "available",
+				...(command.input === undefined ? {} : { argumentSchema: { type: "string", hint: command.input.hint } }),
+				risk: "normal",
+				effect: "session",
+				contractTestId: `CMD-${command.source.toUpperCase()}-${command.name.toUpperCase().replaceAll("-", "_")}`,
+			});
+		}
+		this.#current = this.#replace(commands);
+		return this.manifest();
+	}
+
+	sideCommand(name: string, args: string): { question: string; title: string } {
+		const command = this.session.slashCommands.find(command => command.name === name);
+		if (!command?.side)
+			throw new HarnessCommandManifestError("COMMAND_UNKNOWN", "Side command is no longer available");
+		return { question: renderFileSlashCommand(command, args), title: `/${name}${args ? ` ${args}` : ""}` };
+	}
+
+	async invoke(commandId: string, args: unknown): Promise<unknown> {
+		const descriptor = this.#commandsById.get(commandId);
+		const name =
+			descriptor?.name ?? (commandId.startsWith("builtin.") ? commandId.slice("builtin.".length) : commandId);
+		const command = lookupBuiltinSlashCommand(name);
+		if (!command && descriptor === undefined) {
+			throw new HarnessCommandManifestError("COMMAND_UNKNOWN", `Unknown operator command ${commandId}`);
+		}
+		const argumentText = normalizeArguments(args);
+		if (commandId === HARNESS_SESSION_TITLE_ENSURE_ID) return await this.#ensureSessionTitle(argumentText);
+		if (!command && descriptor !== undefined) return await this.#invokeDynamic(descriptor, argumentText);
+		if (!command) throw new HarnessCommandManifestError("COMMAND_UNKNOWN", `Unknown operator command ${commandId}`);
+		if (!command.handle) {
+			throw new HarnessCommandManifestError("TERMINAL_REQUIRED", `/${command.name} requires the TUI`, {
+				route: "tui.transfer",
+				commandId: `builtin.${command.name}`,
+			});
+		}
+		if (argumentText && !command.allowArgs) {
+			throw new HarnessCommandManifestError("INVALID_ARGUMENT", `/${command.name} does not accept arguments`);
+		}
+		const output: string[] = [];
+		const runtime: SlashCommandRuntime = {
+			session: this.session,
+			sessionManager: this.session.sessionManager,
+			settings: this.session.settings,
+			cwd: this.session.sessionManager.getCwd(),
+			output: text => {
+				output.push(text);
+			},
+			refreshCommands: () => {},
+			reloadPlugins: async () => {
+				await this.session.refreshSkills();
+				await this.refresh();
+			},
+		};
+		const result = await command.handle(
+			{ name: command.name, args: argumentText, text: `/${command.name}${argumentText ? ` ${argumentText}` : ""}` },
+			runtime,
+		);
+		return { output, result: result ?? { consumed: true } };
+	}
+
+	async #ensureSessionTitle(title: string): Promise<unknown> {
+		if (!title) {
+			throw new HarnessCommandManifestError(
+				"INVALID_ARGUMENT",
+				"harness.session-title.ensure requires a non-empty title",
+			);
+		}
+
+		const sessionManager = this.session.sessionManager;
+		const existingTitle = sessionManager.getSessionName();
+		if (existingTitle) {
+			return { applied: false, title: existingTitle, source: sessionManager.titleSource };
+		}
+
+		const applied = await sessionManager.setSessionName(title, "auto", "harness-provisional-fallback");
+		return {
+			applied,
+			title: sessionManager.getSessionName(),
+			source: sessionManager.titleSource,
+		};
+	}
+
+	#replace(commands: HarnessOperatorCommand[]): HarnessOperatorCommandManifest {
+		const unclassifiedBuiltins: string[] = [];
+		// The hash attests to the command surface of this Runtime *build*, so it
+		// covers only the baseline — builtins plus the Harness descriptor — and
+		// never the commands discovered from the operator's environment.
+		//
+		// Managed resolution compares this value against a hash that packaging
+		// froze and Ed25519-signed into `runtime-manifest.json`
+		// (harness-host `classifyManaged`). Skills, extension commands, MCP
+		// prompt templates and file commands are resolved from the user's home
+		// and workspace, so letting any of them reach the hash rejects the
+		// managed Runtime on every machine whose profile differs from the build
+		// machine's. They stay in `commands` and stay invocable; they are simply
+		// not evidence of Runtime identity.
+		const hash = stableCommandBaselineHash({
+			upstreamCommit: UPSTREAM_COMMIT,
+			commands: commands.filter(command => command.source === "builtin"),
+			unclassifiedBuiltins,
+		});
+		this.#commandsById = new Map(commands.map(command => [command.id, command]));
+		return {
+			generatedAt: "1970-01-01T00:00:00.000Z",
+			upstreamCommit: UPSTREAM_COMMIT,
+			hash,
+			commands,
+			unclassifiedBuiltins,
+		};
+	}
+
+	async #invokeDynamic(command: HarnessOperatorCommand, argumentText: string): Promise<unknown> {
+		const text = `/${command.name}${argumentText ? ` ${argumentText}` : ""}`;
+		if (command.source === "skill") {
+			const parsed = parseSkillInvocation(text);
+			const skill =
+				parsed === undefined ? undefined : this.session.skills.find(candidate => candidate.name === parsed.name);
+			if (parsed === undefined || skill === undefined) {
+				throw new HarnessCommandManifestError("COMMAND_UNKNOWN", "Skill command is no longer available");
+			}
+			const built = await buildSkillPromptMessage(skill, parsed, "user");
+			await this.session.promptCustomMessage(
+				{
+					customType: SKILL_PROMPT_MESSAGE_TYPE,
+					content: built.message,
+					display: true,
+					details: built.details,
+					attribution: "user",
+				},
+				{ streamingBehavior: "steer" },
+			);
+			return { queued: true, source: command.source };
+		}
+		let started: boolean;
+		if (command.source === "file-command") {
+			const source = this.session.slashCommands.find(row => row.name === command.name);
+			if (!source) throw new HarnessCommandManifestError("COMMAND_UNKNOWN", "File command is no longer available");
+			started = await this.session.prompt(renderFileSlashCommand(source, argumentText), { runCommands: false });
+		} else started = await this.session.invokeHarnessCommand(command.name, argumentText);
+		return { started, consumed: !started, source: command.source };
+	}
+}
+
+function manifestSource(
+	source: "builtin" | "skill" | "extension" | "custom" | "mcp_prompt" | "file",
+): HarnessOperatorCommand["source"] {
+	switch (source) {
+		case "custom":
+		case "mcp_prompt":
+			return "prompt-template";
+		case "file":
+			return "file-command";
+		default:
+			return source;
+	}
+}
+
+function builtinCommands(): HarnessOperatorCommand[] {
+	return BUILTIN_SLASH_COMMANDS_INTERNAL.map(command => builtinDescriptor(command));
+}
+
+/**
+ * The environment-independent command surface of this build: every builtin plus
+ * the Harness descriptor, all of which carry `source: "builtin"`. This is the
+ * only input to the manifest hash, and packaging re-derives the same value from
+ * a probe to keep `runtime-manifest.json` honest.
+ */
+function baselineCommands(): HarnessOperatorCommand[] {
+	return [...builtinCommands(), harnessCommandDescriptor()];
+}
+
+function harnessCommandDescriptor(): HarnessOperatorCommand {
+	return {
+		id: HARNESS_SESSION_TITLE_ENSURE_ID,
+		name: "session-title.ensure",
+		aliases: [],
+		description: "Ensure the session has a provisional title.",
+		source: "builtin",
+		implementation: "shared-service",
+		interactionKinds: [],
+		presentation: "native",
+		availability: "available",
+		argumentSchema: { type: "string", hint: "Session title" },
+		risk: "normal",
+		effect: "session",
+		contractTestId: "CMD-HARNESS-SESSION-TITLE-ENSURE",
+	};
+}
+
+function builtinDescriptor(command: (typeof BUILTIN_SLASH_COMMANDS_INTERNAL)[number]): HarnessOperatorCommand {
+	return {
+		id: `builtin.${command.name}`,
+		name: command.name,
+		aliases: [...(command.aliases ?? [])],
+		description: command.description,
+		source: "builtin",
+		implementation: command.handle ? "headless-handle" : "tui-compatibility",
+		interactionKinds: [],
+		presentation: command.handle ? "generic-form" : "terminal",
+		availability: "available",
+		...(command.inlineHint === undefined
+			? {}
+			: { argumentSchema: { type: "string" as const, hint: command.inlineHint } }),
+		risk: DESTRUCTIVE.has(command.name) ? "destructive" : "normal",
+		effect: READ_ONLY.has(command.name) ? "read" : "session",
+		contractTestId: `CMD-BUILTIN-${command.name.toUpperCase().replaceAll("-", "_")}`,
+	};
+}
+
+function stableCommandBaselineHash(value: {
+	upstreamCommit: string;
+	commands: HarnessOperatorCommand[];
+	unclassifiedBuiltins: string[];
+}): string {
+	return `sha256:${crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+function normalizeArguments(value: unknown): string {
+	if (value === undefined) return "";
+	if (typeof value === "string") return value.trim();
+	if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+		const keys = Object.keys(value);
+		if (keys.length === 1 && keys[0] === "args" && typeof (value as { args?: unknown }).args === "string") {
+			return (value as { args: string }).args.trim();
+		}
+	}
+	throw new HarnessCommandManifestError("INVALID_ARGUMENT", "Operator command arguments must be a string or {args}");
+}

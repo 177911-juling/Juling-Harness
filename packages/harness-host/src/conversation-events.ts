@@ -1,0 +1,470 @@
+import {
+  CONVERSATION_LIMITS,
+  parseConversationRuntimeEvent,
+  truncateUtf8,
+  utf8ByteLength,
+  type ConversationRuntimeEvent,
+  type HarnessEventEnvelope,
+} from "@juling-harness/harness-protocol";
+import { ReplayTextBuffer } from "./replay-text-buffer.js";
+import { ConversationCoalescer, type ConversationCoalescerOptions } from "./conversation-coalescer.js";
+
+export const CONVERSATION_RUNTIME_EVENT_KINDS = [
+  "conversation.message.started",
+  "conversation.message.delta",
+  "conversation.message.completed",
+  "conversation.tool.started",
+  "conversation.tool.updated",
+  "conversation.tool.completed",
+  "conversation.turn.completed",
+  "conversation.turn.aborted",
+  "conversation.compaction.started",
+  "conversation.compaction.completed",
+  "conversation.notice",
+] as const satisfies readonly ConversationRuntimeEvent["kind"][];
+
+export const CONVERSATION_REPLAY_EVENT_LIMIT = CONVERSATION_LIMITS.LIVE_REPLAY_MAX_EVENTS;
+/** Includes event envelopes and retained coalesced text, measured as UTF-8 JSON. */
+export const CONVERSATION_REPLAY_MAX_BYTES = CONVERSATION_LIMITS.LIVE_REPLAY_MAX_BYTES;
+export const CONVERSATION_REPLAY_GLOBAL_MAX_BYTES = 16 * 1024 * 1024;
+export const CONVERSATION_REPLAY_SESSION_LIMIT = 32;
+
+export function isAllowListedConversationKind(kind: unknown): kind is ConversationRuntimeEvent["kind"] {
+  return typeof kind === "string" && (CONVERSATION_RUNTIME_EVENT_KINDS as readonly string[]).includes(kind);
+}
+
+export interface HarnessConversationForward {
+  readonly envelope: HarnessEventEnvelope<ConversationRuntimeEvent>;
+  /** Monotonic within one conversation session and Runtime controller lifetime. */
+  readonly streamSeq: number;
+}
+
+type ReplaySession = {
+  turnId?: string;
+  overflowed?: boolean;
+  byteSize: number;
+  readonly events: Map<string, HarnessConversationForward>;
+  readonly eventBytes: Map<string, number>;
+  readonly deltaChunks: Map<string, { totalBytes: number; lastKey: string; nextIndex: number }>;
+  readonly toolBuffers: Map<string, ReplayTextBuffer>;
+};
+
+function turnIdOf(event: ConversationRuntimeEvent): string | undefined {
+  return "turnId" in event ? event.turnId : undefined;
+}
+
+/**
+ * Live conversation fan-out. Besides current delivery, it retains a bounded,
+ * normalized reconstruction of each session's open turn. Desktop session
+ * selection can explicitly replay that reconstruction after publishing the
+ * selected Runtime identity; ordinary facade reloads do not replay it.
+ */
+export class ConversationEventFanout {
+  readonly #listeners = new Set<(event: HarnessConversationForward) => void>();
+  readonly #resyncListeners = new Set<(reason: string) => void>();
+  readonly #replay = new Map<string, ReplaySession>();
+  readonly #streamSeq = new Map<string, number>();
+  readonly #evictedTurns = new Map<string, string | undefined>();
+  #replayBytes = 0;
+  #epoch: number | undefined;
+  readonly #coalescer: ConversationCoalescer;
+
+  constructor(readonly options: { readonly incrementalToolReplay?: boolean; readonly backgroundCoalescing?: boolean;
+    readonly timers?: Pick<ConversationCoalescerOptions, "setTimer" | "clearTimer">;
+    /** Slice budget / scheduler for bulk flushes (tests inject a manual one). */
+    readonly delivery?: Pick<ConversationCoalescerOptions, "schedule" | "cancelSchedule" | "sliceEvents" | "sliceMs" | "now"> } = {}) {
+    this.#coalescer = new ConversationCoalescer({ ...options.timers, ...options.delivery, emit: (envelope) => this.#deliver(envelope) });
+  }
+
+  setVisibleSessions(ids: ReadonlySet<string> | undefined): void {
+    this.#coalescer.setVisibleSessions(this.options.backgroundCoalescing === true ? ids : undefined);
+  }
+
+  flush(): void { this.#coalescer.flush(); }
+
+  resetEpoch(epoch: number): void {
+    if (this.#epoch !== undefined && this.#epoch !== epoch) {
+      this.#coalescer.reset();
+      this.#replay.clear(); this.#streamSeq.clear(); this.#evictedTurns.clear(); this.#replayBytes = 0;
+    }
+    this.#epoch = epoch;
+  }
+
+  getDiagnostics(): Readonly<Record<string, number>> {
+    let events = 0;
+    let chunks = 0;
+    for (const session of this.#replay.values()) {
+      events += session.events.size;
+      for (const buffer of session.toolBuffers.values()) chunks += buffer.chunkCount;
+    }
+    return { listeners: this.#listeners.size + this.#resyncListeners.size, replaySessions: this.#replay.size,
+      replayEvents: events, replayBytes: this.#replayBytes, toolChunks: chunks, ...this.#coalescer.getDiagnostics() };
+  }
+
+  #materialize(session: ReplaySession, key: string, forward: HarnessConversationForward): HarnessConversationForward {
+    const buffer = session.toolBuffers.get(key);
+    const event = forward.envelope.event;
+    if (buffer === undefined || event.kind !== "conversation.tool.updated" || !("output" in event)) return forward;
+    return { ...forward, envelope: { ...forward.envelope, event: { ...event, output: buffer.materialize() } } };
+  }
+
+  #releaseToolBuffers(session: ReplaySession): void {
+    for (const [key, buffer] of session.toolBuffers) {
+      const event = session.events.get(key);
+      if (event !== undefined) session.events.set(key, this.#materialize(session, key, event));
+      buffer.clear();
+    }
+    session.toolBuffers.clear();
+  }
+
+  onEvent(listener: (event: HarnessConversationForward) => void): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  }
+
+  onResync(listener: (reason: string) => void): () => void {
+    this.#resyncListeners.add(listener);
+    return () => {
+      this.#resyncListeners.delete(listener);
+    };
+  }
+
+  snapshot(sessionId: ConversationRuntimeEvent["sessionId"]):
+    | { readonly status: "complete"; readonly watermark: number; readonly events: readonly HarnessConversationForward[] }
+    | { readonly status: "resyncRequired"; readonly watermark: number; readonly events: readonly []; readonly reason: string } {
+    // Sliced on purpose: `conversation.open` must return after one bounded slice
+    // instead of draining a whole background backlog in one task. The envelopes
+    // left queued keep their order, are delivered as ordinary live events and
+    // get streamSeq > watermark, so the subscribe-before-open dedupe still holds
+    // (the Client drops buffered events at or below the watermark only).
+    this.#coalescer.flushSliced(sessionId);
+    const session = this.#replay.get(sessionId);
+    const watermark = this.#streamSeq.get(sessionId) ?? 0;
+    if (session?.overflowed === true || this.#evictedTurns.has(sessionId)) {
+      return {
+        status: "resyncRequired",
+        watermark,
+        events: [],
+        reason: "live conversation replay exceeded the Host byte or event limit; reopen the conversation",
+      };
+    }
+    const events = [...(session?.events.entries() ?? [])]
+      .map(([key, event]) => this.#materialize(session!, key, event))
+      .sort((left, right) => left.streamSeq - right.streamSeq)
+      .map((event) => structuredClone(event));
+    return { status: "complete", watermark, events };
+  }
+
+  replay(sessionId: ConversationRuntimeEvent["sessionId"], listener: (event: HarnessConversationForward) => void): void {
+    const snapshot = this.snapshot(sessionId);
+    if (snapshot.status === "resyncRequired") {
+      this.emitResync(snapshot.reason);
+      return;
+    }
+    for (const event of snapshot.events) {
+      try {
+        listener(event);
+      } catch {
+        // Replay consumers are isolated just like live subscribers.
+      }
+    }
+  }
+
+  /**
+   * Allow-list parse and deliver. Returns true when a conversation event was
+   * forwarded. Mapping failure emits resync and drops the event.
+   */
+  forward(envelope: HarnessEventEnvelope): boolean {
+    const kind =
+      envelope.event !== null && typeof envelope.event === "object" && "kind" in envelope.event
+        ? (envelope.event as { readonly kind?: unknown }).kind
+        : undefined;
+    if (!isAllowListedConversationKind(kind)) {
+      this.flush();
+      return false;
+    }
+    let parsed: ConversationRuntimeEvent;
+    try {
+      parsed = parseConversationRuntimeEvent(envelope.event);
+    } catch {
+      this.emitResync("conversation mapping failed; re-read open transcripts");
+      return false;
+    }
+    this.resetEpoch(Number(envelope.runtimeEpoch));
+    this.#coalescer.push({ ...envelope, event: parsed });
+    return true;
+  }
+
+  #deliver(envelope: HarnessEventEnvelope<ConversationRuntimeEvent>): void {
+    const parsed = parseConversationRuntimeEvent(envelope.event);
+    const sessionId = parsed.sessionId;
+    const streamSeq = (this.#streamSeq.get(sessionId) ?? 0) + 1;
+    this.#streamSeq.set(sessionId, streamSeq);
+    const event: HarnessConversationForward = {
+      envelope: { ...envelope, event: parsed },
+      streamSeq,
+    };
+    this.#remember(event);
+    this.#enforceGlobalBudget(sessionId);
+    for (const listener of [...this.#listeners]) {
+      try {
+        listener(event);
+      } catch {
+        // Sibling listener isolation: one throw must not skip the rest.
+      }
+    }
+  }
+
+  #remember(forward: HarnessConversationForward): void {
+    const event = forward.envelope.event;
+    const sessionId = event.sessionId;
+    let session = this.#replay.get(sessionId);
+    const turnId = turnIdOf(event);
+    if (session === undefined && this.#evictedTurns.has(sessionId)) {
+      const evictedTurn = this.#evictedTurns.get(sessionId);
+      if (turnId === undefined || turnId === evictedTurn) return;
+      this.#evictedTurns.delete(sessionId);
+    }
+    if (session === undefined) {
+      session = {
+        events: new Map(),
+        eventBytes: new Map(),
+        deltaChunks: new Map(),
+        toolBuffers: new Map(),
+        byteSize: 0,
+      };
+      this.#replay.set(sessionId, session);
+    }
+    if (turnId !== undefined && session.turnId !== turnId) {
+      this.#clear(session);
+      session.turnId = turnId;
+      session.overflowed = false;
+      this.#evictedTurns.delete(sessionId);
+    }
+    switch (event.kind) {
+      case "conversation.message.started":
+        this.#store(session, `message-started:${event.messageId}`, structuredClone(forward));
+        return;
+      case "conversation.message.delta":
+        this.#rememberDelta(session, forward, event);
+        return;
+      case "conversation.message.completed":
+        this.#delete(session, `message-started:${event.messageId}`);
+        for (const key of [...session.events.keys()]) {
+          if (key.startsWith(`message-delta:${event.messageId}:`)) this.#delete(session, key);
+        }
+        for (const key of [...session.deltaChunks.keys()]) {
+          if (key.startsWith(`${event.messageId}:`)) session.deltaChunks.delete(key);
+        }
+        this.#store(session, `message-completed:${event.messageId}`, structuredClone(forward));
+        return;
+      case "conversation.tool.started":
+        this.#store(session, `tool-started:${event.toolCallId}`, structuredClone(forward));
+        return;
+      case "conversation.tool.updated": {
+        const key = `tool-updated:${event.toolCallId}`;
+        if (this.options.incrementalToolReplay === true) {
+          if (session.overflowed === true) return;
+          let buffer = session.toolBuffers.get(key);
+          if (buffer === undefined) {
+            buffer = new ReplayTextBuffer(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+            const previous = session.events.get(key)?.envelope.event;
+            if (previous?.kind === "conversation.tool.updated") buffer.replace(previous.output ?? "");
+            session.toolBuffers.set(key, buffer);
+          }
+          const truncated = event.updateMode === "replace" ? buffer.replace(event.output ?? "") : buffer.append(event.output ?? "");
+          const metadata: HarnessConversationForward = {
+            streamSeq: forward.streamSeq,
+            envelope: { ...forward.envelope, event: { ...event, updateMode: "replace",
+              ...(event.output !== undefined || buffer.byteLength > 0 ? { output: "" } : {}),
+              ...(event.truncated === true || truncated ? { truncated: true } : {}),
+            } },
+          };
+          this.#store(session, key, metadata, utf8ByteLength(JSON.stringify(metadata)) + buffer.jsonBytes);
+          return;
+        }
+        const previous = session.events.get(key)?.envelope.event;
+        const previousOutput = previous?.kind === "conversation.tool.updated" ? (previous.output ?? "") : "";
+        const raw = event.updateMode === "replace" ? (event.output ?? "") : previousOutput + (event.output ?? "");
+        const bounded = truncateUtf8(raw, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+        this.#store(session, key, {
+          streamSeq: forward.streamSeq,
+          envelope: {
+            ...forward.envelope,
+            event: {
+              ...event,
+              updateMode: "replace",
+              ...(bounded.text.length === 0 ? {} : { output: bounded.text }),
+              ...(event.truncated === true || bounded.truncated ? { truncated: true } : {}),
+            },
+          },
+        });
+        return;
+      }
+      case "conversation.tool.completed":
+        this.#delete(session, `tool-updated:${event.toolCallId}`);
+        this.#store(session, `tool-completed:${event.toolCallId}`, structuredClone(forward));
+        return;
+      case "conversation.turn.completed":
+      case "conversation.turn.aborted":
+        this.#releaseToolBuffers(session);
+        this.#store(session, "turn-terminal", structuredClone(forward));
+        return;
+      case "conversation.compaction.started":
+        this.#store(session, "compaction", structuredClone(forward));
+        return;
+      case "conversation.compaction.completed":
+        this.#delete(session, "compaction");
+        this.#store(session, "compaction-completed", structuredClone(forward));
+        return;
+      case "conversation.notice":
+        this.#store(session, `notice:${forward.streamSeq}`, structuredClone(forward));
+        return;
+      default:
+        return;
+    }
+  }
+
+  /**
+   * `bytes` lets the streaming delta path skip a full `JSON.stringify` per
+   * token: it passes the previously recorded size plus the appended UTF-8
+   * bytes. This is budget accounting, not a contract field, so an
+   * approximation is fine — JSON escaping (`\n`, `\"`) and the streamSeq
+   * digits make the increment a slight undercount, always within a few bytes
+   * per event against `CONVERSATION_REPLAY_MAX_BYTES`. Omit it and the exact
+   * serialized size is measured.
+   */
+  #store(session: ReplaySession, key: string, event: HarnessConversationForward, bytes?: number): void {
+    if (session.overflowed === true) return;
+    const previousBytes = session.eventBytes.get(key) ?? 0;
+    const measured = bytes ?? utf8ByteLength(JSON.stringify(event));
+    session.events.set(key, event);
+    session.eventBytes.set(key, measured);
+    session.byteSize += measured - previousBytes;
+    this.#replayBytes += measured - previousBytes;
+    if (session.events.size <= CONVERSATION_REPLAY_EVENT_LIMIT && session.byteSize <= CONVERSATION_REPLAY_MAX_BYTES) return;
+    this.#clear(session);
+    session.overflowed = true;
+  }
+
+  #delete(session: ReplaySession, key: string): void {
+    const bytes = session.eventBytes.get(key);
+    if (bytes !== undefined) {
+      session.byteSize -= bytes;
+      this.#replayBytes -= bytes;
+    }
+    session.eventBytes.delete(key);
+    session.events.delete(key);
+    session.toolBuffers.get(key)?.clear();
+    session.toolBuffers.delete(key);
+  }
+
+  #clear(session: ReplaySession): void {
+    this.#replayBytes -= session.byteSize;
+    session.events.clear();
+    session.eventBytes.clear();
+    session.deltaChunks.clear();
+    for (const buffer of session.toolBuffers.values()) buffer.clear();
+    session.toolBuffers.clear();
+    session.byteSize = 0;
+  }
+
+  #enforceGlobalBudget(recentSessionId: string): void {
+    const recent = this.#replay.get(recentSessionId);
+    if (recent !== undefined) {
+      this.#replay.delete(recentSessionId);
+      this.#replay.set(recentSessionId, recent);
+    }
+    while (
+      this.#replay.size > CONVERSATION_REPLAY_SESSION_LIMIT ||
+      this.#replayBytes > CONVERSATION_REPLAY_GLOBAL_MAX_BYTES
+    ) {
+      const oldest = this.#replay.entries().next().value as [string, ReplaySession] | undefined;
+      if (oldest === undefined) return;
+      const [sessionId, session] = oldest;
+      this.#evictedTurns.set(sessionId, session.turnId);
+      this.#clear(session);
+      this.#replay.delete(sessionId);
+    }
+  }
+
+  #rememberDelta(
+    session: ReplaySession,
+    forward: HarnessConversationForward,
+    event: Extract<ConversationRuntimeEvent, { kind: "conversation.message.delta" }>,
+  ): void {
+    if (session.overflowed === true) return;
+    const blockKey = `${event.messageId}:${event.blockId}`;
+    const meta = session.deltaChunks.get(blockKey) ?? {
+      totalBytes: 0,
+      lastKey: `message-delta:${blockKey}:0`,
+      nextIndex: 1,
+    };
+    const remaining = Math.max(0, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES - meta.totalBytes);
+    const addition = truncateUtf8(event.delta, remaining).text;
+    const additionBytes = utf8ByteLength(addition);
+    meta.totalBytes += additionBytes;
+    if (addition.length === 0) {
+      session.deltaChunks.set(blockKey, meta);
+      return;
+    }
+    const previous = session.events.get(meta.lastKey);
+    const previousEvent = previous?.envelope.event;
+    if (previous !== undefined && previousEvent?.kind === "conversation.message.delta") {
+      const combined = truncateUtf8(previousEvent.delta + addition, CONVERSATION_LIMITS.DELTA_MAX_BYTES);
+      // Coalescing only appends, so the retained size grows by the appended
+      // bytes; re-serializing the whole block per token is what we are avoiding
+      // here. A truncated combine is not an append and must be measured.
+      const storedBytes = session.eventBytes.get(meta.lastKey);
+      this.#store(
+        session,
+        meta.lastKey,
+        {
+          streamSeq: forward.streamSeq,
+          envelope: {
+            ...(combined.truncated ? previous.envelope : forward.envelope),
+            event: { ...event, delta: combined.text },
+          },
+        },
+        combined.truncated || storedBytes === undefined ? undefined : storedBytes + additionBytes,
+      );
+      if (combined.truncated) {
+        const remainder = (previousEvent.delta + addition).slice(combined.text.length);
+        if (remainder.length > 0) {
+          meta.lastKey = `message-delta:${blockKey}:${meta.nextIndex}`;
+          meta.nextIndex += 1;
+          this.#store(session, meta.lastKey, {
+            streamSeq: forward.streamSeq,
+            envelope: { ...forward.envelope, event: { ...event, delta: remainder } },
+          });
+        }
+      }
+    } else {
+      this.#store(session, meta.lastKey, structuredClone(forward));
+    }
+    if (session.events.size > 0) session.deltaChunks.set(blockKey, meta);
+  }
+
+  emitResync(reason: string): void {
+    this.flush();
+    for (const listener of [...this.#resyncListeners]) {
+      try {
+        listener(reason);
+      } catch {
+        // Isolate resync subscribers the same way as event listeners.
+      }
+    }
+  }
+
+  dispose(): void {
+    this.#coalescer.dispose();
+    this.#listeners.clear();
+    this.#resyncListeners.clear();
+    this.#replay.clear();
+    this.#streamSeq.clear();
+    this.#evictedTurns.clear();
+    this.#replayBytes = 0;
+  }
+}

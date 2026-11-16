@@ -1,0 +1,66 @@
+.runtime-queue .qs-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.runtime-queue-row {
+  min-width: 0;
+}
+.runtime-queue .qs-status {
+  flex-wrap: wrap;
+}
+.runtime-queue-editor {
+  padding: 8px 12px;
+}
+.runtime-queue-editor textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  max-height: 180px;
+}
+.runtime-queue-editor .btn + .btn {
+  margin-inline-start: 6px;
+}
+.runtime-queue > p {
+  padding: 0 12px;
+  overflow-wrap: anywhere;
+}
+
+.runtime-queue {
+  min-width: 0;
+}
+.runtime-queue .qs-list {
+  max-height: min(180px, 25vh);
+  overflow-x: hidden;
+}
+.runtime-queue .qs-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: 8px 0;
+}
+.runtime-queue .qs-status {
+  position: static;
+  transform: none;
+  width: auto;
+  justify-content: flex-start;
+  gap: 8px;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.runtime-queue .qs-actions {
+  margin-inline-start: auto;
+  opacity: 1;
+  pointer-events: auto;
+}
+.runtime-queue-row + .runtime-queue-row {
+  border-top: 1px solid var(--border);
+}
+
+/* Inside the composer tray the tray itself scrolls; the list stays in flow. */
+.composer-tray .runtime-queue .qs-list {
+  max-height: none;
+  overflow: visible;
+}
+.convo-wrap[data-reading-column] > .composer-region > .composer-queues .runtime-queue .qs-text {
+  overflow-wrap: anywhere;
+}

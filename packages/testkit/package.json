@@ -1,0 +1,36 @@
+{
+  "name": "@juling-harness/testkit",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "test:built": "node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@juling-harness/client": "0.2.0",
+    "@juling-harness/client-contract": "0.2.0",
+    "@juling-harness/host-client-api": "0.2.0",
+    "@juling-harness/harness-host": "0.2.0",
+    "@juling-harness/harness-protocol": "0.2.0",
+    "@juling-harness/transport-desktop": "0.2.0",
+    "@juling-harness/transport-web": "0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

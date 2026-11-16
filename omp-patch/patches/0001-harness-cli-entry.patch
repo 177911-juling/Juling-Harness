@@ -1,0 +1,700 @@
+diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
+index 3ecd1d6955..89e12e86e8 100644
+--- a/packages/coding-agent/package.json
++++ b/packages/coding-agent/package.json
+@@ -48,6 +48,10 @@
+ 	"main": "./src/index.ts",
+ 	"types": "./src/index.ts",
+ 	"exports": {
++		"./harness/*": {
++			"types": "./src/harness/*.ts",
++			"import": "./src/harness/*.ts"
++		},
+ 		".": {
+ 			"types": "./src/index.ts",
+ 			"import": "./src/index.ts"
+diff --git a/packages/coding-agent/src/cli.ts b/packages/coding-agent/src/cli.ts
+index 9297d40c53..0c77d5f627 100755
+--- a/packages/coding-agent/src/cli.ts
++++ b/packages/coding-agent/src/cli.ts
+@@ -346,6 +346,11 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
+ 		await runAutoUpdateWorker();
+ 		return true;
+ 	}
++	if (arg === "__omp_worker_harness_stats") {
++		const { startHarnessStatsWorker } = await import("./harness/stats-worker");
++		await startHarnessStatsWorker();
++		return true;
++	}
+ 	return false;
+ }
+ 
+@@ -561,6 +566,14 @@ export async function runCli(argv: string[]): Promise<void> {
+ 	// A failed install is reported once the launch has a warning sink (`main.ts`,
+ 	// `ensureSqliteLockShim`); this module stays free of pi-utils' env snapshot.
+ 	if (isProcessEntry && !helpOrVersion) installSqliteLockShim();
++	// Hidden Harness archived-session telemetry probe: must stay ahead of
++	// command/launch dispatch so the request JSON on stdin is never treated as
++	// a prompt, and must never appear in public help output.
++	if (resolvedArgv[0] === "--harness-session-telemetry-probe") {
++		const { runHarnessSessionTelemetryProbe } = await import("./harness/session-telemetry-probe");
++		process.exitCode = await runHarnessSessionTelemetryProbe();
++		return;
++	}
+ 	let stopStartupComposer: (() => void) | undefined;
+ 	if (
+ 		!process.env.PI_TIMING &&
+diff --git a/packages/coding-agent/src/cli/args.ts b/packages/coding-agent/src/cli/args.ts
+index cb32c574e3..29ee191cc7 100644
+--- a/packages/coding-agent/src/cli/args.ts
++++ b/packages/coding-agent/src/cli/args.ts
+@@ -22,7 +22,7 @@ import { CliUsageError } from "./usage-error";
+ 
+ export { getExtraHelpText };
+ 
+-export type Mode = "text" | "json" | "rpc" | "acp" | "rpc-ui";
++export type Mode = "text" | "json" | "rpc" | "acp" | "rpc-ui" | "harness-host";
+ 
+ export interface Args {
+ 	cwd?: string;
+@@ -70,6 +70,9 @@ export interface Args {
+ 	help?: boolean;
+ 	version?: boolean;
+ 	mode?: Mode;
++	bridgeEndpoint?: string;
++	bridgeTokenFile?: string;
++	bridgeRuntimeEpoch?: number;
+ 	noSession?: boolean;
+ 	sessionDir?: string;
+ 	providerSessionId?: string;
+diff --git a/packages/coding-agent/src/cli/flag-tables.ts b/packages/coding-agent/src/cli/flag-tables.ts
+index df86b455ee..f72a10a44f 100644
+--- a/packages/coding-agent/src/cli/flag-tables.ts
++++ b/packages/coding-agent/src/cli/flag-tables.ts
+@@ -120,6 +120,14 @@ function parseCostUsd(flag: string, value: string): number {
+ 	);
+ }
+ 
++function parseBridgeRuntimeEpoch(value: string): number {
++	const epoch = Number(value);
++	if (Number.isSafeInteger(epoch) && epoch > 0) return epoch;
++	throw new CliUsageError(
++		`Invalid --bridge-runtime-epoch value: ${JSON.stringify(value)}. Expected a positive safe integer.`,
++	);
++}
++
+ /**
+  * Setters for flags with string values. Most built-ins consume the next argv
+  * token even when it starts with `-`; flags listed in
+@@ -137,7 +145,14 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
+ 		result.addDir = [...(result.addDir ?? []), value];
+ 	},
+ 	"--mode": (result, value) => {
+-		if (value === "text" || value === "json" || value === "rpc" || value === "acp" || value === "rpc-ui") {
++		if (
++			value === "text" ||
++			value === "json" ||
++			value === "rpc" ||
++			value === "acp" ||
++			value === "rpc-ui" ||
++			value === "harness-host"
++		) {
+ 			result.mode = value;
+ 		} else {
+ 			result.invalidFlagValues.push(
+@@ -145,6 +160,15 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
+ 			);
+ 		}
+ 	},
++	"--bridge-endpoint": (result, value) => {
++		result.bridgeEndpoint = value;
++	},
++	"--bridge-token-file": (result, value) => {
++		result.bridgeTokenFile = value;
++	},
++	"--bridge-runtime-epoch": (result, value) => {
++		result.bridgeRuntimeEpoch = parseBridgeRuntimeEpoch(value);
++	},
+ 	"--fork": (result, value) => {
+ 		result.fork = value;
+ 	},
+diff --git a/packages/coding-agent/src/cli/stats-cli.ts b/packages/coding-agent/src/cli/stats-cli.ts
+index c193bc7d68..0b699cf64d 100644
+--- a/packages/coding-agent/src/cli/stats-cli.ts
++++ b/packages/coding-agent/src/cli/stats-cli.ts
+@@ -65,6 +65,19 @@ export interface StatsCommandArgs {
+ 	summary: boolean;
+ }
+ 
++/**
++ * Whether the dashboard should also be handed to the system browser.
++ *
++ * A host that embeds the panel (Harness frames it in its own window) sets
++ * `OMP_STATS_NO_OPEN=1`; launching a browser there duplicates the view outside
++ * the app on every visit. This is an environment switch rather than a flag so
++ * a host written against an older Runtime — which rejects unknown flags and
++ * would never start the server — keeps working.
++ */
++export function shouldOpenDashboard(env: Record<string, string | undefined> = process.env): boolean {
++	return env.OMP_STATS_NO_OPEN !== "1";
++}
++
+ // =============================================================================
+ // Command Handler
+ // =============================================================================
+@@ -115,13 +128,13 @@ export async function runStatsCommand(cmd: StatsCommandArgs): Promise<void> {
+ 
+ 	// Close is on before the page first loads, and off again for the system
+ 	// browser, where closing would leave a dead tab.
+-	setStatsCloseHandler(() => void postmortem.quit(0));
+-	const page = await openTernPage(url, "over");
++	if (shouldOpenDashboard()) setStatsCloseHandler(() => void postmortem.quit(0));
++	const page = shouldOpenDashboard() ? await openTernPage(url, "over") : undefined;
+ 	if (page) {
+ 		console.log("Showing it in place of this block: close it to stop\n");
+ 	} else {
+ 		setStatsCloseHandler(undefined);
+-		openPath(url);
++		if (shouldOpenDashboard()) openPath(url);
+ 		console.log(`Press ${formatKeyHint("ctrl+c")} to stop\n`);
+ 	}
+ 
+diff --git a/packages/coding-agent/src/commands/launch-help.ts b/packages/coding-agent/src/commands/launch-help.ts
+index cb31720d26..01311931e1 100644
+--- a/packages/coding-agent/src/commands/launch-help.ts
++++ b/packages/coding-agent/src/commands/launch-help.ts
+@@ -50,8 +50,17 @@ export const launchHelp = {
+ 		alias: Flags.string({ description: "Create a shell shortcut for the selected profile and exit" }),
+ 		cwd: Flags.string({ description: "Directory to start in (overrides the launch cwd)" }),
+ 		mode: Flags.string({
+-			description: "Output mode: text (default), json, rpc, or rpc-ui",
+-			options: ["text", "json", "rpc", "acp", "rpc-ui"],
++			description: "Output mode: text (default), json, rpc, acp, rpc-ui, or harness-host",
++			options: ["text", "json", "rpc", "acp", "rpc-ui", "harness-host"],
++		}),
++		"bridge-endpoint": Flags.string({
++			description: "Harness Bridge endpoint (transport is enabled by the Harness host protocol patch)",
++		}),
++		"bridge-token-file": Flags.string({
++			description: "Harness Bridge authentication token file",
++		}),
++		"bridge-runtime-epoch": Flags.string({
++			description: "Positive Thread epoch assigned to this Harness Runtime process",
+ 		}),
+ 		config: Flags.string({
+ 			description: "Load an extra config.yml-style overlay for this run (repeatable)",
+diff --git a/packages/coding-agent/src/config/models-config-schema-bundle.ts b/packages/coding-agent/src/config/models-config-schema-bundle.ts
+index 18699bdbb2..2b7fa83679 100644
+--- a/packages/coding-agent/src/config/models-config-schema-bundle.ts
++++ b/packages/coding-agent/src/config/models-config-schema-bundle.ts
+@@ -96,6 +96,7 @@ export const getModelsConfigSchemaBundle = once(() => {
+ 		"replayUnsignedThinking?": "boolean",
+ 		"bedrockMessagesApi?": "boolean",
+ 		"requiresThinkingPresence?": "boolean",
++		"extendedCacheTtlBeta?": "boolean",
+ 	} as const;
+ 
+ 	const OpenAICompatFieldsSchema = type(OpenAICompatFields);
+diff --git a/packages/coding-agent/src/config/registry.ts b/packages/coding-agent/src/config/registry.ts
+index a3d6844121..b606b98162 100644
+--- a/packages/coding-agent/src/config/registry.ts
++++ b/packages/coding-agent/src/config/registry.ts
+@@ -616,7 +616,10 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
+ 			case "boolean":
+ 				return typeof value === "boolean";
+ 			case "number":
+-				return typeof value === "number" && Number.isFinite(value);
++				return (
++					(value === null && this.definition.default === undefined) ||
++					(typeof value === "number" && Number.isFinite(value))
++				);
+ 			case "string":
+ 				return typeof value === "string";
+ 			case "enum":
+@@ -647,7 +650,7 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
+ 		if (raw === undefined || this.accepts(raw)) {
+ 			// A fixed value re-arms this instance's warning, so breaking it again is reported again.
+ 			settings.warnState.invalid.delete(this.id);
+-			return raw === undefined ? this.default : (raw as T);
++			return raw === undefined || raw === null ? this.default : (raw as T);
+ 		}
+ 		const warned = settings.warnState.invalid;
+ 		if (!warned.has(this.id) || !Bun.deepEquals(warned.get(this.id), raw)) {
+diff --git a/packages/coding-agent/src/config/settings.ts b/packages/coding-agent/src/config/settings.ts
+index 8d42713212..53aa9bd30b 100644
+--- a/packages/coding-agent/src/config/settings.ts
++++ b/packages/coding-agent/src/config/settings.ts
+@@ -334,7 +334,7 @@ export type SettingsMirrorWrite =
+ 	| { readonly op: "unsetGlobalValue"; readonly id: string }
+ 	| { readonly op: "writeEntry"; readonly id: string; readonly key: string; readonly value: unknown }
+ 	| { readonly op: "writeMember"; readonly id: string; readonly item: string; readonly member: boolean }
+-	| { readonly op: "pinDefaultValue"; readonly id: string }
++	| { readonly op: "pinDefaultValue"; readonly id: string; readonly value?: unknown }
+ 	| { readonly op: "clearOverrideValue"; readonly id: string }
+ 	| { readonly op: "setModelRole"; readonly role: string; readonly modelId: string | undefined }
+ 	| { readonly op: "setProjectModelRole"; readonly role: string; readonly modelId: string }
+@@ -1223,9 +1223,8 @@ export class Settings {
+ 	 * disk reload or re-scope that makes a persisted layer configure it, drops it, and an explicit
+ 	 * override/clear ends it.
+ 	 */
+-	pinDefaultValue(setting: AnySetting): void {
+-		if (this.#mirror) return this.#forward(this.#mirror, { op: "pinDefaultValue", id: setting.id });
+-		const value = setting.default;
++	pinDefaultValue(setting: AnySetting, value: unknown = setting.default): void {
++		if (this.#mirror) return this.#forward(this.#mirror, { op: "pinDefaultValue", id: setting.id, value });
+ 		if (value === undefined || this.isConfigured(setting)) return;
+ 		this.writeValue(setting, value, "override");
+ 		this.#softPins.add(setting);
+diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
+index 2bfe0b7230..a79b98eab2 100644
+--- a/packages/coding-agent/src/main.ts
++++ b/packages/coding-agent/src/main.ts
+@@ -1,3 +1,4 @@
++import { applyHarnessDefaults } from "./harness/settings-defaults";
+ /**
+  * Main entry point for the coding agent CLI.
+  *
+@@ -119,6 +120,7 @@ import {
+ 	persistForeignSession,
+ } from "./session/foreign-session-import";
+ import type { ForeignSessionInfo, ForeignSessionSource, ForeignSessionStore } from "./session/foreign-session-store";
++import { HARNESS_HOST_SESSION_ORIGIN } from "./session/session-entries";
+ import {
+ 	findSessionContinuation,
+ 	type PickerListing,
+@@ -137,6 +139,12 @@ import {
+ 	loadSystemPromptTemplateFile,
+ 	resolvePromptInput,
+ } from "./system-prompt";
++import type { HarnessLoopService } from "./harness/services/loop-service";
++import type { HarnessModeControlService } from "./harness/services/mode-control-service";
++import type { HarnessHostRuntime } from "./harness/harness-host-mode";
++import { bindHarnessHindsightCredential } from "./harness/hindsight-credential";
++import { runHarnessHostMode as defaultRunHarnessHostMode, type RunHarnessHostMode } from "./harness/harness-host-mode";
++import { createMCPProxyTools } from "./task/executor";
+ import { createPersistedSubagentReviverFactory } from "./task/persisted-revive";
+ import { type RestoreOutcome, restoreSession } from "./task/restore";
+ import { createTelemetryExportConfig, initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
+@@ -145,6 +153,7 @@ import { registerLocalInferenceApi } from "./tiny/local-inference-api";
+ import { automaticThinkingLevel, concreteThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+ import type { LspStartupServerInfo } from "./tools";
+ import { sanitizeDisplayWarnings } from "@oh-my-pi/pi-tui/render/render-utils";
++import type { ToolUiFactory } from "./tools/context";
+ import { getChangelogPath, readLastChangelogVersion, resolveStartupChangelogForDisplay } from "./utils/changelog";
+ import { EventBus } from "./utils/event-bus";
+ import { resolveFirstLaunchPythonEvalWarning } from "./eval/startup-warning";
+@@ -644,7 +653,7 @@ async function runInteractiveMode(
+ 	notifs: (InteractiveModeNotify | null)[],
+ 	versionCheckPromise: Promise<string | undefined>,
+ 	initialMessages: string[],
+-	setExtensionUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
++	setExtensionUIContext: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void,
+ 	lspServers: LspStartupServerInfo[] | undefined,
+ 	mcpManager: MCPManager | undefined,
+ 	resuming: boolean,
+@@ -660,6 +669,9 @@ async function runInteractiveMode(
+ 	startupGoal?: string,
+ 	startupRestore?: () => Promise<RestoreOutcome>,
+ 	refreshScopedModelsAfterLogin?: () => Promise<void>,
++	harnessLoopService?: HarnessLoopService,
++	harnessModeService?: HarnessModeControlService,
++	harnessShutdownRequested?: Promise<void>,
+ ): Promise<void> {
+ 	const InteractiveModeConstructor = await loadInteractiveModeConstructor();
+ 	let mode: InteractiveMode;
+@@ -674,6 +686,8 @@ async function runInteractiveMode(
+ 			startupLease?.composer,
+ 			subagentEventBus,
+ 			refreshScopedModelsAfterLogin,
++			harnessLoopService,
++			harnessModeService,
+ 		);
+ 		startupLease?.adopt();
+ 	} catch (error) {
+@@ -748,7 +762,7 @@ async function runInteractiveMode(
+ 		const notifyNewVersion = (newVersion: string): void => {
+ 			if (cfgStartupCheckUpdate.get(settings)) mode.showNewVersionNotification(newVersion);
+ 		};
+-		if (cfgUpdateAuto.get(settings)) {
++		if (harnessShutdownRequested === undefined && cfgUpdateAuto.get(settings)) {
+ 			void runAutoUpdate(checkedVersionPromise, {
+ 				show: update => mode.showVersionUpdate(update),
+ 				notify: notifyNewVersion,
+@@ -857,8 +871,20 @@ async function runInteractiveMode(
+ 	}
+ 
+ 	while (true) {
+-		const input = await mode.getUserInput();
+-		await submitInteractiveInput(mode, session, input);
++		if (harnessShutdownRequested === undefined) {
++			const input = await mode.getUserInput();
++			await submitInteractiveInput(mode, session, input);
++			continue;
++		}
++		const next = await Promise.race([
++			mode.getUserInput().then(input => ({ kind: "input" as const, input })),
++			harnessShutdownRequested.then(() => ({ kind: "shutdown" as const })),
++		]);
++		if (next.kind === "shutdown") {
++			await mode.shutdown();
++			return;
++		}
++		await submitInteractiveInput(mode, session, next.input);
+ 	}
+ }
+ 
+@@ -1263,6 +1289,7 @@ export async function createSessionManager(
+ 		onSessionContinuation?: (continuation: SessionContinuation) => void;
+ 	} = {},
+ ): Promise<SessionManager | undefined> {
++	const harnessOrigin = parsed.mode === "harness-host" ? HARNESS_HOST_SESSION_ORIGIN : undefined;
+ 	if (parsed.fork) {
+ 		if (parsed.noSession) {
+ 			throw new SessionResolutionError("--fork requires session persistence");
+@@ -1272,6 +1299,7 @@ export async function createSessionManager(
+ 			try {
+ 				return await SessionManager.forkFrom(forkSource, cwd, parsed.sessionDir, undefined, {
+ 					repairInterruptedTail: true,
++					harnessOrigin,
+ 				});
+ 			} catch (err) {
+ 				if (err instanceof ForkSourceNotFoundError) {
+@@ -1287,6 +1315,7 @@ export async function createSessionManager(
+ 		try {
+ 			return await SessionManager.forkFrom(match.session.path, cwd, parsed.sessionDir, undefined, {
+ 				repairInterruptedTail: true,
++				harnessOrigin,
+ 			});
+ 		} catch (err) {
+ 			if (err instanceof ForkSourceNotFoundError) {
+@@ -1354,6 +1383,7 @@ export async function createSessionManager(
+ 	if (parsed.continue) {
+ 		return await forkIfMovedAway(
+ 			await SessionManager.continueRecent(cwd, parsed.sessionDir, undefined, {
++				harnessOrigin,
+ 				onSessionContinuation: options.onSessionContinuation,
+ 			}),
+ 			parsed.sessionDir,
+@@ -1362,16 +1392,18 @@ export async function createSessionManager(
+ 	// --resume without value is handled separately (needs picker UI)
+ 	// If --session-dir provided without --continue/--resume, create new session there
+ 	if (parsed.sessionDir) {
+-		return SessionManager.create(cwd, parsed.sessionDir);
++		return SessionManager.create(cwd, parsed.sessionDir, undefined, { harnessOrigin });
+ 	}
+ 	// Auto-resume: behave like --continue if the setting is enabled and a prior
+ 	// session exists. When a prior session is resumed, mark parsed.continue so
+ 	// buildSessionOptions restores the session's model/thinking instead of
+ 	// overriding them with CLI defaults.
+ 	// An explicit startup goal starts fresh even when implicit auto-resume is configured.
+-	if (parsed.goal === undefined && cfgAutoResume.get(activeSettings)) {
++	// Harness owns session selection; an unqualified Worker launch must create a new writer.
++	if (parsed.mode !== "harness-host" && parsed.goal === undefined && cfgAutoResume.get(activeSettings)) {
+ 		const manager = await forkIfMovedAway(
+ 			await SessionManager.continueRecent(cwd, parsed.sessionDir, undefined, {
++				harnessOrigin,
+ 				onSessionContinuation: options.onSessionContinuation,
+ 			}),
+ 			parsed.sessionDir,
+@@ -1381,8 +1413,8 @@ export async function createSessionManager(
+ 		}
+ 		return manager;
+ 	}
+-	// Default case (new session) returns undefined, SDK will create one
+-	return undefined;
++	// Default Harness startup creates the manager here so its first header carries the origin marker.
++	return harnessOrigin ? SessionManager.create(cwd, parsed.sessionDir, undefined, { harnessOrigin }) : undefined;
+ }
+ 
+ /** Discover APPEND_SYSTEM.md file if no CLI append system prompt was provided */
+@@ -1803,6 +1835,7 @@ interface RunRootCommandDependencies {
+ 	discoverAuthStorage?: typeof discoverAuthStorage;
+ 	selectSession?: SessionPicker;
+ 	runAcpMode?: RunAcpMode;
++	runHarnessHostMode?: RunHarnessHostMode;
+ 	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
+ 	settings?: Settings;
+ 	forceSetupWizard?: boolean;
+@@ -1877,6 +1910,10 @@ export async function runRootCommand(
+ 			rejectNoUiWithoutRpc(parsedArgs);
+ 		}
+ 		const mode = parsedArgs.mode || "text";
++		if (mode === "harness-host" && parsedArgs.print) {
++			process.stderr.write(`${chalk.red("Error: --print is not supported in harness-host mode")}\n`);
++			process.exit(1);
++		}
+ 		// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
+ 		const rpcInput = mode === "rpc" || mode === "rpc-ui" ? claimRpcInput() : undefined;
+ 
+@@ -1911,8 +1948,10 @@ export async function runRootCommand(
+ 		// session-critical database connection picks the right busy timeout.
+ 		// See getDbBusyTimeoutMs().
+ 		const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
++		const isHarnessHost = mode === "harness-host";
+ 		// Protocol modes own stdin; treating it as prompt text would consume JSON-RPC frames before their transports start.
+-		const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
++		const pipedInput =
++			isProtocolMode || isHarnessHost ? undefined : await logger.time("readPipedInput", readPipedInput);
+ 		// Without a terminal on stdin the TUI cannot run, so such a launch is always
+ 		// headless: a piped or argv prompt runs like `-p`, and one with no prompt
+ 		// fails with a usage error instead of booting the interactive stack and
+@@ -1920,7 +1959,7 @@ export async function runRootCommand(
+ 		const stdinIsTerminal = process.stdin.isTTY === true;
+ 		const autoPrint =
+ 			(pipedInput !== undefined || !stdinIsTerminal) && !parsedArgs.print && parsedArgs.mode === undefined;
+-		const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
++		const isInteractive = !parsedArgs.print && !autoPrint && (parsedArgs.mode === undefined || isHarnessHost);
+ 		// Before session resolution: resume, fork, and import act on these same
+ 		// startup-parse flags, so rejecting later would leave forked or imported
+ 		// transcripts (or an opened picker) behind a usage error.
+@@ -1944,7 +1983,7 @@ export async function runRootCommand(
+ 		// Only the interactive host renders a focusable Agent Hub / subagent session
+ 		// tree; declare it so headless subagent optimizations (e.g. skipping replan
+ 		// title refresh) can tell a focusable process from a print/RPC/eval one.
+-		setInteractiveHost(isInteractive);
++		setInteractiveHost(isInteractive || isHarnessHost);
+ 		if (!isInteractive) {
+ 			stopPendingStartupComposer();
+ 		}
+@@ -1968,8 +2007,12 @@ export async function runRootCommand(
+ 			process.stderr.write(`${chalk.red(`Error: ${message}`)}\n`);
+ 			process.exit(1);
+ 		}
+-
+ 		const settingsInstance = await settingsPromise;
++		if (isHarnessHost) {
++			applyHarnessDefaults(settingsInstance);
++			const stopMemoryCredential = await bindHarnessHindsightCredential(settingsInstance, parsedArgs.bridgeTokenFile);
++			postmortem.register("harness-memory-credential", stopMemoryCredential);
++		}
+ 		// Process-lifetime: broker/account-policy edits reconfigure the shared credential store.
+ 		createAuthStorageSettingsSync(settingsInstance, authStorage);
+ 		if (parsedArgs.approvalMode) {
+@@ -2204,6 +2247,9 @@ export async function runRootCommand(
+ 		}
+ 		// Only createSessionManager's implicit auto-resume promotes continue here.
+ 		const autoResumed = !explicitSessionSelection && parsedArgs.continue === true;
++		if (isHarnessHost && sessionManager) {
++			sessionManager.setNewSessionHarnessOrigin(HARNESS_HOST_SESSION_ORIGIN);
++		}
+ 
+ 		if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager && !parsedArgs.noSession) {
+ 			const previousCwd = cwd;
+@@ -2377,11 +2423,12 @@ export async function runRootCommand(
+ 			);
+ 			options.authStorage = authStorage;
+ 			options.modelRegistry = modelRegistry;
+-			options.hasUI = isInteractive || mode === "rpc-ui";
++			options.hasUI = isInteractive || isHarnessHost || mode === "rpc-ui";
+ 			options.allowSessionModelFallback = isInteractive;
+-			options.settingsApproval = isInteractive;
++			options.settingsApproval = isInteractive || isHarnessHost;
+ 			options.tuiTranscript = isInteractive;
+-			options.autoTitle = isInteractive;
++			options.replyTranscript = isInteractive || isHarnessHost;
++			options.autoTitle = isInteractive || isHarnessHost;
+ 			options.deferSkillDescriptionCompression = isInteractive;
+ 			options.settings = settingsInstance;
+ 			options.telemetry = startupTelemetry;
+@@ -2494,8 +2541,11 @@ export async function runRootCommand(
+ 			// input; the first request waits for them instead. Kept eager when argv may
+ 			// carry extension flags (they must parse now), `--tools` must validate
+ 			// extension tools, or a restored transcript needs extension renderers.
++			// Harness Host never paints the TUI frame that starts deferred loading, and its
++			// operator manifest must list extension commands from the first Hello.
+ 			const deferStartupSafeExtensions =
+ 				isInteractive &&
++				!isHarnessHost &&
+ 				parsedArgs.unrecognizedFlags.length === 0 &&
+ 				!parsedArgs.tools?.length &&
+ 				!(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || parsedArgs.restore || foreignSource);
+@@ -2861,33 +2911,94 @@ export async function runRootCommand(
+ 				try {
+ 					stopStartupWatchdog();
+ 					logger.endTiming();
+-					await runInteractiveMode(
+-						session,
+-						VERSION,
+-						notifs,
+-						versionCheckPromise,
+-						initialArgs.messages,
+-						setToolUIContext,
+-						lspServers,
+-						mcpManager,
+-						Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || foreignSource),
+-						deps.forceSetupWizard === true,
+-						showStartupSplash,
+-						eventBus,
+-						subagentEventBus,
+-						initialMessage,
+-						initialImages,
+-						parsedArgs.join,
+-						startDeferredStartupWork,
+-						startupLease,
+-						initialArgs.goal,
+-						parsedArgs.restore ? () => restoreSession(session, { eventBus, subagentEventBus }) : undefined,
+-						refreshScopedModelsAfterLogin,
+-					);
++					const runTui = (runtime?: HarnessHostRuntime) => {
++						// The desktop Host owns the UI. In a non-TTY launch, starting the
++						// interactive editor makes the Runtime treat stdin as an interrupt
++						// source and exit with code 129 immediately after the Bridge handshake.
++						// Keep the Bridge process alive until the desktop sends shutdown.
++						if (isHarnessHost && runtime !== undefined && !(process.stdin.isTTY && process.stdout.isTTY)) {
++							return runtime.waitForShutdown().then(async () => {
++								await postmortem.quit(0);
++							});
++						}
++						return runInteractiveMode(
++							session,
++							VERSION,
++							notifs,
++							versionCheckPromise,
++							initialArgs.messages,
++							setToolUIContext,
++							lspServers,
++							mcpManager,
++							Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || foreignSource),
++							deps.forceSetupWizard === true,
++							showStartupSplash,
++							eventBus,
++							subagentEventBus,
++							initialMessage,
++							initialImages,
++							parsedArgs.join,
++							startDeferredStartupWork,
++							startupLease,
++							initialArgs.goal,
++							parsedArgs.restore ? () => restoreSession(session, { eventBus, subagentEventBus }) : undefined,
++							refreshScopedModelsAfterLogin,
++							runtime?.services.loop,
++							runtime?.services.modes,
++							runtime?.waitForShutdown(),
++						);
++					};
++					if (isHarnessHost) {
++						let activeToolUIContextSetter = setToolUIContext;
++						const recreateSession = async (sessionFile: string): Promise<AgentSession> => {
++							const reopened = await SessionManager.open(sessionFile, undefined, undefined, {
++								suppressBreadcrumb: true,
++							});
++							const revivedEventBus = new EventBus();
++							const revivedSubagentEventBus = new EventBus();
++							const revived = await createSession({
++								...sessionOptions,
++								cwd: reopened.getCwd(),
++								sessionManager: reopened,
++								eventBus: revivedEventBus,
++								subagentEventBus: revivedSubagentEventBus,
++								...(extensionsResult.preparedExtensions === undefined
++									? {}
++									: { preloadedPreparedExtensions: extensionsResult.preparedExtensions }),
++								...(mcpManager === undefined ? {} : { mcpManager }),
++							});
++							activeToolUIContextSetter = revived.setToolUIContext;
++							return revived.session;
++						};
++						await (deps.runHarnessHostMode ?? defaultRunHarnessHostMode)(
++							session,
++							{
++								endpoint: parsedArgs.bridgeEndpoint,
++								tokenFile: parsedArgs.bridgeTokenFile,
++								runtimeEpoch: parsedArgs.bridgeRuntimeEpoch,
++							},
++							runTui,
++							{
++								mcpManager,
++								tanCustomTools: mcpManager
++									? createMCPProxyTools(mcpManager, session.sessionManager.getSessionId())
++									: undefined,
++								freshSession:
++									!parsedArgs.resume && !parsedArgs.continue && !parsedArgs.fork && !parsedArgs.restore,
++								setToolUIContext: (uiContext, hasUI) => activeToolUIContextSetter(uiContext, hasUI),
++								recreateSession,
++								...(resumedContinuations.length && typeof parsedArgs.resume === "string"
++									? { resumedFromSessionId: parsedArgs.resume }
++									: {}),
++							},
++						);
++					} else {
++						await runTui();
++					}
+ 				} finally {
+ 					startupLease?.dispose();
+ 				}
+-			} else {
++			} else if (mode === "text" || mode === "json") {
+ 				// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.
+ 				stopStartupWatchdog();
+ 				// PI_TIMING prints the tree after the run; otherwise stop recording now so a
+@@ -2910,6 +3021,8 @@ export async function runRootCommand(
+ 				await disposeSessionQuietly(session);
+ 				stopThemeWatcher();
+ 				await postmortem.quit(exitCode);
++			} else {
++				throw new Error(`Unsupported non-interactive mode: ${mode}`);
+ 			}
+ 		}
+ 	} catch (error) {
+diff --git a/packages/coding-agent/src/thread/services/settings.ts b/packages/coding-agent/src/thread/services/settings.ts
+index 82d451ee9b..537fb041e6 100644
+--- a/packages/coding-agent/src/thread/services/settings.ts
++++ b/packages/coding-agent/src/thread/services/settings.ts
+@@ -184,7 +184,7 @@ function replayWrite(target: Settings, write: SettingsMirrorWrite): void {
+ 		case "writeMember":
+ 			return target.writeMember(settingById(write.id), write.item, { member: write.member });
+ 		case "pinDefaultValue":
+-			return target.pinDefaultValue(settingById(write.id));
++			return target.pinDefaultValue(settingById(write.id), write.value);
+ 		case "clearOverrideValue":
+ 			return target.clearOverrideValue(settingById(write.id));
+ 		case "setModelRole":
+diff --git a/packages/coding-agent/test/main-host-classification.test.ts b/packages/coding-agent/test/main-host-classification.test.ts
+index 8548d5a093..050c57f656 100644
+--- a/packages/coding-agent/test/main-host-classification.test.ts
++++ b/packages/coding-agent/test/main-host-classification.test.ts
+@@ -91,3 +91,26 @@ it("standalone auth discovery routes by PI_CONFIG_FILES policy over main config"
+ 		resetSettingsForTest();
+ 	}
+ });
++
++it("classifies harness-host as an interactive host before opening auth storage", async () => {
++	const previous = setInteractiveHost(false);
++	const stop = new Error("stop after harness-host classification");
++	let observedTimeout: number | undefined;
++	const parsed = parseArgs(["--mode", "harness-host"]);
++	parsed.noExtensions = true;
++
++	try {
++		await expect(
++			runRootCommand(parsed, ["--mode", "harness-host"], {
++				discoverAuthStorage: async () => {
++					observedTimeout = getDbBusyTimeoutMs();
++					throw stop;
++				},
++			}),
++		).rejects.toBe(stop);
++	} finally {
++		setInteractiveHost(previous);
++	}
++
++	expect(observedTimeout).toBe(5000);
++});
+diff --git a/packages/coding-agent/test/stats-cli.test.ts b/packages/coding-agent/test/stats-cli.test.ts
+index 5f051def8f..d484adfda1 100644
+--- a/packages/coding-agent/test/stats-cli.test.ts
++++ b/packages/coding-agent/test/stats-cli.test.ts
+@@ -31,3 +31,13 @@ describe("stats dashboard host arguments", () => {
+ 		expect(parseStatsDashboardArgs("--host 0.0.0.0")).toEqual({ port: 3847, host: "0.0.0.0" });
+ 	});
+ });
++
++describe("stats dashboard browser launch", () => {
++	it("opens a browser unless an embedding host set OMP_STATS_NO_OPEN", () => {
++		expect(statsCli.shouldOpenDashboard({})).toBe(true);
++		expect(statsCli.shouldOpenDashboard({ OMP_STATS_NO_OPEN: "1" })).toBe(false);
++		// Anything else keeps the standalone CLI behaviour: `omp stats` run by a
++		// user is supposed to show its panel.
++		expect(statsCli.shouldOpenDashboard({ OMP_STATS_NO_OPEN: "0" })).toBe(true);
++	});
++});

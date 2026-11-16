@@ -1,0 +1,2208 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { access, appendFile, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createConnection, createServer, Socket, type Server } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { EventEmitter, once } from "node:events";
+import type { ChildProcess, spawn } from "node:child_process";
+import { test } from "node:test";
+import {
+  FrameDecoder,
+  encodeFrame,
+  parseFoundationHarnessRequest,
+  parseHarnessHelloRequest,
+  type HarnessHelloResponse,
+  type HarnessComputerQueryRequest,
+  type HarnessComputerEventEnvelope,
+  COMPUTER_WORKSPACE_KINDS,
+  type HarnessEventEnvelope,
+  type HarnessSnapshotResponse,
+} from "@juling-harness/harness-protocol";
+import type {
+  CommandId,
+  EnvironmentId,
+  IdempotencyKey,
+  InteractionId,
+  RequestId,
+  RuntimeEpoch,
+  RuntimeId,
+  RuntimeInstanceId,
+  SessionBinding,
+  StateVersion,
+  HarnessRequest,
+  ThreadId,
+  WorkspaceId,
+} from "@juling-harness/harness-protocol";
+import {
+  CommandArbiter,
+  CommandLedger,
+  HostConfirmationRegistry,
+  JsonlCommandLedgerStore,
+  NodeRuntimeProcessPort,
+  ReceiptRegistry,
+  RuntimeProjection,
+  RuntimePublicationStore,
+  StateProjector,
+  HarnessHostError,
+  HarnessBridgeClient,
+  HarnessBridgeHandshakeError,
+  HarnessHostRuntimeActor,
+  HarnessRuntimeSessionController,
+  classifyOperation,
+  createProcessProbe,
+  consumeBridgeToken,
+  createBridgeBootstrap,
+  createChallengeProof,
+  createWindowsBridgeAclPort,
+  parseWindowsUserSid,
+  verifyChallengeProof,
+  type RuntimeProbeOutcome,
+} from "../src/index.js";
+import { SimulatedPauseRuntime, initialSnapshot } from "./support/simulated-runtime.js";
+
+const runtimeId = "runtime-1" as RuntimeId;
+const epoch = 1 as RuntimeEpoch;
+const request = (operation: HarnessRequest["operation"], requestId = "request-1"): HarnessRequest => ({
+  type: "harness.request",
+  requestId: requestId as RequestId,
+  runtimeEpoch: epoch,
+  operation,
+});
+
+type HelloResponder = (hello: ReturnType<typeof parseHarnessHelloRequest>, connection: number) => HarnessHelloResponse | Buffer;
+
+function helloResponse(
+  hello: ReturnType<typeof parseHarnessHelloRequest>,
+  token: string,
+  runtimeInstanceId = "runtime-instance-1" as RuntimeInstanceId,
+  selectedProtocolVersion = 1,
+): HarnessHelloResponse {
+  return {
+    type: "harness.hello.result",
+    requestId: hello.requestId,
+    selectedProtocolVersion,
+    runtimeVersion: "17.2.12-harness.3",
+    upstreamVersion: "17.2.12",
+    upstreamCommit: "45e12e5bb758198a920c6070e7e64cb33b21beac",
+    runtimeInstanceId,
+    runtimeEpoch: 1 as RuntimeEpoch,
+    capabilityManifest: {
+      profile: "limited",
+      generatedAt: "2026-08-11T00:00:00.000Z",
+      hash: "sha256:empty-capabilities",
+      capabilities: [],
+    },
+    commandManifestHash: "sha256:empty-commands",
+    stateVersion: 0 as StateVersion,
+    challengeProof: createChallengeProof(token, hello.challenge, runtimeInstanceId),
+  };
+}
+
+function snapshotResponse(
+  requestId: string,
+  hello: HarnessHelloResponse,
+  sessionId = "session-1",
+): HarnessSnapshotResponse {
+  return {
+    type: "harness.snapshot",
+    requestId: requestId as HarnessSnapshotResponse["requestId"],
+    snapshot: {
+      runtimeId: hello.runtimeInstanceId as unknown as HarnessSnapshotResponse["snapshot"]["runtimeId"],
+      runtimeEpoch: hello.runtimeEpoch,
+      stateVersion: hello.stateVersion,
+      sessionId: sessionId as HarnessSnapshotResponse["snapshot"]["sessionId"],
+      isStreaming: false,
+      isCompacting: false,
+      activeMode: "normal", approvalMode: "yolo",
+      pendingMessages: 0,
+      activeCommandIds: [],
+      agentsRevision: 0,
+      jobsRevision: 0,
+      agents: [],
+      jobs: [],
+    },
+    commandManifestHash: hello.commandManifestHash,
+    capabilityHash: hello.capabilityManifest.hash,
+    lastEventSeq: 0 as HarnessSnapshotResponse["lastEventSeq"],
+    terminalReceipts: [],
+  };
+}
+
+async function listenForHello(
+  responder: HelloResponder,
+  hooks: {
+    afterSnapshot?: (response: HarnessSnapshotResponse) => Buffer[];
+    snapshot?: (requestId: string, hello: HarnessHelloResponse) => HarnessSnapshotResponse;
+    onRequest?: (request: HarnessRequest, socket: Socket, hello: HarnessHelloResponse) => void;
+    onComputerQuery?: (request: HarnessComputerQueryRequest, socket: Socket, hello: HarnessHelloResponse) => void;
+    onTimeTravelResult?: (result: { requestId: string; error?: string }) => void;
+  } = {},
+): Promise<{
+  endpoint: string;
+  close(): Promise<void>;
+}> {
+  const endpoint =
+    process.platform === "win32"
+      ? `\\\\.\\pipe\\juling-harness-test-${randomUUID()}`
+      : join(await mkdtemp(join(tmpdir(), "juling-harness-transport-")), "bridge.sock");
+  const sockets = new Set<Socket>();
+  let connection = 0;
+  const server: Server = createServer((socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+    const decoder = new FrameDecoder();
+    const currentConnection = ++connection;
+    let negotiated: HarnessHelloResponse | undefined;
+    socket.on("data", (chunk) => {
+      try {
+        for (const frame of decoder.push(chunk)) {
+          if ((frame.body as { type?: unknown }).type === "harness.hello") {
+            const hello = parseHarnessHelloRequest(frame.body);
+            const response = responder(hello, currentConnection);
+            if (!Buffer.isBuffer(response)) negotiated = response;
+            socket.write(
+              Buffer.isBuffer(response)
+                ? response
+                : encodeFrame(`hello-result:${hello.requestId}`, response.runtimeEpoch, response),
+            );
+            continue;
+          }
+          if ((frame.body as { type?: unknown }).type === "computer.query" && negotiated && hooks.onComputerQuery) {
+            hooks.onComputerQuery(frame.body as HarnessComputerQueryRequest, socket, negotiated);
+            continue;
+          }
+          if ((frame.body as { type?: unknown }).type === "timeTravel.capture.result" && negotiated && hooks.onTimeTravelResult) {
+            hooks.onTimeTravelResult(frame.body as { requestId: string; error?: string });
+            continue;
+          }
+          const request = parseFoundationHarnessRequest(frame.body);
+          if (negotiated === undefined) throw new Error("Not ready");
+          if (request.operation.kind !== "runtime.snapshot") {
+            if (hooks.onRequest === undefined) throw new Error("Unsupported request");
+            hooks.onRequest(request, socket, negotiated);
+            continue;
+          }
+          const response = hooks.snapshot?.(request.requestId, negotiated) ?? snapshotResponse(request.requestId, negotiated);
+          socket.write(
+            Buffer.concat([
+              encodeFrame(`snapshot-result:${request.requestId}`, response.snapshot.runtimeEpoch, response),
+              ...(hooks.afterSnapshot?.(response) ?? []),
+            ]),
+          );
+        }
+      } catch {
+        socket.destroy();
+      }
+    });
+  });
+  server.listen(endpoint);
+  await once(server, "listening");
+  return {
+    endpoint,
+    async close() {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error === undefined ? resolve() : reject(error)));
+      });
+    },
+  };
+}
+
+test("Time Travel waits for Host capture and reports its failure over the same Bridge", async () => {
+  const token = "time-travel-test";
+  let finish!: () => void;
+  let requested!: () => void;
+  let received!: (result: { requestId: string; error?: string }) => void;
+  const captureStarted = new Promise<void>(resolve => { requested = resolve; });
+  const resultReceived = new Promise<{ requestId: string; error?: string }>(resolve => { received = resolve; });
+  const bridge = await listenForHello(hello => helloResponse(hello, token), {
+    afterSnapshot: response => [encodeFrame("capture", response.snapshot.runtimeEpoch, { type: "timeTravel.capture.request", requestId: "capture-1", runtimeEpoch: response.snapshot.runtimeEpoch, sessionId: response.snapshot.sessionId, cwd: "workspace", leafId: null, phase: "before" })],
+    onTimeTravelResult: received,
+  });
+  let count = 0;
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token, onTimeTravelCapture: async request => {
+    count++;
+    assert.equal(request.phase, "before");
+    requested();
+    await new Promise<void>(resolve => { finish = resolve; });
+    throw new Error("snapshot disk full");
+  } });
+  try {
+    await client.connect(); await client.requestSnapshot(); await captureStarted;
+    assert.equal(count, 1);
+    finish();
+    assert.deepEqual(await resultReceived, { type: "timeTravel.capture.result", requestId: "capture-1", runtimeEpoch: 1, error: "snapshot disk full" });
+    assert.equal(client.state, "ready");
+  } finally { client.close(); await bridge.close(); }
+});
+
+test("WP-012 applies an event coalesced after the initial snapshot before READY publication", async () => {
+  const token = "bridge-token-snapshot-event";
+  const observedEvents: HarnessEventEnvelope[] = [];
+  const bridge = await listenForHello(
+    (hello) => helloResponse(hello, token),
+    {
+      afterSnapshot: (response) => [
+        encodeFrame("event:1", response.snapshot.runtimeEpoch, {
+          type: "harness.event",
+          runtimeEpoch: response.snapshot.runtimeEpoch,
+          eventSeq: 1,
+          stateVersion: 1,
+          occurredAt: "2026-08-11T00:00:01.000Z",
+          event: {
+            kind: "state.changed",
+            snapshot: { ...response.snapshot, stateVersion: 1 },
+          },
+        }),
+      ],
+    },
+  );
+  const client = new HarnessBridgeClient({
+    endpoint: bridge.endpoint,
+    token,
+    onEvent: (event) => observedEvents.push(event),
+  });
+  try {
+    await client.connect();
+    await client.requestSnapshot();
+    assert.equal(client.state, "ready");
+    assert.equal(observedEvents.length, 1);
+    assert.equal(observedEvents[0]?.eventSeq, 1);
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("流式 delta 不再触发 projection 发布：N 个 delta → 0 次发布", async () => {
+  const token = "bridge-token-delta-budget";
+  const DELTAS = 32;
+  const observedEvents: HarnessEventEnvelope[] = [];
+  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    afterSnapshot: (response) => {
+      const epoch = response.snapshot.runtimeEpoch;
+      const frames = [
+        // 一次真实状态变化，用来建立基线并证明真变化仍然会发布。
+        encodeFrame("event:1", epoch, {
+          type: "harness.event",
+          runtimeEpoch: epoch,
+          eventSeq: 1,
+          stateVersion: 1,
+          occurredAt: "2026-08-31T00:00:01.000Z",
+          event: { kind: "state.changed", snapshot: { ...response.snapshot, stateVersion: 1 } },
+        }),
+      ];
+      // 纯文本增量：推进 eventSeq，但按契约不推进 stateVersion，也不带快照。
+      for (let index = 0; index < DELTAS; index += 1) {
+        frames.push(
+          encodeFrame(`event:${index + 2}`, epoch, {
+            type: "harness.event",
+            runtimeEpoch: epoch,
+            eventSeq: index + 2,
+            stateVersion: 1,
+            occurredAt: "2026-08-31T00:00:02.000Z",
+            event: {
+              kind: "conversation.message.delta",
+              sessionId: response.snapshot.sessionId,
+              turnId: "turn-1",
+              messageId: "message-1",
+              blockId: "block-1",
+              blockType: "text",
+              delta: "字",
+            },
+          }),
+        );
+      }
+      return frames;
+    },
+  });
+  const client = new HarnessBridgeClient({
+    endpoint: bridge.endpoint,
+    token,
+    onEvent: (event) => observedEvents.push(event),
+  });
+  const controller = new HarnessRuntimeSessionController(
+    client,
+    new CommandLedger(() => "2026-08-31T00:00:00.000Z"),
+    new RuntimePublicationStore(() => "2026-08-31T00:00:02.000Z"),
+  );
+  let publications = 0;
+  const unsubscribe = controller.onPublication(() => {
+    publications += 1;
+  });
+  try {
+    await client.connect();
+    await client.requestSnapshot();
+    assert.equal(client.state, "ready");
+    // unix socket 会把帧分几次读到（macOS），等全部送达再计数。
+    for (let waited = 0; observedEvents.length < DELTAS + 1 && waited < 2_000; waited += 10) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    // 每一条都送达了订阅者：门控只影响发布，不影响事件分发。
+    assert.equal(observedEvents.length, DELTAS + 1);
+    // 两次发布：初始快照一次，那条 state.changed 一次。32 个 delta 贡献 0 次。
+    // 旧实现在这里是 2 + DELTAS。
+    assert.equal(publications, 2);
+    assert.equal(controller.publication()?.commitSeq, 2);
+    assert.equal(Number(controller.publication()?.snapshot.stateVersion), 1);
+  } finally {
+    unsubscribe();
+    controller.dispose();
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("WP-013 correlates accepted/event/completed frames into a durable publication", async () => {
+  const token = "bridge-token-command-lifecycle";
+  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    onRequest(request, socket, hello) {
+      const base = snapshotResponse(request.requestId, hello).snapshot;
+      socket.write(
+        Buffer.concat([
+          encodeFrame("receipt:accepted", hello.runtimeEpoch, {
+            type: "harness.receipt",
+            requestId: request.requestId,
+            commandId: "runtime-command-1",
+            runtimeEpoch: hello.runtimeEpoch,
+            stateVersion: 0,
+            status: "accepted",
+          }),
+          encodeFrame("event:paused", hello.runtimeEpoch, {
+            type: "harness.event",
+            runtimeEpoch: hello.runtimeEpoch,
+            eventSeq: 1,
+            stateVersion: 1,
+            occurredAt: "2026-08-11T00:00:01.000Z",
+            event: {
+              kind: "state.changed",
+              snapshot: {
+                ...base,
+                stateVersion: 1,
+                pause: { paused: true, pauseEpoch: 1, pausedAt: "2026-08-11T00:00:01.000Z" },
+              },
+            },
+          }),
+          encodeFrame("receipt:completed", hello.runtimeEpoch, {
+            type: "harness.receipt",
+            requestId: request.requestId,
+            commandId: "runtime-command-1",
+            runtimeEpoch: hello.runtimeEpoch,
+            stateVersion: 1,
+            status: "completed",
+            result: { pauseEpoch: 1 },
+          }),
+        ]),
+      );
+    },
+  });
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+  const ledger = new CommandLedger(() => "2026-08-11T00:00:00.000Z");
+  const controller = new HarnessRuntimeSessionController(
+    client,
+    ledger,
+    new RuntimePublicationStore(() => "2026-08-11T00:00:02.000Z"),
+  );
+  try {
+    await client.connect();
+    await controller.refresh();
+    const receipt = await controller.invoke(request({ kind: "runtime.pause" }, "request-wire-command"));
+    assert.equal(receipt.status, "completed");
+    assert.equal(ledger.getByRequestId("request-wire-command")?.commandId, "runtime-command-1");
+    assert.equal(ledger.getByRequestId("request-wire-command")?.status, "completed");
+    assert.equal(controller.publication()?.snapshot.pause?.paused, true);
+    assert.equal(controller.publication()?.terminalOutcomes[0]?.status, "completed");
+  } finally {
+    controller.dispose();
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("WP-013 renderer refresh reconciles terminal receipt tail from READY", async () => {
+  const token = "bridge-token-terminal-tail";
+  const terminalReceipt = {
+    type: "harness.receipt" as const,
+    requestId: "request-tail" as RequestId,
+    commandId: "runtime-command-tail" as CommandId,
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    status: "completed" as const,
+  };
+  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    snapshot(requestId, hello) {
+      const response = snapshotResponse(requestId, hello);
+      return {
+        ...response,
+        snapshot: { ...response.snapshot, stateVersion: 1 as StateVersion },
+        terminalReceipts: [terminalReceipt],
+      };
+    },
+  });
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+  const ledger = new CommandLedger(() => "2026-08-11T00:00:00.000Z");
+  ledger.request("request-tail" as CommandId, request({ kind: "runtime.pause" }, "request-tail"), "runtime-instance-1" as RuntimeId);
+  const controller = new HarnessRuntimeSessionController(client, ledger);
+  try {
+    await client.connect();
+    await controller.refresh();
+    assert.equal(ledger.getByRequestId("request-tail")?.commandId, "runtime-command-tail");
+    assert.equal(ledger.getByRequestId("request-tail")?.status, "completed");
+    const refreshed = await controller.refresh();
+    assert.equal(refreshed.terminalOutcomes[0]?.status, "completed");
+  } finally {
+    controller.dispose();
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("PR-010 Bridge shutdown waits for the terminal receipt and shutdownComplete event", async () => {
+  const token = "bridge-token-shutdown";
+  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    onRequest(request, socket, hello) {
+      assert.deepEqual(request.operation, { kind: "runtime.shutdown", drain: true });
+      socket.write(Buffer.concat([
+        encodeFrame("receipt:shutdown", hello.runtimeEpoch, {
+          type: "harness.receipt",
+          requestId: request.requestId,
+          commandId: "runtime-command-shutdown",
+          runtimeEpoch: hello.runtimeEpoch,
+          stateVersion: 0,
+          status: "completed",
+          result: { drained: true },
+        }),
+        encodeFrame("event:shutdown", hello.runtimeEpoch, {
+          type: "harness.event",
+          runtimeEpoch: hello.runtimeEpoch,
+          eventSeq: 1,
+          stateVersion: 0,
+          occurredAt: "2026-08-12T00:00:00.000Z",
+          event: { kind: "runtime.shutdownComplete" },
+        }),
+      ]));
+    },
+  });
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+  try {
+    await client.connect();
+    await client.requestSnapshot();
+    assert.equal((await client.shutdown()).status, "completed");
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+for (const supportsOwner of [false, true]) {
+  test(`startup owner notifications preserve the Bridge with ${supportsOwner ? "supporting" : "legacy"} Runtime`, async () => {
+    const token = "bridge-token-owner-notifications";
+    const received: string[] = [];
+    const bridge = await listenForHello(hello => {
+      const response = helloResponse(hello, token);
+      if (supportsOwner) response.capabilityManifest.capabilities.push({
+        id: "session.owner.update", grade: "stable", version: 1, evidence: "owner-fixture",
+      });
+      return response;
+    }, {
+      onRequest(request, socket, hello) {
+        received.push(request.operation.kind);
+        // Match released Runtimes: an unknown operation terminates the pipe.
+        if (request.operation.kind === "session.owner.update" && !supportsOwner) {
+          socket.destroy();
+          return;
+        }
+        socket.write(encodeFrame(`receipt:${request.requestId}`, hello.runtimeEpoch, {
+          type: "harness.receipt", requestId: request.requestId, runtimeEpoch: hello.runtimeEpoch,
+          stateVersion: 0, status: "completed",
+          result: request.operation.kind === "operator.manifest.get" ? {
+            generatedAt: "1970-01-01T00:00:00.000Z", upstreamCommit: hello.upstreamCommit,
+            hash: hello.commandManifestHash, commands: [], unclassifiedBuiltins: [],
+          } : { updated: true },
+        }));
+      },
+    });
+    const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+    const controller = new HarnessRuntimeSessionController(client, new CommandLedger());
+    const off = controller.onPublication(() => controller.updateOwnerState({
+      known: false, visibleSessionIds: [], blockedSessionIds: [],
+    }));
+    try {
+      await client.connect();
+      await controller.refresh();
+      await client.requestCommandManifest();
+      assert.equal(client.state, "ready");
+      assert.equal(received.includes("session.owner.update"), supportsOwner);
+      assert.equal(received.at(-1), "operator.manifest.get");
+    } finally {
+      off();
+      controller.dispose();
+      client.close();
+      await bridge.close();
+    }
+  });
+}
+
+test("RT-002 Bridge command-manifest probe parses and returns the advertised manifest", async () => {
+  const token = "bridge-token-command-manifest";
+  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    onRequest(request, socket, hello) {
+      assert.deepEqual(request.operation, { kind: "operator.manifest.get" });
+      socket.write(encodeFrame("receipt:manifest", hello.runtimeEpoch, {
+        type: "harness.receipt",
+        requestId: request.requestId,
+        commandId: "runtime-command-manifest",
+        runtimeEpoch: hello.runtimeEpoch,
+        stateVersion: 0,
+        status: "completed",
+        result: {
+          generatedAt: "1970-01-01T00:00:00.000Z",
+          upstreamCommit: hello.upstreamCommit,
+          hash: hello.commandManifestHash,
+          commands: [],
+          unclassifiedBuiltins: [],
+        },
+      }));
+    },
+  });
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+  try {
+    await client.connect();
+    await client.requestSnapshot();
+    const manifest = await client.requestCommandManifest();
+    assert.equal(manifest.hash, "sha256:empty-commands");
+    assert.deepEqual(manifest.unclassifiedBuiltins, []);
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+for (const acceptedBeforeLoss of [false, true]) {
+  test(`reconnect resolves a lost ${acceptedBeforeLoss ? "accepted" : "requested"} command from terminal receipts without replay`, async () => {
+    const token = "bridge-token-late-terminal";
+    let invocations = 0;
+    const terminalReceipt = {
+      type: "harness.receipt" as const,
+      requestId: "request-crash" as RequestId,
+      commandId: "runtime-command-crash" as CommandId,
+      runtimeEpoch: epoch,
+      stateVersion: 1 as StateVersion,
+      status: "completed" as const,
+    };
+    const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+      snapshot(requestId, hello) {
+        const response = snapshotResponse(requestId, hello);
+        if (invocations === 0) return response;
+        return {
+          ...response,
+          snapshot: {
+            ...response.snapshot,
+            stateVersion: 1 as StateVersion,
+            pause: { paused: true, pauseEpoch: 1, pausedAt: "2026-11-09T00:00:01.000Z" },
+          },
+          terminalReceipts: [terminalReceipt],
+        };
+      },
+      onRequest(request, socket, hello) {
+        invocations += 1;
+        if (!acceptedBeforeLoss) {
+          socket.destroy();
+          return;
+        }
+        socket.write(
+          encodeFrame("receipt:accepted-before-loss", hello.runtimeEpoch, {
+            ...terminalReceipt,
+            requestId: request.requestId,
+            stateVersion: 0,
+            status: "accepted",
+          }),
+          () => socket.destroy(),
+        );
+      },
+    });
+    const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+    const ledger = new CommandLedger(() => "2026-11-09T00:00:00.000Z");
+    const controller = new HarnessRuntimeSessionController(client, ledger);
+    try {
+      await client.connect();
+      await controller.refresh();
+      await assert.rejects(() => controller.invoke(request({ kind: "runtime.pause" }, "request-crash")));
+      assert.equal(ledger.getByRequestId("request-crash")?.commandId, acceptedBeforeLoss ? "runtime-command-crash" : "request-crash");
+      assert.equal(ledger.getByRequestId("request-crash")?.status, "outcome_unknown");
+      assert.equal(controller.publication()?.terminalOutcomes[0]?.status, "outcome_unknown");
+
+      await client.reconnect();
+      const recovered = await controller.refresh();
+      assert.equal(client.state, "ready");
+      assert.equal(recovered.snapshot.pause?.paused, true);
+      assert.equal(recovered.terminalOutcomes[0]?.commandId, "runtime-command-crash");
+      assert.equal(recovered.terminalOutcomes[0]?.status, "completed");
+      assert.equal(recovered.terminalOutcomes[0]?.stateVersionAfter, 1);
+      assert.equal(recovered.terminalOutcomes[0]?.errorCode, undefined);
+      const revision = ledger.terminalRevision;
+      assert.equal((await controller.refresh()).terminalOutcomes[0]?.status, "completed");
+      assert.equal(ledger.terminalRevision, revision, "duplicate terminal tails are idempotent");
+      assert.equal(invocations, 1, "snapshot recovery must not replay the command");
+    } finally {
+      controller.dispose();
+      client.close();
+      await bridge.close();
+    }
+  });
+}
+
+for (const status of ["completed", "failed", "rejected"] as const) {
+  test(`late ${status} receipt replaces the unknown outcome and its loss diagnosis`, () => {
+    let now = "2026-11-09T00:00:00.000Z";
+    const ledger = new CommandLedger(() => now);
+    const commandId = "late-command" as CommandId;
+    ledger.request(commandId, request({ kind: "runtime.pause" }, "late-request"), runtimeId);
+    ledger.transition(commandId, "accepted");
+    ledger.markRuntimeLost(runtimeId, epoch);
+    const revision = ledger.terminalRevision;
+    now = "2026-11-09T00:00:01.000Z";
+    const receipt = {
+      type: "harness.receipt" as const,
+      requestId: "late-request" as RequestId,
+      commandId,
+      runtimeEpoch: epoch,
+      stateVersion: 2 as StateVersion,
+      status,
+      ...(status === "completed" ? {} : {
+        error: { code: "INVALID_ARGUMENT" as const, message: "  Runtime rejected the operation  ", retryable: false },
+      }),
+    };
+    const settled = ledger.reconcileReceipt(receipt);
+    assert.equal(settled?.status, status);
+    assert.equal(settled?.stateVersionAfter, 2);
+    assert.equal(settled?.terminalAt, now);
+    assert.equal(settled?.errorCode, status === "completed" ? undefined : "INVALID_ARGUMENT");
+    assert.equal(settled?.errorMessage, status === "completed" ? undefined : "Runtime rejected the operation");
+    assert.equal(ledger.terminalRevision, revision + 1);
+    assert.deepEqual(ledger.reconcileReceipt(receipt), settled);
+    assert.equal(ledger.terminalRevision, revision + 1);
+  });
+}
+
+test("late receipts preserve request identity, epoch fences and known terminal outcomes", () => {
+  const ledger = new CommandLedger();
+  const commandId = "bound-command" as CommandId;
+  ledger.request(commandId, request({ kind: "runtime.pause" }, "lost-request"), runtimeId);
+  ledger.transition(commandId, "accepted");
+  ledger.markRuntimeLost(runtimeId, epoch);
+  const unknown = ledger.snapshot();
+  const receipt = {
+    type: "harness.receipt" as const,
+    requestId: "lost-request" as RequestId,
+    commandId,
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    status: "completed" as const,
+  };
+  assert.throws(() => ledger.reconcileReceipt({ ...receipt, requestId: "another-request" as RequestId }), /Unknown request id/u);
+  assert.throws(() => ledger.reconcileReceipt({ ...receipt, commandId: "another-command" as CommandId }), /command id mismatch/u);
+  assert.throws(() => ledger.reconcileReceipt({ ...receipt, runtimeEpoch: 2 as RuntimeEpoch }), /runtime epoch mismatch/u);
+  assert.throws(() => ledger.reconcileReceipt({ ...receipt, status: "accepted" }), /Conflicting terminal receipt/u);
+  assert.deepEqual(ledger.snapshot(), unknown, "untrusted or nonterminal receipts cannot mutate the fenced row");
+
+  ledger.reconcileReceipt(receipt);
+  const completed = ledger.snapshot();
+  assert.throws(() => ledger.reconcileReceipt({ ...receipt, status: "failed" }), /Conflicting terminal receipt completed -> failed/u);
+  assert.deepEqual(ledger.snapshot(), completed);
+});
+
+test("snapshot recovery fences other Runtime instances and epochs without hiding real conflicts", async () => {
+  const token = "bridge-token-recovery-fences";
+  const connectedRuntime = "runtime-instance-1" as RuntimeId;
+  const currentEpoch = 2 as RuntimeEpoch;
+  let conflict = false;
+  const bridge = await listenForHello(hello => ({ ...helloResponse(hello, token), runtimeEpoch: currentEpoch }), {
+    snapshot(requestId, hello) {
+      const response = snapshotResponse(requestId, hello);
+      return {
+        ...response,
+        snapshot: { ...response.snapshot, stateVersion: 1 as StateVersion },
+        terminalReceipts: ["previous-epoch", "previous-runtime", "current"].map(id => ({
+          type: "harness.receipt" as const,
+          requestId: id as RequestId,
+          commandId: id as CommandId,
+          runtimeEpoch: currentEpoch,
+          stateVersion: 1 as StateVersion,
+          status: conflict && id === "current" ? "failed" as const : "completed" as const,
+        })),
+      };
+    },
+  });
+  const ledger = new CommandLedger();
+  for (const entry of [
+    { id: "previous-epoch", runtimeId: connectedRuntime, runtimeEpoch: epoch },
+    { id: "previous-runtime", runtimeId: "retired-runtime" as RuntimeId, runtimeEpoch: currentEpoch },
+    { id: "current", runtimeId: connectedRuntime, runtimeEpoch: currentEpoch },
+  ]) {
+    ledger.request(entry.id as CommandId, { ...request({ kind: "runtime.pause" }, entry.id), runtimeEpoch: entry.runtimeEpoch }, entry.runtimeId);
+    ledger.markRuntimeLost(entry.runtimeId, entry.runtimeEpoch);
+  }
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+  const controller = new HarnessRuntimeSessionController(client, ledger);
+  try {
+    await client.connect();
+    const recovered = await controller.refresh();
+    assert.equal(recovered.snapshot.runtimeEpoch, currentEpoch);
+    assert.equal(ledger.getByRequestId("previous-epoch")?.status, "outcome_unknown");
+    assert.equal(ledger.getByRequestId("previous-runtime")?.status, "outcome_unknown");
+    assert.equal(ledger.getByRequestId("current")?.status, "completed");
+    conflict = true;
+    await assert.rejects(() => controller.refresh(), /Conflicting terminal receipt completed -> failed/u);
+    assert.equal(ledger.getByRequestId("current")?.status, "completed");
+  } finally {
+    controller.dispose();
+    client.close();
+    await bridge.close();
+  }
+});
+
+for (const phase of ["failed", "pending"] as const) {
+  test(`disposed controller does not retry a ${phase} gap refresh`, async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let resync = () => {};
+    let rejectSnapshot!: (error: Error) => void;
+    let snapshots = 0;
+    const bridge = {
+      state: "snapshot-required",
+      onProjectionChanged: () => () => {},
+      onEvent: () => () => {},
+      onResyncRequired(listener: () => void) {
+        resync = listener;
+        return () => { resync = () => {}; };
+      },
+      requestSnapshot() {
+        snapshots += 1;
+        return new Promise<HarnessSnapshotResponse>((_resolve, reject) => { rejectSnapshot = reject; });
+      },
+    } as unknown as HarnessBridgeClient;
+    const controller = new HarnessRuntimeSessionController(bridge, new CommandLedger());
+    try {
+      resync();
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(snapshots, 1);
+      if (phase === "failed") {
+        rejectSnapshot(new Error("snapshot blocked by pending requests"));
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      controller.dispose();
+      if (phase === "pending") rejectSnapshot(new Error("snapshot blocked by pending requests"));
+      await new Promise<void>(resolve => setImmediate(resolve));
+      t.mock.timers.tick(1_000);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(snapshots, 1, "retired controllers must not resume background snapshot traffic");
+    } finally {
+      controller.dispose();
+    }
+  });
+}
+
+test("connectUntilReady retries CONNECTION_FAILED until the pipe accepts", async () => {
+  const token = "bridge-token-retry";
+  const bridge = await listenForHello((hello) => helloResponse(hello, token));
+  let attempts = 0;
+  const client = new HarnessBridgeClient({
+    endpoint: bridge.endpoint,
+    token,
+    connectSocket: (endpoint) => {
+      attempts += 1;
+      if (attempts < 3) {
+        const socket = new Socket();
+        queueMicrotask(() => {
+          socket.emit("error", Object.assign(new Error("connect ENOENT"), { code: "ENOENT" }));
+        });
+        return socket;
+      }
+      return createConnection(endpoint);
+    },
+  });
+  try {
+    const response = await client.connectUntilReady({ deadline: Date.now() + 2_000 });
+    assert.equal(attempts >= 3, true);
+    assert.equal(client.state, "negotiated");
+    assert.equal(response.runtimeVersion, "17.2.12-harness.3");
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("an uncorrelated receipt after the snapshot is ignored instead of killing the Bridge", async () => {
+  const token = "bridge-token-uncorrelated-receipt";
+  const internalErrors: string[] = [];
+  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    afterSnapshot: (response) => [
+      encodeFrame("receipt:unknown", response.snapshot.runtimeEpoch, {
+        type: "harness.receipt",
+        requestId: "request-never-sent",
+        commandId: "runtime-command-never-sent",
+        runtimeEpoch: response.snapshot.runtimeEpoch,
+        stateVersion: 0,
+        status: "completed",
+      }),
+    ],
+  });
+  const client = new HarnessBridgeClient({
+    endpoint: bridge.endpoint,
+    token,
+    onInternalError: (error, source) => internalErrors.push(`${source}:${error.message}`),
+  });
+  try {
+    await client.connect();
+    const response = await client.requestSnapshot();
+    assert.equal(response.snapshot.runtimeEpoch, 1);
+    assert.equal(client.state, "ready");
+    assert.deepEqual(internalErrors, ["receipt:Uncorrelated Harness receipt"]);
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("a throwing projection subscriber does not reject the snapshot or close the Bridge", async () => {
+  const token = "bridge-token-projection-throw";
+  const internalErrors: string[] = [];
+  const bridge = await listenForHello((hello) => helloResponse(hello, token));
+  const client = new HarnessBridgeClient({
+    endpoint: bridge.endpoint,
+    token,
+    onInternalError: (error, source) => internalErrors.push(`${source}:${error.message}`),
+  });
+  client.onProjectionChanged(() => {
+    throw new Error("projection subscriber exploded");
+  });
+  try {
+    await client.connect();
+    const response = await client.requestSnapshot();
+    assert.equal(response.snapshot.runtimeEpoch, 1);
+    assert.equal(client.state, "ready");
+    assert.equal(internalErrors.includes("projection:projection subscriber exploded"), true);
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("WP-011 authenticates a real local Bridge connection without sending the token", async () => {
+  const token = "bridge-token-1";
+  let observedHello = "";
+  const bridge = await listenForHello((hello) => {
+    observedHello = JSON.stringify(hello);
+    return helloResponse(hello, token);
+  });
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+  try {
+    const response = await client.connect();
+    assert.equal(client.state, "negotiated");
+    assert.equal(response.capabilityManifest.profile, "limited");
+    assert.equal(observedHello.includes(token), false);
+    const snapshot = await client.requestSnapshot();
+    assert.equal(client.state, "ready");
+    assert.equal(snapshot.snapshot.sessionId, "session-1");
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("PR-002 connection authentication fails without leaking Bridge secrets", async () => {
+  const token = "bridge-token-correct";
+  const bridge = await listenForHello((hello) => ({
+    ...helloResponse(hello, "bridge-token-wrong"),
+    challengeProof: "invalid-proof",
+  }));
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+  try {
+    await assert.rejects(() => client.connect(), (error: unknown) => {
+      assert.equal(error instanceof HarnessBridgeHandshakeError && error.code === "UNAUTHENTICATED", true);
+      const message = error instanceof Error ? error.message : String(error);
+      return !message.includes(token) && !message.includes(bridge.endpoint);
+    });
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("WP-011 rejects an unsupported negotiated protocol", async () => {
+  const token = "bridge-token-version";
+  const bridge = await listenForHello((hello) => helloResponse(hello, token, undefined, 2));
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+  try {
+    await assert.rejects(
+      () => client.connect(),
+      (error: unknown) => error instanceof HarnessBridgeHandshakeError && error.code === "PROTOCOL_UNSUPPORTED",
+    );
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("WP-011 reconnect uses a fresh challenge and requires the same runtime identity", async () => {
+  const token = "bridge-token-reconnect";
+  const challenges: string[] = [];
+  const bridge = await listenForHello((hello, connection) => {
+    challenges.push(hello.challenge);
+    return helloResponse(
+      hello,
+      token,
+      (connection === 1 ? "runtime-instance-1" : "runtime-instance-2") as RuntimeInstanceId,
+    );
+  });
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+  try {
+    await client.connect();
+    await client.requestSnapshot();
+    client.disconnect();
+    await assert.rejects(
+      () => client.reconnect(),
+      (error: unknown) => error instanceof HarnessBridgeHandshakeError && error.code === "IDENTITY_CHANGED",
+    );
+    assert.equal(challenges.length, 2);
+    assert.notEqual(challenges[0], challenges[1]);
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+for (const recovery of ["split live receipt", "snapshot receipt tail"] as const) {
+  test(`event-gap recovery settles an in-flight command from its ${recovery}`, { timeout: 2_000 }, async t => {
+    const token = "bridge-gap-with-pending-command";
+    let snapshots = 0;
+    let activeSocket: Socket | undefined;
+    let terminal: HarnessSnapshotResponse["terminalReceipts"][number] | undefined;
+    let completedFrame: Buffer = Buffer.alloc(0);
+    const bridge = await listenForHello(hello => helloResponse(hello, token), {
+      snapshot(requestId, hello) {
+        const response = snapshotResponse(requestId, hello);
+        snapshots++;
+        if (snapshots === 1) return response;
+        if (recovery === "split live receipt") activeSocket!.write(completedFrame.subarray(20));
+        return {
+          ...response, lastEventSeq: 2 as HarnessSnapshotResponse["lastEventSeq"],
+          snapshot: { ...response.snapshot, stateVersion: 2 as StateVersion },
+          terminalReceipts: recovery === "snapshot receipt tail" ? [terminal!] : [],
+        };
+      },
+      onRequest(command, socket, hello) {
+        activeSocket = socket;
+        terminal = {
+          type: "harness.receipt", requestId: command.requestId,
+          commandId: "runtime-held-command" as CommandId, runtimeEpoch: hello.runtimeEpoch,
+          stateVersion: 2 as StateVersion, status: "completed",
+        };
+        completedFrame = encodeFrame("completed", hello.runtimeEpoch, terminal);
+        const base = snapshotResponse("state", hello).snapshot;
+        socket.write(Buffer.concat([
+          encodeFrame("accepted", hello.runtimeEpoch, { ...terminal, status: "accepted", stateVersion: 0 }),
+          encodeFrame("gap", hello.runtimeEpoch, {
+            type: "harness.event", runtimeEpoch: hello.runtimeEpoch, eventSeq: 2, stateVersion: 1,
+            occurredAt: "2026-11-12T00:00:00.000Z",
+            event: { kind: "state.changed", snapshot: { ...base, stateVersion: 1 } },
+          }),
+          ...(recovery === "split live receipt" ? [completedFrame.subarray(0, 20)] : []),
+        ]));
+      },
+    });
+    const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+    const ledger = new CommandLedger();
+    const controller = new HarnessRuntimeSessionController(client, ledger);
+    t.after(async () => { controller.dispose(); client.close(); await bridge.close(); });
+    let recovered!: () => void;
+    const recoveryDone = new Promise<void>(resolve => { recovered = resolve; });
+    controller.onPublication(publication => {
+      if (client.state === "ready" && publication.snapshot.stateVersion === 2) recovered();
+    });
+    await client.connect();
+    await controller.refresh();
+    const completed = await controller.invoke(request({ kind: "core.prompt", text: "keep working" }, "gap-held"));
+    await recoveryDone;
+    assert.equal(completed.status, "completed");
+    assert.equal(ledger.getByRequestId("gap-held")?.status, "completed");
+    assert.equal(snapshots, 2);
+    assert.equal(client.state, "ready");
+  });
+}
+
+test("another gap behind a recovery snapshot starts a subsequent refresh", { timeout: 2_000 }, async t => {
+  const token = "bridge-consecutive-gaps";
+  let snapshots = 0;
+  const bridge = await listenForHello(hello => helloResponse(hello, token), {
+    snapshot(requestId, hello) {
+      const response = snapshotResponse(requestId, hello);
+      const version = 2 * snapshots++;
+      return { ...response, lastEventSeq: version as HarnessSnapshotResponse["lastEventSeq"],
+        snapshot: { ...response.snapshot, stateVersion: version as StateVersion } };
+    },
+    afterSnapshot(response) {
+      if (snapshots >= 3) return [];
+      return [encodeFrame("next-gap", response.snapshot.runtimeEpoch, {
+        type: "harness.event", runtimeEpoch: response.snapshot.runtimeEpoch,
+        eventSeq: response.lastEventSeq + 2, stateVersion: response.snapshot.stateVersion + 1,
+        occurredAt: "2026-11-12T00:00:00.000Z",
+        event: { kind: "state.changed", snapshot: { ...response.snapshot, stateVersion: response.snapshot.stateVersion + 1 } },
+      })];
+    },
+  });
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+  const controller = new HarnessRuntimeSessionController(client, new CommandLedger());
+  t.after(async () => { controller.dispose(); client.close(); await bridge.close(); });
+  let recovered!: () => void;
+  const done = new Promise<void>(resolve => { recovered = resolve; });
+  controller.onPublication(publication => {
+    if (client.state === "ready" && publication.snapshot.stateVersion === 4) recovered();
+  });
+  await client.connect();
+  await controller.refresh();
+  await done;
+  assert.equal(snapshots, 3);
+  assert.equal(client.state, "ready");
+});
+
+test("WP-012 projection fences stale epochs and requests a snapshot on event gaps", () => {
+  const token = "projection-token";
+  const hello = helloResponse(
+    {
+      type: "harness.hello",
+      requestId: "hello-projection" as RequestId,
+      supportedProtocolVersions: [1],
+      requiredProfile: "full-parity-v1",
+      challenge: "projection-challenge",
+    },
+    token,
+  );
+  const projection = new RuntimeProjection();
+  projection.beginConnection(hello);
+  projection.applySnapshot(snapshotResponse("snapshot-projection", hello));
+  const base = projection.snapshot()!;
+  assert.equal(
+    projection.applyEvent({
+      type: "harness.event",
+      runtimeEpoch: 1 as RuntimeEpoch,
+      eventSeq: 1 as HarnessSnapshotResponse["lastEventSeq"],
+      stateVersion: 1 as StateVersion,
+      occurredAt: "2026-08-11T00:00:01.000Z",
+      event: { kind: "state.changed", snapshot: { ...base, stateVersion: 1 as StateVersion } },
+    }),
+    "applied",
+  );
+  assert.equal(
+    projection.applyEvent({
+      type: "harness.event",
+      runtimeEpoch: 1 as RuntimeEpoch,
+      eventSeq: 3 as HarnessSnapshotResponse["lastEventSeq"],
+      stateVersion: 2 as StateVersion,
+      occurredAt: "2026-08-11T00:00:02.000Z",
+      event: { kind: "state.changed", snapshot: { ...base, stateVersion: 2 as StateVersion } },
+    }),
+    "gap",
+  );
+  assert.equal(projection.needsSnapshot(), true);
+  assert.equal(
+    projection.applyEvent({
+      type: "harness.event",
+      runtimeEpoch: 99 as RuntimeEpoch,
+      eventSeq: 2 as HarnessSnapshotResponse["lastEventSeq"],
+      stateVersion: 2 as StateVersion,
+      occurredAt: "2026-08-11T00:00:03.000Z",
+      event: { kind: "runtime.ready" },
+    }),
+    "snapshot-required",
+  );
+});
+
+test("projection consumes a stale-session telemetry sequence without mutating the snapshot", () => {
+  const token = "projection-telemetry-token";
+  const hello = helloResponse(
+    {
+      type: "harness.hello",
+      requestId: "hello-projection-telemetry" as RequestId,
+      supportedProtocolVersions: [1],
+      requiredProfile: "full-parity-v1",
+      challenge: "projection-telemetry-challenge",
+    },
+    token,
+  );
+  const projection = new RuntimeProjection();
+  projection.beginConnection(hello);
+  projection.applySnapshot(snapshotResponse("snapshot-projection-telemetry", hello));
+  const base = projection.snapshot()!;
+  const staleSessionId = "session-old" as typeof base.sessionId;
+
+  assert.equal(
+    projection.applyEvent({
+      type: "harness.event",
+      runtimeEpoch: hello.runtimeEpoch,
+      eventSeq: 1 as HarnessSnapshotResponse["lastEventSeq"],
+      stateVersion: base.stateVersion,
+      occurredAt: "2026-08-15T00:00:01.000Z",
+      event: {
+        kind: "session.telemetry.changed",
+        sessionId: staleSessionId,
+        telemetry: {
+          sessionId: staleSessionId,
+          capturedAt: "2026-08-15T00:00:01.000Z",
+          tokens: {
+            input: 1,
+            output: 2,
+            reasoning: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            total: 3,
+            cost: 0,
+          },
+          context: null,
+          unavailableReason: "model_context_unknown",
+        },
+      },
+    }),
+    "stale",
+  );
+  assert.equal(projection.lastEventSeq(), 1);
+  assert.equal(projection.snapshot()?.telemetry, undefined);
+  assert.equal(projection.needsSnapshot(), false);
+
+  assert.equal(
+    projection.applyEvent({
+      type: "harness.event",
+      runtimeEpoch: hello.runtimeEpoch,
+      eventSeq: 2 as HarnessSnapshotResponse["lastEventSeq"],
+      stateVersion: 1 as StateVersion,
+      occurredAt: "2026-08-15T00:00:02.000Z",
+      event: { kind: "state.changed", snapshot: { ...base, stateVersion: 1 as StateVersion } },
+    }),
+    "applied",
+  );
+  assert.equal(projection.lastEventSeq(), 2);
+  assert.equal(projection.needsSnapshot(), false);
+});
+
+test("PR-008 closes a local Bridge connection on an oversized response", async () => {
+  const prefix = Buffer.alloc(4);
+  prefix.writeUInt32BE(1024 * 1024 + 1);
+  const bridge = await listenForHello(() => prefix);
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token: "bridge-token-oversize" });
+  try {
+    await assert.rejects(
+      () => client.connect(),
+      (error: unknown) => error instanceof HarnessBridgeHandshakeError && error.code === "MALFORMED_RESPONSE",
+    );
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("PR-002 bridge token is one-time and challenge proof is bound to runtime identity", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "juling-harness-bridge-"));
+  const secured: string[] = [];
+  const bootstrap = await createBridgeBootstrap(directory, "win32", {
+    secureDirectory: async (path) => {
+      secured.push(`directory:${path}`);
+    },
+    createSecureTokenFile: async (path, token) => {
+      secured.push(`file:${path}`);
+      await writeFile(path, token, { encoding: "utf8", flag: "wx" });
+    },
+  });
+  assert.equal(secured.length, 2);
+  const consumed = await consumeBridgeToken(bootstrap.tokenFile);
+  assert.equal(consumed, bootstrap.token);
+  const instance = "instance-1" as RuntimeInstanceId;
+  const proof = createChallengeProof(consumed, "challenge-1", instance);
+  assert.equal(verifyChallengeProof(consumed, "challenge-1", instance, proof), true);
+  assert.equal(verifyChallengeProof(consumed, "challenge-2", instance, proof), false);
+  assert.equal(verifyChallengeProof(consumed, "challenge-1", "instance-2" as RuntimeInstanceId, proof), false);
+  await assert.rejects(() => consumeBridgeToken(bootstrap.tokenFile));
+});
+
+test("SEC-007 concurrent Bridge token consumers cannot both claim the secret", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "juling-harness-token-race-"));
+  for (let index = 0; index < 500; index += 1) {
+    const tokenFile = join(directory, `bridge-${index}.token`);
+    await writeFile(tokenFile, "one-time-token", { encoding: "utf8", flag: "wx" });
+    const results = await Promise.allSettled([consumeBridgeToken(tokenFile), consumeBridgeToken(tokenFile)]);
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1, `iteration ${index}`);
+    assert.equal(results.filter((result) => result.status === "rejected").length, 1, `iteration ${index}`);
+    await assert.rejects(() => access(tokenFile));
+    await assert.rejects(() => access(`${tokenFile}.claimed`));
+  }
+});
+
+test("SEC-007 an existing Bridge token claim fails closed without deleting the token", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "juling-harness-token-claimed-"));
+  const tokenFile = join(directory, "bridge.token");
+  await writeFile(tokenFile, "one-time-token", { encoding: "utf8", flag: "wx" });
+  await writeFile(`${tokenFile}.claimed`, "", { encoding: "utf8", flag: "wx" });
+  await assert.rejects(() => consumeBridgeToken(tokenFile));
+  assert.equal(await readFile(tokenFile, "utf8"), "one-time-token");
+});
+
+test("SEC-002 Windows bootstrap fails closed without an ACL provider", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "juling-harness-bridge-no-acl-"));
+  await assert.rejects(() => createBridgeBootstrap(directory, "win32"), /ACL provider/u);
+});
+
+test("SEC-002 production Windows ACL provider grants only the current SID", async () => {
+  const commands: Array<{ executable: string; args: readonly string[] }> = [];
+  const acl = createWindowsBridgeAclPort(async (executable, args) => {
+    commands.push({ executable, args });
+    if (executable === "whoami.exe") return '"desktop\\operator","S-1-5-21-100-200-300-400"';
+    return "processed";
+  });
+  const directory = await mkdtemp(join(tmpdir(), "juling-harness-acl-provider-"));
+  const tokenFile = join(directory, "bridge.token");
+  await acl.secureDirectory(directory);
+  await acl.createSecureTokenFile(tokenFile, "secret");
+  assert.equal(parseWindowsUserSid('"desktop\\operator","S-1-5-21-100-200-300-400"'), "S-1-5-21-100-200-300-400");
+  assert.deepEqual(commands, [
+    { executable: "whoami.exe", args: ["/user", "/fo", "csv", "/nh"] },
+    {
+      executable: "icacls.exe",
+      args: [directory, "/inheritance:r", "/grant:r", "*S-1-5-21-100-200-300-400:(OI)(CI)F"],
+    },
+    {
+      executable: "icacls.exe",
+      args: [tokenFile, "/inheritance:r", "/grant:r", "*S-1-5-21-100-200-300-400:F"],
+    },
+  ]);
+  assert.equal(await consumeBridgeToken(tokenFile), "secret");
+});
+
+test("PR-004/PR-005 registry replays identical operations and rejects key reuse", () => {
+  const registry = new ReceiptRegistry(2);
+  const key = "same-key" as IdempotencyKey;
+  const pause = request({ kind: "runtime.pause" });
+  const receipt = {
+    type: "harness.receipt" as const,
+    requestId: pause.requestId,
+    runtimeEpoch: epoch,
+    stateVersion: 0 as StateVersion,
+    status: "accepted" as const,
+  };
+  registry.remember(key, pause.operation, receipt);
+  assert.equal(registry.lookup(key, { kind: "runtime.pause" }).kind, "replay");
+  assert.equal(registry.lookup(key, { kind: "runtime.snapshot" }).kind, "conflict");
+});
+
+test("PR-006 projector increments stateVersion and eventSeq together", () => {
+  const projector = new StateProjector(initialSnapshot(runtimeId, epoch));
+  const event = projector.commit((draft) => {
+    draft.pause = { paused: true, pauseEpoch: 1 };
+  });
+  assert.equal(event.stateVersion, 1);
+  assert.equal(event.eventSeq, 1);
+  assert.equal(projector.snapshot().pause?.paused, true);
+});
+
+test("PR-003 arbiter rejects stale epochs", async () => {
+  const arbiter = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 0 as StateVersion,
+    isStreaming: false,
+    isCompacting: false,
+  }));
+  const stale = { ...request({ kind: "runtime.pause" }), runtimeEpoch: 0 as RuntimeEpoch };
+  await assert.rejects(() => arbiter.run(stale, () => undefined), (error: unknown) => {
+    return error instanceof HarnessHostError && error.code === "RUNTIME_EPOCH_STALE";
+  });
+});
+
+test("WP-014 arbiter enforces state, streaming, and exclusive-command gates", async () => {
+  let state = {
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: false,
+    isCompacting: false,
+  };
+  const arbiter = new CommandArbiter(() => state);
+  await assert.rejects(
+    () =>
+      arbiter.run(
+        { ...request({ kind: "runtime.pause" }), expectedStateVersion: 0 as StateVersion },
+        () => undefined,
+      ),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "STATE_VERSION_CONFLICT",
+  );
+
+  state = { ...state, isStreaming: true };
+  await assert.rejects(
+    () => arbiter.run(request({ kind: "session.drop" }), () => undefined),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "BUSY_STREAMING",
+  );
+
+  state = { ...state, isStreaming: false };
+  let release: (() => void) | undefined;
+  const held = arbiter.run(
+    request({ kind: "runtime.pause" }),
+    () => new Promise<void>((resolve) => (release = resolve)),
+  );
+  await assert.rejects(
+    () => arbiter.run(request({ kind: "runtime.resume", expectedPauseEpoch: 1 }, "request-exclusive"), () => undefined),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "COMMAND_BLOCKED",
+  );
+  release?.();
+  await held;
+});
+
+test("M4 operator.manifest.get is read-concurrent and operator.invoke is session-exclusive", async () => {
+  assert.equal(classifyOperation({ kind: "operator.manifest.get" }), "read-concurrent");
+  assert.equal(classifyOperation({ kind: "operator.invoke", commandId: "builtin.help" }), "session-exclusive");
+
+  const streaming = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: true,
+    isCompacting: false,
+  }));
+  await streaming.run(request({ kind: "operator.manifest.get" }), () => undefined);
+  await assert.rejects(
+    () => streaming.run(request({ kind: "operator.invoke", commandId: "builtin.help" }), () => undefined),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "BUSY_STREAMING",
+  );
+
+  const compacting = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: false,
+    isCompacting: true,
+  }));
+  await compacting.run(request({ kind: "operator.manifest.get" }), () => undefined);
+  await assert.rejects(
+    () => compacting.run(request({ kind: "operator.invoke", commandId: "builtin.help" }), () => undefined),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "BUSY_COMPACTING",
+  );
+});
+
+test("session.model.set is queue-compatible during streaming and compacting", async () => {
+  assert.equal(classifyOperation({ kind: "session.model.set", selector: "anthropic/claude-opus-4-6" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "session.thinking.set", level: "high" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "mode.plan.enter" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "mode.vibe.exit" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "goal.create", objective: "ship" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "loop.enable" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "session.fast.set", enabled: true }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "session.prewalk.disarm" }), "queue-compatible");
+
+  const streaming = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: true,
+    isCompacting: false,
+  }));
+  await streaming.run(request({ kind: "session.model.set", selector: "anthropic/claude-opus-4-6" }), () => undefined);
+  await streaming.run(request({ kind: "mode.plan.enter" }), () => undefined);
+
+  const compacting = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: false,
+    isCompacting: true,
+  }));
+  await compacting.run(request({ kind: "session.thinking.set", level: "high" }), () => undefined);
+  await compacting.run(request({ kind: "mode.vibe.enter" }), () => undefined);
+  await assert.rejects(
+    () => compacting.run(request({ kind: "session.drop" }), () => undefined),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "BUSY_COMPACTING",
+  );
+});
+
+test("M4 concurrent operator.manifest.get reads both execute", async () => {
+  const arbiter = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: false,
+    isCompacting: false,
+  }));
+  let executions = 0;
+  let release: (() => void) | undefined;
+  const first = arbiter.run(
+    request({ kind: "operator.manifest.get" }, "request-read-1"),
+    () =>
+      new Promise<void>((resolve) => {
+        executions += 1;
+        release = resolve;
+      }),
+  );
+  await arbiter.run(request({ kind: "operator.manifest.get" }, "request-read-2"), () => {
+    executions += 1;
+  });
+  assert.equal(executions, 2);
+  assert.equal(arbiter.currentLease, undefined);
+  release?.();
+  await first;
+});
+
+test("PR-009 runtime loss fences accepted commands as outcome_unknown", async () => {
+  const ledger = new CommandLedger(() => "2026-08-10T00:00:00.000Z");
+  const commandId = "command-1" as CommandId;
+  ledger.request(commandId, request({ kind: "runtime.pause" }), runtimeId);
+  ledger.transition(commandId, "accepted");
+  const binding: SessionBinding = {
+    threadId: "thread-1" as ThreadId,
+    environmentId: "environment-1" as EnvironmentId,
+    workspaceId: "workspace-1" as WorkspaceId,
+    runtimeId,
+    runtimeEpoch: epoch,
+    classification: "managed",
+    backend: "harness-host",
+    runtimeVersion: "v1",
+    upstreamVersion: "0.0.0",
+    upstreamCommit: "45e12e5bb758198a920c6070e7e64cb33b21beac",
+    capabilityHash: "capabilities",
+  };
+  const actor = new HarnessHostRuntimeActor({ start: async () => undefined, stop: async () => undefined }, ledger);
+  await actor.start(binding);
+  actor.runtimeLost(runtimeId, epoch);
+  assert.equal(actor.state, "crashed");
+  assert.equal(ledger.get(commandId)?.status, "outcome_unknown");
+});
+
+test("WP-013 process exit automatically fences the active Runtime epoch", async () => {
+  const ledger = new CommandLedger(() => "2026-08-11T00:00:00.000Z");
+  const commandId = "command-process-exit" as CommandId;
+  ledger.request(commandId, request({ kind: "runtime.pause" }, "request-process-exit"), runtimeId);
+  ledger.transition(commandId, "accepted");
+  let exitListener: (() => void) | undefined;
+  const actor = new HarnessHostRuntimeActor(
+    {
+      start: async () => undefined,
+      stop: async () => undefined,
+      onExit(listener) {
+        exitListener = listener;
+        return () => {
+          exitListener = undefined;
+        };
+      },
+    },
+    ledger,
+  );
+  const binding: SessionBinding = {
+    threadId: "thread-exit" as ThreadId,
+    environmentId: "environment-exit" as EnvironmentId,
+    workspaceId: "workspace-exit" as WorkspaceId,
+    runtimeId,
+    runtimeEpoch: epoch,
+    classification: "managed",
+    backend: "harness-host",
+    runtimeVersion: "v1",
+    upstreamVersion: "17.2.12",
+    upstreamCommit: "45e12e5bb758198a920c6070e7e64cb33b21beac",
+    capabilityHash: "capabilities",
+  };
+  await actor.start(binding);
+  exitListener?.();
+  assert.equal(actor.state, "crashed");
+  assert.equal(ledger.get(commandId)?.status, "outcome_unknown");
+  actor.dispose();
+});
+
+test("WP-013 failed stop restores the actor to running instead of wedging in stopping", async () => {
+  const actor = new HarnessHostRuntimeActor(
+    {
+      start: async () => undefined,
+      stop: async () => {
+        throw new Error("stop failed");
+      },
+    },
+    new CommandLedger(),
+  );
+  const binding: SessionBinding = {
+    threadId: "thread-stop" as ThreadId,
+    environmentId: "environment-stop" as EnvironmentId,
+    workspaceId: "workspace-stop" as WorkspaceId,
+    runtimeId,
+    runtimeEpoch: epoch,
+    classification: "managed",
+    backend: "harness-host",
+    runtimeVersion: "v1",
+    upstreamVersion: "17.2.12",
+    upstreamCommit: "45e12e5bb758198a920c6070e7e64cb33b21beac",
+    capabilityHash: "capabilities",
+  };
+  await actor.start(binding);
+  await assert.rejects(() => actor.stop(), /stop failed/u);
+  assert.equal(actor.state, "running");
+});
+
+test("WP-013 concrete process port spawns, awaits readiness, and stops through containment", async () => {
+  let readinessChecks = 0;
+  let requestedStops = 0;
+  const port = new NodeRuntimeProcessPort({
+    executable: process.execPath,
+    cwd: process.cwd(),
+    args: () => ["-e", "setInterval(() => {}, 1000)"],
+    spawnOptions: { stdio: "ignore" },
+    waitUntilReady: async (child) => {
+      assert.ok(child.pid !== undefined);
+      readinessChecks += 1;
+    },
+    containment: {
+      requestStop(child) {
+        requestedStops += 1;
+        child.kill();
+      },
+      forceStop(child) {
+        child.kill("SIGKILL");
+      },
+    },
+  });
+  const actor = new HarnessHostRuntimeActor(port, new CommandLedger());
+  const binding: SessionBinding = {
+    threadId: "thread-process" as ThreadId,
+    environmentId: "environment-process" as EnvironmentId,
+    workspaceId: "workspace-process" as WorkspaceId,
+    runtimeId,
+    runtimeEpoch: epoch,
+    classification: "managed",
+    backend: "harness-host",
+    runtimeVersion: "v1",
+    upstreamVersion: "17.2.12",
+    upstreamCommit: "45e12e5bb758198a920c6070e7e64cb33b21beac",
+    capabilityHash: "capabilities",
+  };
+  await actor.start(binding);
+  assert.equal(actor.state, "running");
+  await actor.stop();
+  assert.equal(actor.state, "stopped");
+  assert.equal(readinessChecks, 1);
+  assert.equal(requestedStops, 1);
+  actor.dispose();
+});
+
+test("PR-010 process port requests graceful shutdown before containment fallback", async () => {
+  const calls: string[] = [];
+  const port = new NodeRuntimeProcessPort({
+    executable: process.execPath,
+    cwd: process.cwd(),
+    args: () => ["-e", "setInterval(() => {}, 1000)"],
+    spawnOptions: { stdio: "ignore" },
+    waitUntilReady: async () => undefined,
+    requestGracefulShutdown: async child => {
+      calls.push("bridge-shutdown");
+      child.kill();
+    },
+    containment: {
+      requestStop(child) { calls.push("containment-stop"); child.kill(); },
+      forceStop(child) { calls.push("containment-force"); child.kill("SIGKILL"); },
+    },
+  });
+  await port.start({
+    threadId: "thread-shutdown" as ThreadId,
+    environmentId: "environment-shutdown" as EnvironmentId,
+    workspaceId: "workspace-shutdown" as WorkspaceId,
+    runtimeId,
+    runtimeEpoch: epoch,
+    classification: "managed",
+    backend: "harness-host",
+    runtimeVersion: "v1",
+    upstreamVersion: "17.2.12",
+    upstreamCommit: "45e12e5bb758198a920c6070e7e64cb33b21beac",
+    capabilityHash: "capabilities",
+  });
+  await port.stop();
+  assert.deepEqual(calls, ["bridge-shutdown"]);
+});
+
+test("WP-013 readiness failure force-stops the spawned Runtime", async () => {
+  let forcedStops = 0;
+  const port = new NodeRuntimeProcessPort({
+    executable: process.execPath,
+    cwd: process.cwd(),
+    args: () => ["-e", "setInterval(() => {}, 1000)"],
+    spawnOptions: { stdio: "ignore" },
+    waitUntilReady: async () => {
+      throw new Error("Bridge did not authenticate");
+    },
+    containment: {
+      requestStop(child) {
+        child.kill();
+      },
+      forceStop(child) {
+        forcedStops += 1;
+        child.kill("SIGKILL");
+      },
+    },
+  });
+  const binding: SessionBinding = {
+    threadId: "thread-readiness" as ThreadId,
+    environmentId: "environment-readiness" as EnvironmentId,
+    workspaceId: "workspace-readiness" as WorkspaceId,
+    runtimeId,
+    runtimeEpoch: epoch,
+    classification: "managed",
+    backend: "harness-host",
+    runtimeVersion: "v1",
+    upstreamVersion: "17.2.12",
+    upstreamCommit: "45e12e5bb758198a920c6070e7e64cb33b21beac",
+    capabilityHash: "capabilities",
+  };
+  await assert.rejects(() => port.start(binding), /Bridge did not authenticate/u);
+  assert.equal(forcedStops, 1);
+});
+
+test("PR-009 terminal ledger outcomes survive a Host restart", () => {
+  const directory = join(tmpdir(), `juling-harness-ledger-${randomUUID()}`);
+  const store = new JsonlCommandLedgerStore(join(directory, "commands.jsonl"));
+  const commandId = "durable-command" as CommandId;
+  const first = new CommandLedger(() => "2026-08-10T00:00:00.000Z", store);
+  first.request(commandId, request({ kind: "runtime.pause" }), runtimeId);
+  first.transition(commandId, "accepted");
+  first.transition(commandId, "completed", { stateVersionAfter: 1 as StateVersion });
+  const restored = new CommandLedger(() => "2026-08-10T00:00:01.000Z", store);
+  assert.equal(restored.get(commandId)?.status, "completed");
+  assert.equal(restored.get(commandId)?.stateVersionAfter, 1);
+});
+
+test("ledger keeps the Runtime failure message beside the code and caps its length", () => {
+  const directory = join(tmpdir(), `juling-harness-ledger-message-${randomUUID()}`);
+  const store = new JsonlCommandLedgerStore(join(directory, "commands.jsonl"));
+  const ledger = new CommandLedger(() => "2026-08-21T00:00:00.000Z", store);
+  const commandId = "message-command" as CommandId;
+  ledger.request(commandId, request({ kind: "session.model.set", selector: "x/y" }, "message-request"), runtimeId);
+  ledger.transition(commandId, "accepted");
+  ledger.reconcileReceipt({
+    type: "harness.receipt",
+    requestId: "message-request" as RequestId,
+    commandId,
+    runtimeEpoch: epoch,
+    stateVersion: 2 as StateVersion,
+    status: "failed",
+    error: { code: "INVALID_ARGUMENT", message: "  Model is not available: deepseek/deepseek-v9  ", retryable: false },
+  });
+  const entry = ledger.get(commandId);
+  assert.equal(entry?.errorCode, "INVALID_ARGUMENT");
+  assert.equal(entry?.errorMessage, "Model is not available: deepseek/deepseek-v9");
+  // Survives a Host restart through the durable store.
+  const restored = new CommandLedger(() => "2026-08-21T00:00:01.000Z", store);
+  assert.equal(restored.get(commandId)?.errorMessage, "Model is not available: deepseek/deepseek-v9");
+
+  // A blank message adds nothing, and an oversized one is capped at 512 chars.
+  const blankCommand = "blank-command" as CommandId;
+  ledger.request(blankCommand, request({ kind: "runtime.pause" }, "blank-request"), runtimeId);
+  ledger.transition(blankCommand, "accepted");
+  ledger.reconcileReceipt({
+    type: "harness.receipt",
+    requestId: "blank-request" as RequestId,
+    commandId: blankCommand,
+    runtimeEpoch: epoch,
+    stateVersion: 3 as StateVersion,
+    status: "failed",
+    error: { code: "INTERNAL_ERROR", message: "   ", retryable: false },
+  });
+  assert.equal(ledger.get(blankCommand)?.errorMessage, undefined);
+
+  const longCommand = "long-command" as CommandId;
+  ledger.request(longCommand, request({ kind: "runtime.pause" }, "long-request"), runtimeId);
+  ledger.transition(longCommand, "accepted");
+  ledger.reconcileReceipt({
+    type: "harness.receipt",
+    requestId: "long-request" as RequestId,
+    commandId: longCommand,
+    runtimeEpoch: epoch,
+    stateVersion: 4 as StateVersion,
+    status: "failed",
+    error: { code: "INTERNAL_ERROR", message: "z".repeat(900), retryable: false },
+  });
+  assert.equal(ledger.get(longCommand)?.errorMessage?.length, 512);
+});
+
+test("REC-002 ledger recovery ignores only a crash-truncated tail record", async () => {
+  const directory = join(tmpdir(), `juling-harness-ledger-tail-${randomUUID()}`);
+  const path = join(directory, "commands.jsonl");
+  const store = new JsonlCommandLedgerStore(path);
+  const commandId = "tail-command" as CommandId;
+  const first = new CommandLedger(() => "2026-08-10T00:00:00.000Z", store);
+  first.request(commandId, request({ kind: "runtime.pause" }), runtimeId);
+  first.transition(commandId, "accepted");
+  await appendFile(path, '{"commandId":"partial');
+  const restored = new CommandLedger(() => "2026-08-10T00:00:01.000Z", store);
+  assert.equal(restored.get(commandId)?.status, "accepted");
+});
+
+test("WP-013 ledger recovery rejects an invalid durable status", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "juling-harness-ledger-invalid-"));
+  const path = join(directory, "commands.jsonl");
+  await writeFile(
+    path,
+    `${JSON.stringify({
+      commandId: "bad-command",
+      requestId: "bad-request",
+      runtimeId: "bad-runtime",
+      runtimeEpoch: 1,
+      operationKind: "runtime.pause",
+      requestedAt: "2026-08-11T00:00:00.000Z",
+      status: "invented-success",
+    })}\n`,
+  );
+  assert.throws(() => new JsonlCommandLedgerStore(path).load(), /Invalid command ledger entry/u);
+});
+
+test("backend pause/resume fixture completes request -> receipt -> state -> reconnect snapshot", async () => {
+  const runtime = new SimulatedPauseRuntime(initialSnapshot(runtimeId, epoch));
+  const paused = await runtime.invoke({
+    ...request({ kind: "runtime.pause" }),
+    idempotencyKey: "pause-key" as IdempotencyKey,
+  });
+  assert.equal(paused.status, "completed");
+  assert.equal(runtime.snapshot().pause?.paused, true);
+  const pauseEpoch = runtime.snapshot().pause?.pauseEpoch;
+  assert.equal(pauseEpoch, 1);
+
+  const resumed = await runtime.invoke(request({ kind: "runtime.resume", expectedPauseEpoch: pauseEpoch ?? 0 }, "request-2"));
+  assert.equal(resumed.status, "completed");
+  assert.equal(runtime.snapshot().pause?.paused, false);
+
+  const reconnect = await runtime.invoke(request({ kind: "runtime.snapshot" }, "request-3"));
+  assert.equal(reconnect.status, "completed");
+  assert.equal((reconnect.result as { pause?: { paused: boolean } }).pause?.paused, false);
+});
+
+test("WP-014 runtime.pause is executable while the Runtime is streaming", async () => {
+  const arbiter = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: true,
+    isCompacting: false,
+  }));
+  await arbiter.run(request({ kind: "runtime.pause" }), () => undefined);
+  assert.equal(arbiter.currentLease, undefined);
+});
+
+test("WP-014 concurrent GUI/TUI destructive commands execute exactly one", async () => {
+  const arbiter = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: false,
+    isCompacting: false,
+  }));
+  let executions = 0;
+  let release: (() => void) | undefined;
+  const guiRun = arbiter.run(
+    request({ kind: "session.drop" }, "request-gui"),
+    () =>
+      new Promise<void>((resolve) => {
+        executions += 1;
+        release = resolve;
+      }),
+    { surface: "gui", commandId: "destructive-gui" as CommandId },
+  );
+  assert.equal(arbiter.currentLease?.holder, "gui");
+  assert.equal(arbiter.currentLease?.commandId, "destructive-gui");
+  await assert.rejects(
+    () =>
+      arbiter.run(
+        request({ kind: "session.drop" }, "request-tui"),
+        () => {
+          executions += 1;
+        },
+        {
+          surface: "tui",
+          commandId: "destructive-tui" as CommandId,
+          precondition: () => {
+            throw new HarnessHostError("INTERACTION_REQUIRED", "Confirmation required");
+          },
+        },
+      ),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "COMMAND_BLOCKED",
+  );
+  assert.equal(executions, 1);
+  release?.();
+  await guiRun;
+  assert.equal(arbiter.currentLease, undefined);
+});
+
+test("WP-014 control lease generation increments across exclusive acquisitions", async () => {
+  const arbiter = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: false,
+    isCompacting: false,
+  }));
+  let release: (() => void) | undefined;
+  const first = arbiter.run(
+    request({ kind: "session.drop" }, "request-lease-1"),
+    () => new Promise<void>((resolve) => (release = resolve)),
+    { surface: "gui", commandId: "lease-1" as CommandId },
+  );
+  const firstLease = arbiter.currentLease;
+  release?.();
+  await first;
+  const second = arbiter.run(
+    request({ kind: "runtime.pause" }, "request-lease-2"),
+    () => new Promise<void>((resolve) => (release = resolve)),
+    { surface: "tui", commandId: "lease-2" as CommandId },
+  );
+  const secondLease = arbiter.currentLease;
+  release?.();
+  await second;
+  assert.ok(firstLease !== undefined);
+  assert.ok(secondLease !== undefined);
+  assert.equal(firstLease.holder, "gui");
+  assert.equal(secondLease.holder, "tui");
+  assert.equal(firstLease.generation, 1);
+  assert.equal(secondLease.generation, 2);
+  assert.equal(arbiter.currentLease, undefined);
+});
+
+test("WP-014 interaction ownership transfers and rejects stale or foreign claims", () => {
+  const arbiter = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: false,
+    isCompacting: false,
+  }));
+  const commandId = "interact-command" as CommandId;
+  const opened = arbiter.openInteraction(commandId, "gui");
+  assert.equal(opened.owner, "gui");
+  assert.equal(opened.generation, 1);
+
+  const claimed = arbiter.claimInteraction(commandId, "gui");
+  assert.equal(claimed.owner, "gui");
+  assert.equal(claimed.generation, 1);
+  assert.throws(
+    () => arbiter.claimInteraction(commandId, "tui"),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "NOT_OWNER",
+  );
+
+  const transferred = arbiter.transferInteraction(opened.interactionId, "gui", "tui");
+  assert.equal(transferred.owner, "tui");
+  assert.equal(transferred.generation, 2);
+
+  const transferredBack = arbiter.transferInteraction(opened.interactionId, "tui", "gui");
+  assert.equal(transferredBack.owner, "gui");
+  assert.equal(transferredBack.generation, 3);
+
+  assert.throws(
+    () => arbiter.assertInteraction(opened.interactionId, commandId, "gui", 2),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "INTERACTION_STALE",
+  );
+  assert.throws(
+    () => arbiter.assertInteraction(opened.interactionId, commandId, "tui", 3),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "NOT_OWNER",
+  );
+  assert.throws(
+    () => arbiter.assertInteraction(opened.interactionId, "other-command" as CommandId, "gui", 3),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "NOT_OWNER",
+  );
+  arbiter.completeInteraction(opened.interactionId, commandId, "gui", 3);
+  assert.throws(
+    () => arbiter.completeInteraction(opened.interactionId, commandId, "gui", 3),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "INTERACTION_STALE",
+  );
+});
+
+test("WP-014 an active interaction blocks new exclusive commands", async () => {
+  const arbiter = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: false,
+    isCompacting: false,
+  }));
+  arbiter.openInteraction("blocked-command" as CommandId, "gui");
+  await assert.rejects(
+    () => arbiter.run(request({ kind: "session.drop" }), () => undefined),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "COMMAND_BLOCKED",
+  );
+  await arbiter.run(request({ kind: "runtime.snapshot" }), () => undefined);
+});
+
+test("WP-014 a command precondition gates execution and releases the lease", async () => {
+  const arbiter = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: false,
+    isCompacting: false,
+  }));
+  let executed = false;
+  await assert.rejects(
+    () =>
+      arbiter.run(
+        request({ kind: "session.drop" }),
+        () => {
+          executed = true;
+        },
+        {
+          surface: "gui",
+          commandId: "precondition-command" as CommandId,
+          precondition: () => {
+            throw new HarnessHostError("INTERACTION_REQUIRED", "Destructive confirmation required");
+          },
+        },
+      ),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "INTERACTION_REQUIRED",
+  );
+  assert.equal(executed, false);
+  assert.equal(arbiter.currentLease, undefined);
+});
+
+test("WP-014 confirmation token consumes an identical operation exactly once", () => {
+  const registry = new HostConfirmationRegistry();
+  const token = registry.issue({ kind: "session.drop" }, "gui");
+  registry.consume(token, { kind: "session.drop" }, "gui");
+  assert.throws(
+    () => registry.consume(token, { kind: "session.drop" }, "gui"),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "INTERACTION_STALE",
+  );
+});
+
+test("WP-014 confirmation token rejects a different operation or owner", () => {
+  const registry = new HostConfirmationRegistry();
+  const drop = registry.issue({ kind: "session.drop" }, "gui");
+  assert.throws(
+    () => registry.consume(drop, { kind: "session.clearContext" }, "gui"),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "NOT_OWNER",
+  );
+  const owned = registry.issue({ kind: "session.drop" }, "gui");
+  assert.throws(
+    () => registry.consume(owned, { kind: "session.drop" }, "tui"),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "NOT_OWNER",
+  );
+  registry.consume(owned, { kind: "session.drop" }, "gui");
+});
+
+test("WP-014 confirmation token expires after its TTL", () => {
+  let now = 1000;
+  const registry = new HostConfirmationRegistry({ ttlMs: 250, now: () => now });
+  const token = registry.issue({ kind: "session.drop" }, "gui");
+  now += 251;
+  assert.throws(
+    () => registry.consume(token, { kind: "session.drop" }, "gui"),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "INTERACTION_STALE",
+  );
+});
+
+test("WP-014 confirmation token binds lease generation and runtime epoch", () => {
+  const registry = new HostConfirmationRegistry();
+  const operation = { kind: "session.drop" } as const;
+  const token = registry.issue(operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  // same binding: ok
+  registry.consume(token, operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  // re-issue and try a stale generation / epoch: fail closed
+  const gen = registry.issue(operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  assert.throws(
+    () => registry.consume(gen, operation, "gui", { leaseGeneration: 4, runtimeEpoch: 7 }),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "INTERACTION_STALE",
+  );
+  const epoch = registry.issue(operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  assert.throws(
+    () => registry.consume(epoch, operation, "gui", { leaseGeneration: 3, runtimeEpoch: 8 }),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "INTERACTION_STALE",
+  );
+  // A caller cannot bypass either binding by omitting it, and cannot attach
+  // a binding to a token that was issued without one.
+  const missingGeneration = registry.issue(operation, "gui", { leaseGeneration: 1, runtimeEpoch: 7 });
+  assert.throws(
+    () => registry.consume(missingGeneration, operation, "gui", { runtimeEpoch: 7 }),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "INTERACTION_STALE",
+  );
+  const missingEpoch = registry.issue(operation, "gui", { leaseGeneration: 1, runtimeEpoch: 7 });
+  assert.throws(
+    () => registry.consume(missingEpoch, operation, "gui", { leaseGeneration: 1 }),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "INTERACTION_STALE",
+  );
+  const unexpectedBinding = registry.issue(operation, "gui");
+  assert.throws(
+    () => registry.consume(unexpectedBinding, operation, "gui", { leaseGeneration: 1 }),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "INTERACTION_STALE",
+  );
+});
+
+test("WP-014 confirmation registry evicts the oldest token at capacity", () => {
+  const registry = new HostConfirmationRegistry({ capacity: 2 });
+  const first = registry.issue({ kind: "session.drop" }, "gui");
+  registry.issue({ kind: "session.drop" }, "tui");
+  registry.issue({ kind: "session.drop" }, "system");
+  assert.throws(
+    () => registry.consume(first, { kind: "session.drop" }, "gui"),
+    (error: unknown) => error instanceof HarnessHostError && error.code === "INTERACTION_STALE",
+  );
+});
+
+/**
+ * Stand-in for the spawned Runtime's spawn/close lifecycle; no binary runs.
+ */
+class FakeProbeChild extends EventEmitter {
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+
+  exit(code: number): void {
+    this.exitCode = code;
+    this.emit("close", code, null);
+  }
+
+  kill(): boolean {
+    if (this.exitCode === null) setImmediate(() => this.exit(143));
+    return true;
+  }
+}
+
+async function probeWithLostShutdownAck(exitCodeAfterShutdown?: number): Promise<RuntimeProbeOutcome> {
+  const token = "bridge-token-probe-shutdown";
+  const child = new FakeProbeChild();
+  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    onRequest(request, socket, hello) {
+      if (request.operation.kind === "runtime.shutdown") {
+        // The Runtime tears its Bridge down while exiting, so the completion
+        // receipt and `runtime.shutdownComplete` never reach the Host.
+        socket.destroy();
+        if (exitCodeAfterShutdown !== undefined) child.exit(exitCodeAfterShutdown);
+        return;
+      }
+      socket.write(
+        encodeFrame(`receipt:${request.requestId}`, hello.runtimeEpoch, {
+          type: "harness.receipt",
+          requestId: request.requestId,
+          commandId: `command-${request.requestId}`,
+          runtimeEpoch: hello.runtimeEpoch,
+          stateVersion: 0,
+          status: "failed",
+          error: { code: "COMMAND_BLOCKED", message: "manifest route is unavailable", retryable: false },
+        }),
+      );
+    },
+  });
+  const probe = createProcessProbe({
+    createBootstrap: async () => ({ endpoint: bridge.endpoint, token, tokenFile: "unused" }),
+    spawnProcess: (() => {
+      queueMicrotask(() => child.emit("spawn"));
+      return child as unknown as ChildProcess;
+    }) as unknown as typeof spawn,
+    shutdownGraceMs: 250,
+  });
+  try {
+    return await probe.probe({
+      executablePath: process.execPath,
+      platform: process.platform,
+      arch: process.arch,
+      workspaceDirectory: tmpdir(),
+      supportedProtocolVersions: [1],
+      probeTimeoutMs: 5_000,
+    });
+  } finally {
+    await bridge.close();
+  }
+}
+
+test("probe scores graceful shutdown from a clean exit when the ack is lost in flight", async () => {
+  const outcome = await probeWithLostShutdownAck(0);
+  assert.equal(outcome.failure, undefined);
+  assert.equal(outcome.smoke, "passed");
+  assert.equal(outcome.shutdown, "passed", JSON.stringify(outcome));
+});
+
+test("probe fails the shutdown gate when the Runtime neither acks nor exits", async () => {
+  const outcome = await probeWithLostShutdownAck(undefined);
+  assert.equal(outcome.smoke, "passed");
+  assert.equal(outcome.shutdown, "failed");
+});
+
+for (const supported of [true, false]) {
+  test("Computer queries use a receipt-free channel with " + (supported ? "current" : "legacy") + " Runtime", async () => {
+    const token = "computer-query-token";
+    let queries = 0;
+    let commands = 0;
+    const bridge = await listenForHello(hello => {
+      const response = helloResponse(hello, token);
+      if (supported) response.capabilityManifest.capabilities = COMPUTER_WORKSPACE_KINDS.map(id => ({ id, grade: "stable", version: 1, evidence: "computer-fixture" }));
+      return response;
+    }, {
+      onComputerQuery(request, socket, hello) {
+        queries++;
+        assert.equal(request.runtimeEpoch, hello.runtimeEpoch);
+        const computerEvent = (sessionId: string, runtimeEpoch = hello.runtimeEpoch): HarnessComputerEventEnvelope => ({
+          type: "computer.event", runtimeEpoch, stateVersion: 0 as StateVersion,
+          occurredAt: "2026-11-05T00:00:00.000Z", event: { kind: "reset", sessionId, revision: 1 },
+        });
+        socket.write(Buffer.concat([
+          encodeFrame("stale-epoch", 0 as RuntimeEpoch, computerEvent("session-1", 0 as RuntimeEpoch)),
+          encodeFrame("stale-session", hello.runtimeEpoch, computerEvent("other-session")),
+          encodeFrame("current", hello.runtimeEpoch, computerEvent("session-1")),
+          encodeFrame("result", hello.runtimeEpoch, { type: "computer.result", runtimeEpoch: hello.runtimeEpoch, requestId: request.requestId, ok: true, result: null }),
+        ]));
+      },
+      onRequest(request, socket, hello) {
+        commands++;
+        socket.write(encodeFrame("legacy-receipt", hello.runtimeEpoch, {
+          type: "harness.receipt", runtimeEpoch: hello.runtimeEpoch, requestId: request.requestId,
+          status: "completed", stateVersion: 0, result: { stopped: true },
+        }));
+      },
+    });
+    const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token, requestTimeoutMs: 1000 });
+    const ledger = new CommandLedger();
+    const controller = new HarnessRuntimeSessionController(client, ledger);
+    const events: HarnessComputerEventEnvelope[] = [];
+    let publications = 0;
+    let publicEvents = 0;
+    controller.onComputerEvent(event => events.push(event.envelope));
+    controller.onPublication(() => { publications++; });
+    client.onEvent(() => { publicEvents++; });
+    try {
+      await client.connect();
+      await controller.refresh();
+      publications = 0;
+      const read = () => controller.readComputer({ kind: "computer.frame.get", sessionId: "session-1", frameId: "frame-1" });
+      if (supported) assert.equal(await read(), null);
+      else await assert.rejects(read, error => error instanceof HarnessHostError && error.code === "CAPABILITY_UNAVAILABLE");
+      assert.equal(queries, supported ? 1 : 0);
+      assert.equal(events.length, supported ? 1 : 0);
+      assert.equal(events[0]?.event.sessionId, supported ? "session-1" : undefined);
+      assert.equal(publications, 0);
+      assert.equal(publicEvents, 0);
+      assert.deepEqual(ledger.snapshot(), []);
+      const receipt = await controller.invoke(request({ kind: "computer.stop", sessionId: "session-1" }, "old-stop"));
+      assert.equal(receipt.status, "completed");
+      assert.equal(commands, 1);
+      assert.equal(ledger.snapshot().length, 1);
+      assert.equal(client.state, "ready");
+    } finally {
+      controller.dispose(); client.close(); await bridge.close();
+    }
+  });
+}
+
+test("Computer read rejects a session switch without creating a ledger entry", async () => {
+  const token = "computer-session-switch";
+  const bridge = await listenForHello(hello => {
+    const response = helloResponse(hello, token);
+    response.capabilityManifest.capabilities.push({ id: "computer.frame.get", grade: "stable", version: 1, evidence: "fixture" });
+    return response;
+  }, {
+    onComputerQuery(request, socket, hello) {
+      const next = snapshotResponse("switch", hello, "session-2").snapshot;
+      next.stateVersion = 1 as StateVersion;
+      socket.write(Buffer.concat([
+        encodeFrame("session-switch", hello.runtimeEpoch, { type: "harness.event", runtimeEpoch: hello.runtimeEpoch, eventSeq: 1, stateVersion: 1, occurredAt: "2026-11-05T00:00:00.000Z", event: { kind: "state.changed", snapshot: next } }),
+        encodeFrame("result", hello.runtimeEpoch, { type: "computer.result", requestId: request.requestId, runtimeEpoch: hello.runtimeEpoch, ok: true, result: null }),
+      ]));
+    },
+  });
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token, requestTimeoutMs: 1000 });
+  const ledger = new CommandLedger();
+  const controller = new HarnessRuntimeSessionController(client, ledger);
+  try {
+    await client.connect(); await controller.refresh();
+    await assert.rejects(() => controller.readComputer({ kind: "computer.frame.get", sessionId: "session-1", frameId: "frame-1" }), error => error instanceof HarnessHostError && error.code === "CURSOR_STALE");
+    assert.deepEqual(ledger.snapshot(), []);
+    assert.equal(client.state, "ready");
+  } finally { controller.dispose(); client.close(); await bridge.close(); }
+});
+
+test("Computer stop and observation can run while the session is streaming", async () => {
+  const arbiter = new CommandArbiter(() => ({ runtimeEpoch: epoch, stateVersion: 1 as StateVersion, isStreaming: true, isCompacting: false }));
+  for (const operation of [
+    { kind: "computer.control.stop", sessionId: "session-1" },
+    { kind: "computer.frame.capture", sessionId: "session-1", leaseId: "lease-1", targetId: "display-1" },
+  ] as const) {
+    assert.equal(await arbiter.run(request(operation), () => "executed"), "executed");
+  }
+});

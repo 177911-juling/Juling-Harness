@@ -1,0 +1,123 @@
+import { afterEach, expect, test } from "bun:test";
+import { HarnessCfgService } from "../src/harness/services/cfg-service";
+import { cfgAdvisorEnabled, cfgAdvisorSyncBacklog } from "../src/advisor/settings";
+import { Settings } from "../src/config/settings";
+import { CfgProtocolHandler, setCfgApprovalHost } from "../src/internal-urls/cfg-protocol";
+import { parseInternalUrl } from "../src/internal-urls/parse";
+import type { AgentSession } from "../src/session/agent-session";
+import { HarnessRuntimeCommandArbiter } from "../src/harness/command-arbiter";
+import { installHarnessConfigurationApproval } from "../src/harness/services/configuration-approval";
+import { HarnessInteractionGateway, HarnessRemoteInteractionPort } from "../src/harness/services/interaction-port";
+import type { ToolSession } from "../src/tools";
+
+afterEach(() => setCfgApprovalHost(null));
+function fixture() {
+	const arbiter = new HarnessRuntimeCommandArbiter(
+		() => ({ runtimeEpoch: 1, stateVersion: 0, isStreaming: false, isCompacting: false }),
+		[],
+	);
+	const port = new HarnessRemoteInteractionPort(
+		arbiter,
+		() => {},
+		() => {},
+	);
+	const gateway = new HarnessInteractionGateway();
+	gateway.bind(port);
+	return { port, gateway };
+}
+async function answer(port: HarnessRemoteInteractionPort, value: "once" | "session" | undefined): Promise<void> {
+	const deadline = Date.now() + 1000;
+	while (!port.pending() && Date.now() < deadline) await Bun.sleep(1);
+	const request = port.pending()?.request;
+	if (!request) throw new Error("Configuration approval did not arrive");
+	expect(request).toMatchObject({ kind: "approval", approvalType: "configuration" });
+	port.respond({
+		kind: "interaction.respond",
+		interactionId: request.interactionId,
+		commandId: request.commandId,
+		decision: value ? "submit" : "cancel",
+		...(value ? { value } : {}),
+	});
+}
+test("native cfg writes reach Harness before mutation, preserve native session grants and revoke on disposal", async () => {
+	const { port, gateway } = fixture();
+	const settings = Settings.isolated();
+	const session = { sessionId: "s", settings } as AgentSession;
+	const release = installHarnessConfigurationApproval(session, gateway);
+	const toolSession = {
+		settings,
+		settingsApproval: true,
+		hasUI: true,
+		taskDepth: 0,
+		getSessionId: () => "s",
+	} as unknown as ToolSession;
+	const handler = new CfgProtocolHandler();
+	try {
+		const pending = handler.write(parseInternalUrl("cfg://advisor/enabled"), "true", { session: toolSession });
+		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
+		await answer(port, "session");
+		await pending;
+		expect(cfgAdvisorEnabled.get(settings)).toBe(true);
+		await handler.write(parseInternalUrl("cfg://advisor/syncBacklog"), '"3"', { session: toolSession });
+		expect(cfgAdvisorSyncBacklog.get(settings)).toBe("3");
+		expect(port.pending()).toBeUndefined();
+		const save = handler.write(parseInternalUrl("cfg://advisor/syncBacklog/save"), '"5"', { session: toolSession });
+		await answer(port, undefined);
+		await save;
+		expect(cfgAdvisorSyncBacklog.get(settings)).toBe("3");
+	} finally {
+		release();
+	}
+	await expect(
+		handler.write(parseInternalUrl("cfg://advisor/enabled"), "false", { session: toolSession }),
+	).rejects.toThrow("requires user approval");
+});
+test("expiry never approves a configuration change or cancels a different pending interaction", async () => {
+	const { port } = fixture();
+	const expired = port.approveConfiguration({ commandId: "cfg-1", title: "Config", details: {} }, 5);
+	await expect(expired).resolves.toBe("timeout");
+	expect(port.pending()).toBeUndefined();
+	const other = port.confirm({ commandId: "other", title: "Other", message: "Continue?" });
+	await expect(port.approveConfiguration({ commandId: "cfg-2", title: "Config", details: {} }, 5)).resolves.toBe(
+		"timeout",
+	);
+	const request = port.pending()!.request;
+	expect(request.commandId).toBe("other");
+	port.respond({
+		kind: "interaction.respond",
+		interactionId: request.interactionId,
+		commandId: request.commandId,
+		decision: "cancel",
+	});
+	await expect(other).resolves.toBe(false);
+});
+
+test("published cfg service rebind cancels old approvals and owns the new host until disposal", async () => {
+	const { port, gateway } = fixture();
+	const settings = Settings.isolated();
+	const toolSession = { settings, hasUI: true, taskDepth: 0, getSessionId: () => "s" } as unknown as ToolSession;
+	const session = { sessionId: "s", settings, harnessToolSession: toolSession } as unknown as AgentSession;
+	const service = new HarnessCfgService(session, gateway);
+	const handler = new CfgProtocolHandler();
+	try {
+		const oldWrite = handler.write(parseInternalUrl("cfg://advisor/enabled"), "true", { session: toolSession });
+		const deadline = Date.now() + 1000;
+		while (!port.pending() && Date.now() < deadline) await Bun.sleep(1);
+		expect(port.pending()).toBeDefined();
+		service.rebind();
+		await oldWrite;
+		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
+		expect(port.pending()).toBeUndefined();
+		const nextWrite = handler.write(parseInternalUrl("cfg://advisor/enabled"), "true", { session: toolSession });
+		await answer(port, "once");
+		await nextWrite;
+		expect(cfgAdvisorEnabled.get(settings)).toBe(true);
+	} finally {
+		service.dispose();
+	}
+	expect(toolSession.settingsApproval).toBe(false);
+	await expect(
+		handler.write(parseInternalUrl("cfg://advisor/enabled"), "false", { session: toolSession }),
+	).rejects.toThrow();
+	expect(cfgAdvisorEnabled.get(settings)).toBe(true);
+});

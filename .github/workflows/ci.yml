@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    # `0.2.0` is the release candidate branch: a push there has to run the same
+    # gate as `main`, otherwise the candidate is only ever verified locally.
+    branches: [main, "0.2.0"]
+    paths-ignore: ["*.md", "docs/**", "doc/**", "ui_reference/**", ".github/ISSUE_TEMPLATE/**", ".github/PULL_REQUEST_TEMPLATE.md"]
+  pull_request:
+    paths-ignore: ["*.md", "docs/**", "doc/**", "ui_reference/**", ".github/ISSUE_TEMPLATE/**", ".github/PULL_REQUEST_TEMPLATE.md"]
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Core checks, full Windows/macOS tests including Runtime, or a Mac test package
+        type: choice
+        options: [core, full, macos-package]
+        default: core
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ inputs.scope || 'core' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  platform:
+    if: inputs.scope != 'macos-package'
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.scope == 'full' && '[{"name":"Windows","os":"windows-latest","native":"win32-x64"},{"name":"macOS (arm64)","os":"macos-15","native":"darwin-arm64"}]' || '[{"name":"Windows","os":"windows-latest","native":"win32-x64"}]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # The renderer imports chart sources from the patched vendor tree.
+      - run: npm run omp:overlay:apply
+      # Architecture rules, selector rules, compile, core suites, then the
+      # production bundles. One entry point, same code path as a local run.
+      - run: npm run check -- --production
+      - run: npm run test:built
+        if: inputs.scope == 'full'
+
+      # Catalog reproducibility reads the Runtime registry through Bun, including
+      # its native path helpers, so prepare the full Runtime before tooling.
+      - uses: oven-sh/setup-bun@v2
+        if: inputs.scope == 'full'
+        with:
+          bun-version: "1.4.4"
+      - uses: Swatinem/rust-cache@v2
+        if: inputs.scope == 'full'
+        with:
+          workspaces: omp-patch/vendor/oh-my-pi -> target
+          shared-key: platform
+          key: natives-${{ matrix.native }}
+          cache-on-failure: "true"
+      - run: npm run omp:install-deps
+        if: inputs.scope == 'full'
+      - run: npm run omp:build:natives
+        if: inputs.scope == 'full'
+      - name: Packaging and update tooling tests
+        if: inputs.scope == 'full'
+        run: node --test scripts/*.test.mjs
+
+      # The full Runtime suite is explicitly requested work.
+      - run: node scripts/unapply-release-overlay.mjs
+        if: inputs.scope == 'full'
+      - run: npm run omp:verify:patches
+        if: inputs.scope == 'full'
+
+  macos-package:
+    name: macOS test package (arm64)
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'macos-package'
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: omp-patch/vendor/oh-my-pi -> target
+          shared-key: platform
+          key: natives-darwin-arm64
+          cache-on-failure: "true"
+      - run: npm ci
+      - run: npm run omp:overlay:apply
+      # A throwaway identity is used only for this manually requested package.
+      - run: npm run omp:keys
+      - run: npm run omp:build:host
+      - name: Pack and audit the app
+        run: |
+          keys="$HOME/Library/Application Support/juling-harness/keys"
+          export OMP_RUNTIME_TRUSTED_PUBLIC_KEY="$keys/trusted-public.pem"
+          export OMP_RUNTIME_SIGNING_KEY_ID="$(tr -d '[:space:]' < "$keys/key-id.txt")"
+          npm run pack:mac -- --skip-host --skip-build
+      - name: Packaged Electron acceptance
+        timeout-minutes: 10
+        env:
+          OMP_E2E_PACKAGED_EXE: ${{ github.workspace }}/outputs/installer-mac/mac-arm64/Juling Harness.app/Contents/MacOS/Juling Harness
+          OMP_E2E_OUTPUT_DIR: ${{ github.workspace }}/outputs/macos-gui-e2e
+        run: |
+          npm install --no-save --package-lock=false playwright@1.62.1
+          node scripts/full-gui-e2e.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-gui-evidence
+          path: outputs/macos-gui-e2e/
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: juling-harness-macos-arm64-adhoc
+          path: |
+            outputs/installer-mac/*.dmg
+            outputs/installer-mac/*.zip
+          retention-days: 7
+          if-no-files-found: error

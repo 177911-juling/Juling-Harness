@@ -1,0 +1,493 @@
+/**
+ * HarnessJobService - presentation-neutral AsyncJob observation and control
+ * service for the Harness Jobs panel (05_AGENT_HUB_AND_JOBS.md, WP-054).
+ *
+ * Native semantics arrive exclusively through narrow injected ports:
+ *   - snapshot/list/cancel .. AsyncJobManager (getJob/list/cancel)
+ *   - hierarchy ............. AgentRegistry (parentId chain for owner scope)
+ *   - agent fallback ........ hub kill semantics when a cancelled job owns a
+ *                             live agent
+ *
+ * The service never exposes native error text or job internals (abort
+ * controllers, promises). Generations are derived from native job data
+ * (re-registration of the same job id is a new native generation), never from
+ * renderer input.
+ */
+
+import type { AsyncJob, AsyncJobFilter, AsyncJobType } from "../../async/job-manager";
+import type { JobWidgetView } from "../runtime-features-protocol";
+
+const MAX_ID_LENGTH = 512;
+const DEFAULT_LIST_LIMIT = 100;
+const MAX_LIST_LIMIT = 200;
+const DEFAULT_SETTLED_LIMIT = 50;
+const RECENT_SETTLED_LIMIT = 100;
+const DEFAULT_SUMMARY_LIMIT = 500;
+const MAX_HIERARCHY_HOPS = 64;
+/**
+ * Retained generation records. The widest window this service can project is
+ * `MAX_LIST_LIMIT` running jobs plus `RECENT_SETTLED_LIMIT` settled ones, so
+ * four such windows of least-recently-observed history is far more than any
+ * fence a renderer can still be holding, and the map stops growing with the
+ * process.
+ */
+const MAX_TRACKED_GENERATIONS = 4 * (MAX_LIST_LIMIT + RECENT_SETTLED_LIMIT);
+/** Last widget views kept for settled jobs: the projected window, with headroom. */
+const MAX_RETAINED_WIDGETS = MAX_LIST_LIMIT + RECENT_SETTLED_LIMIT;
+
+export type HarnessJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface HarnessJobSnapshot {
+	caption?: string;
+	jobId: string;
+	generation: number;
+	ownerAgentId?: string;
+	agentId?: string;
+	type: AsyncJobType;
+	label: string;
+	status: HarnessJobStatus;
+	startedAt: string;
+	/** When the run settled; a finished job's duration is frozen at this instant. */
+	completedAt?: string;
+	summary?: string;
+	/** Full command line of a job that spawned a process (the label is cut short). */
+	command?: string;
+	/** A running task's own completion estimate, 0–100. */
+	completionPercent?: number;
+	/** What the job is doing now: a subagent's stage. */
+	stage?: string;
+	/** Live widget of the job (last seen view once it settled). */
+	widget?: JobWidgetView;
+}
+
+/** Agent lineage linking job owners to the projected root; parents absent at the root. */
+export interface HarnessJobAgentLink {
+	id: string;
+	parentId?: string;
+}
+
+/** Stage and completion estimate a running task job reports for its subagent (upstream `snapshotJobs`). */
+export function taskJobProgress(job: AsyncJob): { stage?: string; completionPercent?: number } {
+	if (job.type !== "task") return {};
+	const progress = job.latestDetails?.progress;
+	if (!Array.isArray(progress)) return {};
+	let record: Record<string, unknown> | undefined;
+	for (const item of progress) {
+		if (!item || typeof item !== "object") continue;
+		const candidate = item as Record<string, unknown>;
+		record ??= candidate;
+		if (candidate.id === job.id) {
+			record = candidate;
+			break;
+		}
+	}
+	const stage = typeof record?.stage === "string" ? record.stage.trim().slice(0, 240) : "";
+	const percent = record?.completionPercent;
+	return {
+		...(stage ? { stage } : {}),
+		...(job.status === "running" && typeof percent === "number" && Number.isFinite(percent)
+			? { completionPercent: Math.min(100, Math.max(0, percent)) }
+			: {}),
+	};
+}
+
+export interface HarnessJobCancelReceipt {
+	outcome: "cancelled" | "cancellation_requested" | "already_terminal";
+	snapshot: HarnessJobSnapshot;
+}
+
+/**
+ * Job port. Structurally compatible with the native AsyncJobManager
+ * (getJob/getRunningJobs/getRecentJobs/getAllJobs/cancel).
+ */
+export interface HarnessJobsPort {
+	getJob(id: string): AsyncJob | undefined;
+	getRunningJobs(filter?: AsyncJobFilter): AsyncJob[];
+	getRecentJobs(limit?: number, filter?: AsyncJobFilter): AsyncJob[];
+	getAllJobs(filter?: AsyncJobFilter): AsyncJob[];
+	cancel(id: string, filter?: AsyncJobFilter): boolean;
+	/** Last observed widget (`AsyncJobManager.widgets.peek`), without starting authoring. */
+	widgetView?(job: AsyncJob): JobWidgetView | undefined;
+	widgetCaption?(job: AsyncJob): string | undefined;
+}
+
+/** Hierarchy port; structurally compatible with AgentRegistry.get. */
+export interface HarnessJobRegistryPort {
+	get(id: string): { id: string; parentId?: string } | undefined;
+}
+
+/**
+ * Hub fallback port: abort a live agent owned by a cancelled job. Production
+ * wiring uses the same abort + tombstone release semantics as the Agent Hub.
+ */
+export interface HarnessJobAgentAbortPort {
+	abortAgent(agentId: string): Promise<void>;
+}
+
+export type HarnessJobCancelAction = {
+	kind: "cancelJob";
+	jobId: string;
+	generation: number;
+	risk: "destructive";
+};
+
+export type HarnessJobConfirmationGate = (action: HarnessJobCancelAction) => boolean | Promise<boolean>;
+
+export type HarnessJobErrorCode =
+	| "JOB_NOT_FOUND"
+	| "JOB_GENERATION_CONFLICT"
+	| "NOT_OWNER"
+	| "CONFIRMATION_REQUIRED"
+	| "CONFIRMATION_DENIED"
+	| "CANCEL_FAILED"
+	| "INVALID_ARGUMENT";
+
+export class HarnessJobError extends Error {
+	constructor(
+		readonly code: HarnessJobErrorCode,
+		message: string,
+		readonly snapshot?: HarnessJobSnapshot,
+		readonly action?: HarnessJobCancelAction,
+	) {
+		super(message);
+		this.name = "HarnessJobError";
+	}
+}
+
+export interface HarnessJobServiceOptions {
+	confirmationGate?: HarnessJobConfirmationGate;
+	/** Hub fallback for jobs that own a live agent; absent disables the fallback. */
+	abortAgent?: HarnessJobAgentAbortPort;
+	maxListLimit?: number;
+	summaryLimit?: number;
+}
+
+function clampInt(value: number, min: number, max: number): number {
+	if (!Number.isSafeInteger(value)) return min;
+	return Math.min(max, Math.max(min, value));
+}
+
+export class HarnessJobService {
+	readonly #jobs: HarnessJobsPort;
+	readonly #registry: HarnessJobRegistryPort;
+	readonly #abortAgent?: HarnessJobAgentAbortPort;
+	readonly #confirmationGate?: HarnessJobConfirmationGate;
+	readonly #maxListLimit: number;
+	readonly #summaryLimit: number;
+	readonly #generations = new Map<string, { generation: number; startTime: number }>();
+	readonly #widgets = new Map<string, JobWidgetView>();
+
+	constructor(jobs: HarnessJobsPort, registry: HarnessJobRegistryPort, options: HarnessJobServiceOptions = {}) {
+		this.#jobs = jobs;
+		this.#registry = registry;
+		this.#abortAgent = options.abortAgent;
+		this.#confirmationGate = options.confirmationGate;
+		this.#maxListLimit = clampInt(options.maxListLimit ?? DEFAULT_LIST_LIMIT, 1, MAX_LIST_LIMIT);
+		this.#summaryLimit = clampInt(options.summaryLimit ?? DEFAULT_SUMMARY_LIMIT, 1, 64 * 1024);
+	}
+
+	/**
+	 * Bounded job DTOs. Default: running jobs plus the most recent settled
+	 * jobs (native retention bounds the window). `includeRecent` widens the
+	 * settled window. `ownerAgentId` filters to one owner (caller scope is
+	 * enforced); otherwise the caller sees its own jobs, its descendants'
+	 * jobs, and unowned jobs.
+	 */
+	list(
+		options: { callerAgentId?: string; ownerAgentId?: string; includeRecent?: boolean; limit?: number } = {},
+	): HarnessJobSnapshot[] {
+		const limit = clampInt(options.limit ?? DEFAULT_LIST_LIMIT, 1, this.#maxListLimit);
+		if (options.ownerAgentId !== undefined) {
+			this.#validateId(options.ownerAgentId);
+			this.#assertOwnerScope(options.callerAgentId, options.ownerAgentId);
+		}
+		const jobs = new Map<string, AsyncJob>();
+		for (const job of this.#jobs.getRunningJobs()) jobs.set(job.id, job);
+		const settledLimit = options.includeRecent ? RECENT_SETTLED_LIMIT : DEFAULT_SETTLED_LIMIT;
+		for (const job of this.#jobs.getRecentJobs(settledLimit)) {
+			if (!jobs.has(job.id)) jobs.set(job.id, job);
+		}
+		const ownerFilter = options.ownerAgentId;
+		const visible = [...jobs.values()]
+			.filter(job => this.#canSee(options.callerAgentId, ownerFilter, job))
+			.sort((a, b) => Number(b.status === "running") - Number(a.status === "running") || b.startTime - a.startTime);
+		return visible.slice(0, limit).map(job => this.#snapshot(job));
+	}
+
+	get(jobId: string): HarnessJobSnapshot {
+		this.#validateId(jobId);
+		const job = this.#jobs.getJob(jobId);
+		if (!job) throw new HarnessJobError("JOB_NOT_FOUND", `Job "${jobId}" was not found`);
+		return this.#snapshot(job);
+	}
+
+	async cancel(args: {
+		jobId: string;
+		expectedGeneration: number;
+		callerAgentId?: string;
+	}): Promise<HarnessJobCancelReceipt> {
+		this.#validateId(args.jobId);
+		this.#validateGeneration(args.expectedGeneration);
+		const job = this.#jobs.getJob(args.jobId);
+		if (!job) throw new HarnessJobError("JOB_NOT_FOUND", `Job "${args.jobId}" was not found`);
+		const generation = this.#observe(job);
+		if (generation !== args.expectedGeneration) {
+			throw new HarnessJobError(
+				"JOB_GENERATION_CONFLICT",
+				`Job "${args.jobId}" changed; refresh before cancelling`,
+				this.#snapshot(job),
+			);
+		}
+		if (job.ownerId !== undefined) {
+			if (args.callerAgentId === undefined) {
+				throw new HarnessJobError("NOT_OWNER", `Job "${args.jobId}" belongs to agent "${job.ownerId}"`);
+			}
+			if (args.callerAgentId !== job.ownerId && !this.#isAncestorOf(args.callerAgentId, job.ownerId)) {
+				throw new HarnessJobError("NOT_OWNER", `Agent "${args.callerAgentId}" cannot cancel job "${args.jobId}"`);
+			}
+		}
+		if (job.status !== "running") {
+			return { outcome: "already_terminal", snapshot: this.#snapshot(job) };
+		}
+		const ownerId = job.ownerId;
+		await this.#requireConfirmation({ kind: "cancelJob", jobId: args.jobId, generation, risk: "destructive" });
+		// Confirmation may outlive this run or its manager. Fence the task again
+		// immediately before the synchronous cancellation, not just before waiting.
+		const confirmed = this.#jobs.getJob(args.jobId);
+		if (!confirmed) throw new HarnessJobError("JOB_NOT_FOUND", `Job "${args.jobId}" was not found`);
+		if (confirmed !== job || this.#observe(confirmed) !== generation || confirmed.ownerId !== ownerId) {
+			throw new HarnessJobError(
+				"JOB_GENERATION_CONFLICT",
+				`Job "${args.jobId}" changed while cancellation was being confirmed`,
+				this.#snapshot(confirmed),
+			);
+		}
+		if (
+			ownerId !== undefined &&
+			args.callerAgentId !== ownerId &&
+			(args.callerAgentId === undefined || !this.#isAncestorOf(args.callerAgentId, ownerId))
+		) {
+			throw new HarnessJobError("NOT_OWNER", `Agent "${args.callerAgentId ?? ""}" cannot cancel job "${args.jobId}"`);
+		}
+		const cancelled = this.#jobs.cancel(args.jobId, ownerId === undefined ? undefined : { ownerId });
+		if (!cancelled) {
+			const current = this.#jobs.getJob(args.jobId);
+			if (!current) throw new HarnessJobError("JOB_NOT_FOUND", `Job "${args.jobId}" was not found`);
+			if (current.status !== "running") {
+				return { outcome: "already_terminal", snapshot: this.#snapshot(current) };
+			}
+			throw new HarnessJobError(
+				"JOB_GENERATION_CONFLICT",
+				`Job "${args.jobId}" changed before it could cancel`,
+				this.#snapshot(current),
+			);
+		}
+		let agentCleanupOk = true;
+		if (job.agentId !== undefined && this.#abortAgent) {
+			try {
+				await this.#abortAgent.abortAgent(job.agentId);
+			} catch {
+				agentCleanupOk = false;
+			}
+		}
+		const current = this.#jobs.getJob(args.jobId);
+		const snapshot = current ? this.#snapshot(current) : this.#snapshot({ ...job, status: "cancelled" } as AsyncJob);
+		return { outcome: agentCleanupOk ? "cancelled" : "cancellation_requested", snapshot };
+	}
+
+	#snapshot(job: AsyncJob): HarnessJobSnapshot {
+		const generation = this.#observe(job);
+		const status: HarnessJobStatus = job.status === "running" && job.queued === true ? "queued" : job.status;
+		const summary = (job.resultText ?? job.errorText ?? "").trim();
+		const command = job.process?.command;
+		const widget = this.#widget(job);
+		return {
+			jobId: job.id,
+			generation,
+			...(job.ownerId !== undefined ? { ownerAgentId: job.ownerId } : {}),
+			...(job.agentId !== undefined ? { agentId: job.agentId } : {}),
+			type: job.type,
+			label: job.intent ?? job.label,
+			...(this.#jobs.widgetCaption?.(job) ? { caption: this.#jobs.widgetCaption(job) } : {}),
+			status,
+			startedAt: new Date(job.startTime).toISOString(),
+			...(job.status !== "running" && job.endTime !== undefined
+				? { completedAt: new Date(job.endTime).toISOString() }
+				: {}),
+			...(summary.length > 0
+				? { summary: summary.length > this.#summaryLimit ? `${summary.slice(0, this.#summaryLimit)}…` : summary }
+				: {}),
+			...(command ? { command: command.length > 4096 ? `${command.slice(0, 4096)}…` : command } : {}),
+			...taskJobProgress(job),
+			...(widget ? { widget } : {}),
+		};
+	}
+
+	/**
+	 * Lineage for the jobs in `jobs`: every owner and its ancestors up to (not
+	 * including) `rootId`. Parents come from the agent registry, falling back to
+	 * the task job that runs a subagent once its registry entry is gone.
+	 */
+	agentLinks(jobs: readonly HarnessJobSnapshot[], rootId: string | undefined): HarnessJobAgentLink[] {
+		const parentOf = this.#parentResolver();
+		const links = new Map<string, HarnessJobAgentLink>();
+		for (const job of jobs) {
+			let hops = 0;
+			for (
+				let id = job.ownerAgentId;
+				id !== undefined && id !== rootId && !links.has(id) && hops < MAX_HIERARCHY_HOPS;
+				hops += 1
+			) {
+				const parentId = parentOf(id);
+				links.set(id, parentId === undefined ? { id } : { id, parentId });
+				id = parentId;
+			}
+		}
+		return [...links.values()];
+	}
+
+	/**
+	 * Running jobs project already-observed views; actual inspectors mark widgets
+	 * shown. A settled job keeps the last view seen while it ran, without starting
+	 * spec authoring for a job nobody watched.
+	 */
+	#widget(job: AsyncJob): JobWidgetView | undefined {
+		if (job.status === "running" && job.queued !== true && this.#jobs.widgetView) {
+			let view: JobWidgetView | undefined;
+			try {
+				view = this.#jobs.widgetView(job);
+			} catch {
+				view = undefined;
+			}
+			if (view) {
+				this.#widgets.delete(job.id);
+				this.#widgets.set(job.id, view);
+				while (this.#widgets.size > MAX_RETAINED_WIDGETS) {
+					const oldest = this.#widgets.keys().next().value;
+					if (oldest === undefined) break;
+					this.#widgets.delete(oldest);
+				}
+			}
+			return view;
+		}
+		return this.#widgets.get(job.id);
+	}
+
+	/**
+	 * Generation is native-port-driven: re-registration of the same job id
+	 * (observed via a changed native startTime) is a new generation.
+	 */
+	#observe(job: AsyncJob): number {
+		const recorded = this.#generations.get(job.id);
+		if (recorded === undefined) {
+			this.#remember(job.id, { generation: 1, startTime: job.startTime });
+			return 1;
+		}
+		if (recorded.startTime !== job.startTime) {
+			const generation = recorded.generation + 1;
+			this.#remember(job.id, { generation, startTime: job.startTime });
+			return generation;
+		}
+		// Re-record unchanged sightings too: eviction drops the least recently
+		// observed ids, so every job the native manager still lists stays fenced.
+		this.#remember(job.id, recorded);
+		return recorded.generation;
+	}
+
+	/**
+	 * Record a generation and bound the map. `#observe` can only compare an id
+	 * the native manager still returns, so evicting the least recently observed
+	 * entries costs nothing: a job outside the retention window re-derives as
+	 * generation 1 exactly like a first sighting, and a stale renderer fence
+	 * fails closed with `JOB_GENERATION_CONFLICT`.
+	 */
+	#remember(jobId: string, record: { generation: number; startTime: number }): void {
+		this.#generations.delete(jobId);
+		this.#generations.set(jobId, record);
+		while (this.#generations.size > MAX_TRACKED_GENERATIONS) {
+			const oldest = this.#generations.keys().next().value;
+			if (oldest === undefined) break;
+			this.#generations.delete(oldest);
+		}
+	}
+
+	#canSee(callerAgentId: string | undefined, ownerFilter: string | undefined, job: AsyncJob): boolean {
+		const ownerId = job.ownerId;
+		if (ownerFilter !== undefined) return ownerId === ownerFilter;
+		if (ownerId === undefined) return true; // unowned jobs are visible to every caller
+		if (callerAgentId === undefined) return false; // fail closed: no caller identity, no owned rows
+		if (ownerId === callerAgentId) return true;
+		return this.#isAncestorOf(callerAgentId, ownerId);
+	}
+
+	#assertOwnerScope(callerAgentId: string | undefined, ownerAgentId: string): void {
+		if (callerAgentId === ownerAgentId) return;
+		if (callerAgentId === undefined || !this.#isAncestorOf(callerAgentId, ownerAgentId)) {
+			throw new HarnessJobError(
+				"NOT_OWNER",
+				`Agent "${callerAgentId ?? "<none>"}" cannot view jobs of "${ownerAgentId}"`,
+			);
+		}
+	}
+
+	#isAncestorOf(ancestorId: string, descendantId: string): boolean {
+		const parentOf = this.#parentResolver();
+		let current: string | undefined = descendantId;
+		let hops = 0;
+		while (current !== undefined && hops < MAX_HIERARCHY_HOPS) {
+			if (current === ancestorId) return true;
+			current = parentOf(current);
+			hops += 1;
+		}
+		return false;
+	}
+
+	/**
+	 * Parent of an agent: the registry first, then the owner of the task job
+	 * that runs it (the registry entry of a finished subagent is gone, but its
+	 * jobs still belong in its spawner's tree, as upstream `getAsyncJobTree`).
+	 */
+	#parentResolver(): (agentId: string) => string | undefined {
+		let taskOwners: Map<string, string> | undefined;
+		return id => {
+			const parent = this.#registry.get(id)?.parentId;
+			if (parent !== undefined) return parent;
+			if (taskOwners === undefined) {
+				taskOwners = new Map();
+				for (const job of this.#jobs.getAllJobs()) {
+					if (job.agentId !== undefined && job.ownerId !== undefined && job.agentId !== job.ownerId) {
+						taskOwners.set(job.agentId, job.ownerId);
+					}
+				}
+			}
+			return taskOwners.get(id);
+		};
+	}
+
+	async #requireConfirmation(action: HarnessJobCancelAction): Promise<void> {
+		if (!this.#confirmationGate) {
+			throw new HarnessJobError(
+				"CONFIRMATION_REQUIRED",
+				"Destructive cancelJob requires host confirmation",
+				undefined,
+				action,
+			);
+		}
+		const granted = await this.#confirmationGate(action);
+		if (!granted) {
+			throw new HarnessJobError("CONFIRMATION_DENIED", "Destructive cancelJob was not confirmed");
+		}
+	}
+
+	#validateId(jobId: string): void {
+		if (typeof jobId !== "string" || jobId.length === 0 || jobId.length > MAX_ID_LENGTH) {
+			throw new HarnessJobError("INVALID_ARGUMENT", "Job id is invalid");
+		}
+	}
+
+	#validateGeneration(expectedGeneration: number): void {
+		if (!Number.isSafeInteger(expectedGeneration) || expectedGeneration < 1) {
+			throw new HarnessJobError("INVALID_ARGUMENT", "Expected generation is invalid");
+		}
+	}
+}

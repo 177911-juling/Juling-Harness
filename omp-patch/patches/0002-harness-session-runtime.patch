@@ -1,0 +1,2669 @@
+diff --git a/packages/agent/src/agent.ts b/packages/agent/src/agent.ts
+index 74d54d0668..b140242e84 100644
+--- a/packages/agent/src/agent.ts
++++ b/packages/agent/src/agent.ts
+@@ -39,7 +39,7 @@ import {
+ 	unpairedToolCallTail,
+ } from "./agent-loop";
+ import type { AppendOnlyContextManager } from "./append-only-context";
+-import { agentPauseGate } from "./pause";
++import { agentPauseGate, type AgentPauseListener } from "./pause";
+ import { isProviderRefusalMessage } from "./replay-policy";
+ import { SentToolDefinitions } from "./sent-tool-definitions";
+ import { Tokenizer } from "./tokenizer";
+@@ -483,11 +483,30 @@ export class Agent {
+ 
+ 	#runningPrompt?: Promise<void>;
+ 	#isPaused = false;
++	readonly #pauseListeners = new Set<AgentPauseListener>();
+ 
+ 	/** True while this unfinished turn is safely parked by the process pause gate. */
+ 	get isPaused(): boolean {
+ 		return this.#isPaused && agentPauseGate.paused && !this.#abortController?.signal.aborted;
+ 	}
++
++	/** Observe a loop reaching or leaving the process pause boundary. */
++	subscribePause(listener: AgentPauseListener): () => void {
++		this.#pauseListeners.add(listener);
++		return () => this.#pauseListeners.delete(listener);
++	}
++
++	#setPaused(paused: boolean): void {
++		if (this.#isPaused === paused) return;
++		this.#isPaused = paused;
++		for (const listener of this.#pauseListeners) {
++			try {
++				listener(this.isPaused);
++			} catch (error) {
++				logger.warn("Agent pause listener failed", { error: String(error) });
++			}
++		}
++	}
+ 	#resolveRunningPrompt?: () => void;
+ 	#kimiApiFormat?: "openai" | "anthropic";
+ 	#preferWebsockets?: boolean;
+@@ -1903,7 +1922,7 @@ export class Agent {
+ 		this.#state.isStreaming = true;
+ 		this.#state.streamMessage = null;
+ 		this.#state.error = undefined;
+-		this.#isPaused = false;
++		this.#setPaused(false);
+ 
+ 		// Clear Cursor tool result buffer at start of each run
+ 		this.#cursorToolResultBuffer = [];
+@@ -2078,7 +2097,7 @@ export class Agent {
+ 			onHarmonyLeak: this.#onHarmonyLeak,
+ 			onTurnEnd: (messages, signal, context) => this.#onTurnEnd?.(messages, signal, context),
+ 			onPauseChange: paused => {
+-				this.#isPaused = paused;
++				this.#setPaused(paused);
+ 			},
+ 			getToolChoice,
+ 			softToolRequirementState: this.#softToolRequirementState,
+@@ -2331,7 +2350,7 @@ export class Agent {
+ 				this.#emit({ type: "agent_end", messages: [errorMsg] });
+ 			}
+ 		} finally {
+-			this.#isPaused = false;
++			this.#setPaused(false);
+ 			this.#restoreUndeliveredQueuedMessages(loopAbortController);
+ 			resolveRun?.();
+ 			if (this.#abortController === loopAbortController) {
+diff --git a/packages/coding-agent/src/archive/archive.ts b/packages/coding-agent/src/archive/archive.ts
+index 53726ec547..1de77662aa 100644
+--- a/packages/coding-agent/src/archive/archive.ts
++++ b/packages/coding-agent/src/archive/archive.ts
+@@ -147,11 +147,15 @@ export async function archiveSessions(cwd: string | undefined, limit: number): P
+  *
+  * @throws {ToolError} when no session or several sessions match, or the file is not a session.
+  */
+-export async function archiveSession(idOrFile: string, limit: number): Promise<ArchiveView<ArchiveSessionDetail>> {
++export async function archiveSession(
++	idOrFile: string,
++	limit: number,
++	recapLimit?: number,
++): Promise<ArchiveView<ArchiveSessionDetail>> {
+ 	const file = path.isAbsolute(idOrFile) ? idOrFile : await resolveSessionFile(idOrFile);
+ 	const info = await readSessionInfo(file);
+ 	if (!info) throw new ToolError(`Not a readable session file: ${shortenPath(file)}`);
+-	const recaps = listSessionRecaps({ sessionIds: [info.id] })
++	const recaps = listSessionRecaps({ sessionIds: [info.id], limit: recapLimit })
+ 		.map(toArchiveRecap)
+ 		.reverse();
+ 	const prompts = HistoryStorage.open().getRecent(limit, { sessionId: info.id }).map(toArchivePrompt).reverse();
+diff --git a/packages/coding-agent/src/cli/gc-cli.ts b/packages/coding-agent/src/cli/gc-cli.ts
+index b4af9962d4..62e386edee 100644
+--- a/packages/coding-agent/src/cli/gc-cli.ts
++++ b/packages/coding-agent/src/cli/gc-cli.ts
+@@ -97,6 +97,11 @@ export interface GcCommandFlags {
+ 
+ export interface GcCommandArgs {
+ 	flags: GcCommandFlags;
++	/** Optional typed selection boundary for reviewed desktop compression operations. */
++	compressionCandidates?: (
++		sessionId: string,
++		candidates: readonly CompressCandidate[],
++	) => readonly CompressCandidate[];
+ }
+ 
+ export interface BlobGcResult {
+@@ -1953,7 +1958,11 @@ async function tryAcquireSessionTreeLeases(
+  * deleted, so it stays resumable. Leftover scratch directories from a killed
+  * run are removed first. A session that fails is reported and skipped.
+  */
+-async function runCompressGc(options: ResolvedGcOptions, archiveRoot: string): Promise<CompressGcResult> {
++async function runCompressGc(
++	options: ResolvedGcOptions,
++	archiveRoot: string,
++	select?: GcCommandArgs["compressionCandidates"],
++): Promise<CompressGcResult> {
+ 	const sessionsRoot = getSessionsDir(options.agentDir);
+ 	const method = await compressMethod(sessionsRoot);
+ 	const result: CompressGcResult = {
+@@ -2005,7 +2014,7 @@ async function runCompressGc(options: ResolvedGcOptions, archiveRoot: string): P
+ 			result.errors.push(`${session.path}: ${errorMessage(error)}`);
+ 			continue;
+ 		}
+-		const candidates: CompressCandidate[] = [];
++		let candidates: CompressCandidate[] = [];
+ 		for (const file of files) {
+ 			try {
+ 				const candidate = await compressCandidate(file);
+@@ -2022,6 +2031,8 @@ async function runCompressGc(options: ResolvedGcOptions, archiveRoot: string): P
+ 				result.skippedLive += 1;
+ 				continue;
+ 			}
++			if (select) candidates = [...select(session.id, candidates)];
++			if (candidates.length === 0) continue;
+ 			result.sessions += 1;
+ 			result.wouldCompress += candidates.length;
+ 			for (const candidate of candidates) {
+@@ -2323,7 +2334,8 @@ function renderText(result: GcResult): string {
+ 	return `${lines.join("\n")}\n`;
+ }
+ 
+-export async function runGcCommand(args: GcCommandArgs): Promise<GcResult> {
++/** Run the native collector without writing terminal output. */
++export async function collectGc(args: GcCommandArgs): Promise<GcResult> {
+ 	const options = await resolveOptions(args.flags);
+ 	const archiveRoot = getArchivedSessionsDir(options.agentDir);
+ 	const result = await withGcLock(options.agentDir, async lockPath => {
+@@ -2336,12 +2348,17 @@ export async function runGcCommand(args: GcCommandArgs): Promise<GcResult> {
+ 		if (options.runStale) next.stale = await runStaleGc(options);
+ 		if (options.runBlobs) next.blobs = await runBlobGc(options, archiveRoot);
+ 		if (options.runArchive) next.archive = await runArchiveGc(options, archiveRoot, registeredSessionPaths);
+-		if (options.runCompress) next.compress = await runCompressGc(options, archiveRoot);
++		if (options.runCompress) next.compress = await runCompressGc(options, archiveRoot, args.compressionCandidates);
+ 		if (options.runWal) next.wal = await runWalGc(options);
+ 		return next;
+ 	});
+ 
+-	const output = options.json ? `${JSON.stringify(result, null, 2)}\n` : renderText(result);
++	return result;
++}
++
++export async function runGcCommand(args: GcCommandArgs): Promise<GcResult> {
++	const result = await collectGc(args);
++	const output = args.flags.json ? `${JSON.stringify(result, null, 2)}\n` : renderText(result);
+ 	process.stdout.write(output);
+ 	return result;
+ }
+diff --git a/packages/coding-agent/src/cli/usage-cli.ts b/packages/coding-agent/src/cli/usage-cli.ts
+index ae2066c237..e8a5e1e295 100644
+--- a/packages/coding-agent/src/cli/usage-cli.ts
++++ b/packages/coding-agent/src/cli/usage-cli.ts
+@@ -677,7 +677,7 @@ export type UsagePolicyDiagnostics = {
+ 	| { state: "eligible" | "inside-reserve"; remainingPct: number }
+ );
+ 
+-function computePolicyDiagnostics(
++export function computePolicyDiagnostics(
+ 	provider: string,
+ 	identity: OAuthAccountIdentity,
+ 	limits: UsageLimit[] | undefined,
+diff --git a/packages/coding-agent/src/if-bench/runner.ts b/packages/coding-agent/src/if-bench/runner.ts
+index 6125f06216..20286af1da 100644
+--- a/packages/coding-agent/src/if-bench/runner.ts
++++ b/packages/coding-agent/src/if-bench/runner.ts
+@@ -74,6 +74,7 @@ export interface IfBenchSummary {
+ }
+ 
+ export interface IfBenchRunOptions {
++	signal?: AbortSignal;
+ 	targets: readonly BenchTarget[];
+ 	runtime: BenchRuntime;
+ 	maxTurns: number;
+@@ -137,6 +138,7 @@ export async function runIfBench(options: IfBenchRunOptions): Promise<IfBenchSum
+ 
+ 	const worker = async (): Promise<void> => {
+ 		for (;;) {
++			options.signal?.throwIfAborted();
+ 			const next = queue.shift();
+ 			if (!next) return;
+ 			ordered[next.index] = await runTarget(next.target, options);
+@@ -196,6 +198,7 @@ async function runTarget(target: BenchTarget, options: IfBenchRunOptions): Promi
+ 
+ 	try {
+ 		for (let turn = 1; turn <= options.maxTurns; turn += 1) {
++			options.signal?.throwIfAborted();
+ 			const actions: Action[] = makeActions(options.arrayLength, cumulativeActions, turn);
+ 			const turnPrompt = buildTurnPrompt({
+ 				turn,
+@@ -278,7 +281,24 @@ async function requestTurnWithRefusalRetry(
+ ): Promise<TurnOutcome> {
+ 	let outcome: TurnOutcome = { text: "", error: "request failed", durationMs: 0 };
+ 	for (let attempt = 1; attempt <= REFUSAL_MAX_ATTEMPTS; attempt += 1) {
+-		if (attempt > 1) await (options.sleep ?? Bun.sleep)(REFUSAL_BACKOFF_MS[attempt - 1] ?? 180_000);
++		options.signal?.throwIfAborted();
++		if (attempt > 1) {
++			const ms = REFUSAL_BACKOFF_MS[attempt - 1] ?? 180_000;
++			if (options.sleep) await options.sleep(ms);
++			else
++				await new Promise<void>((resolve, reject) => {
++					const abort = () => {
++						clearTimeout(timer);
++						reject(options.signal?.reason);
++					};
++					const timer = setTimeout(() => {
++						options.signal?.removeEventListener("abort", abort);
++						resolve();
++					}, ms);
++					options.signal?.addEventListener("abort", abort, { once: true });
++				});
++		}
++		options.signal?.throwIfAborted();
+ 		const sessionId = options.randomSessionId();
+ 		const apiKey = options.runtime.modelRegistry.resolver(model, sessionId);
+ 		outcome = await requestTurn(model, context, sessionId, apiKey, providerSessionState, target, options);
+@@ -305,6 +325,7 @@ async function requestTurn(
+ 	try {
+ 		const stream = options.stream(model, context, {
+ 			apiKey,
++			signal: options.signal,
+ 			sessionId,
+ 			promptCacheKey: sessionId,
+ 			maxTokens:
+@@ -339,6 +360,7 @@ async function requestTurn(
+ 		}
+ 		return { message, text, durationMs: elapsed(message) };
+ 	} catch (error) {
++		options.signal?.throwIfAborted();
+ 		return { text: "", error: errorText(error), durationMs: elapsed() };
+ 	}
+ }
+diff --git a/packages/coding-agent/src/plan-mode/approved-plan.ts b/packages/coding-agent/src/plan-mode/approved-plan.ts
+index 90cd798e91..2bc96a315d 100644
+--- a/packages/coding-agent/src/plan-mode/approved-plan.ts
++++ b/packages/coding-agent/src/plan-mode/approved-plan.ts
+@@ -10,6 +10,7 @@ export interface PlanApprovalDetails {
+ 	planFilePath: string;
+ 	title: string;
+ 	planExists: boolean;
++	planContent?: string;
+ }
+ 
+ /** Validate and normalize the agent-supplied plan title into a safe filename stem.
+diff --git a/packages/coding-agent/src/predict/client.ts b/packages/coding-agent/src/predict/client.ts
+index 9d410bcfda..9113e0e40b 100644
+--- a/packages/coding-agent/src/predict/client.ts
++++ b/packages/coding-agent/src/predict/client.ts
+@@ -19,6 +19,8 @@ import { resolveWorkerSpawnCmd, SMOKE_TEST_TIMEOUT_MS, workerEnvFromParent } fro
+ import { prefetchSmolLmWeights } from "./smollm-weights";
+ import {
+ 	TEXT_PREDICT_AGENT_DIR_ENV,
++	TEXT_PREDICT_PROFILE_ENV,
++	type TextPredictProfile,
+ 	TEXT_PREDICT_BROKER_SCOPE,
+ 	TEXT_PREDICT_READY_PATTERN,
+ 	TEXT_PREDICT_SOCKET_ENV,
+@@ -119,7 +121,10 @@ class DaemonConnection {
+  * Connect and confirm the daemon speaks this omp version or a newer one;
+  * `undefined` when nothing usable listens.
+  */
+-async function connectDaemon(endpoint: string): Promise<DaemonConnection | undefined> {
++async function connectDaemon(
++	endpoint: string,
++	profile: TextPredictProfile = "default",
++): Promise<DaemonConnection | undefined> {
+ 	let ipc: IpcConnection;
+ 	try {
+ 		ipc = await IpcConnection.connect(endpoint, { framing: "lines", timeoutMs: CONNECT_TIMEOUT_MS });
+@@ -129,7 +134,12 @@ async function connectDaemon(endpoint: string): Promise<DaemonConnection | undef
+ 	const connection = new DaemonConnection(ipc);
+ 	try {
+ 		const pong = await connection.request(id => ({ id, op: "ping" }), REQUEST_TIMEOUT_MS);
+-		if (pong.ok && pong.op === "ping" && (pong.version === VERSION || compareVersions(pong.version, VERSION) > 0)) {
++		if (
++			pong.ok &&
++			pong.op === "ping" &&
++			(pong.version === VERSION || compareVersions(pong.version, VERSION) > 0) &&
++			(profile === "default" || (pong.profile === profile && pong.protocol === 2))
++		) {
+ 			return connection;
+ 		}
+ 		// A daemon from an older omp version: retire it so this version's starts. A newer
+@@ -144,19 +154,23 @@ async function connectDaemon(endpoint: string): Promise<DaemonConnection | undef
+ }
+ 
+ /** Find or start the daemon serving `agentDir` under the global broker. */
+-async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
++async function ensureDaemon(
++	agentDir: string,
++	profile: TextPredictProfile,
++	foreignHistory = true,
++): Promise<DaemonConnection> {
+ 	const broker = await daemonClientForGlobal(TEXT_PREDICT_BROKER_SCOPE);
+ 	await broker.request({ op: "ping" });
+-	const { name, endpoint } = textPredictDaemon(broker.projectDir, agentDir);
++	const { name, endpoint } = textPredictDaemon(broker.projectDir, agentDir, profile);
+ 	const spawn = resolveWorkerSpawnCmd(TEXT_PREDICT_WORKER_ARG);
+ 	for (let attempt = 0; attempt < ENSURE_ATTEMPTS; attempt++) {
+-		const live = await connectDaemon(endpoint);
++		const live = await connectDaemon(endpoint, profile);
+ 		if (live) return live;
+ 		const existing = await describeQuietly(broker, name, LABEL);
+ 		if (existing && existing.state !== "exited" && existing.state !== "failed") {
+ 			if (existing.readyAt === undefined) {
+ 				await waitReady(broker, name, LABEL, undefined, READY_TIMEOUT_MS);
+-				const ready = await connectDaemon(endpoint);
++				const ready = await connectDaemon(endpoint, profile);
+ 				if (ready) return ready;
+ 			}
+ 			// Live record but nothing usable listening: replace it.
+@@ -170,7 +184,12 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
+ 					name,
+ 					application: spawn.cmd[0]!,
+ 					args: spawn.cmd.slice(1),
+-					env: { [TEXT_PREDICT_SOCKET_ENV]: endpoint, [TEXT_PREDICT_AGENT_DIR_ENV]: agentDir },
++					env: {
++						[TEXT_PREDICT_SOCKET_ENV]: endpoint,
++						[TEXT_PREDICT_AGENT_DIR_ENV]: agentDir,
++						[TEXT_PREDICT_PROFILE_ENV]: profile,
++						OMP_TEXT_PREDICT_NO_FOREIGN: foreignHistory ? "0" : "1",
++					},
+ 					cwd: spawn.cwd ?? broker.projectDir,
+ 					pty: false,
+ 					ready: { log: TEXT_PREDICT_READY_PATTERN, timeoutMs: READY_TIMEOUT_MS },
+@@ -188,7 +207,41 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
+ }
+ 
+ /** Process-wide daemon access shared by every editor and the submit hook. */
+-class TextPredictionClient {
++export class TextPredictionClient {
++	#closed = false;
++	readonly profile: TextPredictProfile;
++	readonly agentDirectory: string;
++	readonly foreignHistory: boolean;
++	readonly downloadWeights: boolean;
++	constructor(
++		profileOrDirectory: TextPredictProfile | string = "default",
++		downloadOrForeign = true,
++		legacyDownloads?: boolean,
++	) {
++		const namedProfile = profileOrDirectory === "default" || profileOrDirectory === "harness";
++		this.profile = namedProfile ? profileOrDirectory : "harness";
++		this.agentDirectory = namedProfile ? getAgentDir() : profileOrDirectory;
++		this.foreignHistory = namedProfile ? this.profile === "default" : downloadOrForeign;
++		this.downloadWeights = namedProfile ? downloadOrForeign : (legacyDownloads ?? true);
++	}
++	async stop(): Promise<void> {
++		const connecting = this.#connecting;
++		this.close();
++		await connecting?.catch(() => undefined);
++		const broker = await daemonClientForGlobal(TEXT_PREDICT_BROKER_SCOPE);
++		const { name } = textPredictDaemon(broker.projectDir, this.agentDirectory, this.profile);
++		const listed = await broker.request({ op: "list" });
++		if (listed.op !== "list") throw Error("Unexpected prediction broker response");
++		if (
++			listed.daemons.some(daemon => daemon.name === name && daemon.state !== "exited" && daemon.state !== "failed")
++		) {
++			const stopped = await broker.request({ op: "stop", name, timeoutMs: 10000 });
++			if (stopped.op !== "stop" || !["exited", "failed"].includes(stopped.daemon.state))
++				throw Error("Prediction daemon is still running");
++		}
++		this.#closed = false;
++		this.#retryAt = 0;
++	}
+ 	#connection: DaemonConnection | undefined;
+ 	#connecting: Promise<DaemonConnection> | undefined;
+ 	#retryAt = 0;
+@@ -221,6 +274,7 @@ class TextPredictionClient {
+ 
+ 	/** Drop the daemon connection so a short-lived command can exit. */
+ 	close(): void {
++		this.#closed = true;
+ 		this.#connection?.close();
+ 		this.#connection = undefined;
+ 	}
+@@ -234,7 +288,7 @@ class TextPredictionClient {
+ 	async complete(engine: TextPredictMethod, before: string, prefix: string): Promise<TextPrediction> {
+ 		// SmolLM's weights download here, in the interactive process (shown in the
+ 		// download HUD), only once the user has chosen SmolLM.
+-		if (engine === "smollm") prefetchSmolLmWeights();
++		if (engine === "smollm" && this.downloadWeights) prefetchSmolLmWeights();
+ 		const response = await this.#request(
+ 			id => ({ id, op: "complete", method: engine, before, prefix }),
+ 			COMPLETE_TIMEOUT_MS,
+@@ -262,12 +316,18 @@ class TextPredictionClient {
+ 	}
+ 
+ 	#connect(): Promise<DaemonConnection> {
++		if (this.#closed) return Promise.reject(new Error("text-predict client closed"));
+ 		const current = this.#connection;
+ 		if (current && !current.closed) return Promise.resolve(current);
+ 		if (this.#connecting) return this.#connecting;
+ 		if (Date.now() < this.#retryAt) return Promise.reject(new Error("text-predict daemon unavailable"));
+-		const connecting = ensureDaemon(getAgentDir()).then(
++		const connecting = ensureDaemon(this.agentDirectory, this.profile, this.foreignHistory).then(
+ 			connection => {
++				if (this.#closed) {
++					connection.close();
++					this.#connecting = undefined;
++					throw new Error("text-predict client closed");
++				}
+ 				this.#connection = connection;
+ 				this.#connecting = undefined;
+ 				return connection;
+@@ -335,13 +395,14 @@ export async function smokeTestTextPredictDaemon(): Promise<void> {
+ 		env: workerEnvFromParent({
+ 			[TEXT_PREDICT_SOCKET_ENV]: endpoint,
+ 			[TEXT_PREDICT_AGENT_DIR_ENV]: path.join(root, "agent"),
++			[TEXT_PREDICT_PROFILE_ENV]: "harness",
+ 		}),
+ 	});
+ 	let connection: DaemonConnection | undefined;
+ 	try {
+ 		const deadline = Date.now() + SMOKE_TEST_TIMEOUT_MS;
+ 		while (!connection && Date.now() < deadline && proc.exitCode === null) {
+-			connection = await connectDaemon(endpoint);
++			connection = await connectDaemon(endpoint, "harness");
+ 			if (!connection) await Bun.sleep(200);
+ 		}
+ 		if (!connection) {
+diff --git a/packages/coding-agent/src/predict/daemon.ts b/packages/coding-agent/src/predict/daemon.ts
+index 1dac9d5a30..1ff3e4476e 100644
+--- a/packages/coding-agent/src/predict/daemon.ts
++++ b/packages/coding-agent/src/predict/daemon.ts
+@@ -21,6 +21,8 @@ import { blendPredictions } from "./blend";
+ import { readForeignPrompts } from "./foreign-history";
+ import {
+ 	TEXT_PREDICT_AGENT_DIR_ENV,
++	TEXT_PREDICT_PROFILE_ENV,
++	type TextPredictProfile,
+ 	TEXT_PREDICT_SOCKET_ENV,
+ 	type TextPredictMethod,
+ 	type TextPredictRequest,
+@@ -130,10 +132,11 @@ class Engine {
+ 		readonly stateDir: string,
+ 		readonly predictor: TextPredictor,
+ 		cursor: number | undefined,
++		seedForeign = true,
+ 	) {
+ 		this.cursor = cursor ?? 0;
+ 		this.#persistedCursor = this.cursor;
+-		this.#seed = cursor === undefined;
++		this.#seed = cursor === undefined && seedForeign && process.env.OMP_TEXT_PREDICT_NO_FOREIGN !== "1";
+ 	}
+ 
+ 	get dirty(): boolean {
+@@ -210,6 +213,7 @@ class Engine {
+ 
+ /** Serves every connection; engines open lazily on their first request. */
+ class TextPredictDaemon {
++	readonly #profile: TextPredictProfile;
+ 	#agentDir: string;
+ 	#historyDbPath: string;
+ 	#engines = new Map<TextPredictMethod, Promise<Engine>>();
+@@ -228,8 +232,9 @@ class TextPredictDaemon {
+ 		onStop: () => this.#persistAll(),
+ 	});
+ 
+-	constructor(agentDir: string) {
+-		this.#agentDir = agentDir;
++	constructor(agentDir: string, profile: TextPredictProfile = "default") {
++		this.#profile = profile;
++		this.#agentDir = profile === "harness" ? path.join(agentDir, "harness-predict") : agentDir;
+ 		this.#historyDbPath = getHistoryDbPath(agentDir);
+ 	}
+ 
+@@ -254,6 +259,8 @@ class TextPredictDaemon {
+ 					ok: true,
+ 					op: "ping",
+ 					version: VERSION,
++					profile: this.#profile,
++					protocol: 2,
+ 					pid: process.pid,
+ 					engines: [...this.#engines.keys()],
+ 				};
+@@ -357,7 +364,7 @@ class TextPredictDaemon {
+ 			await predictor.ready();
+ 			cursor = undefined;
+ 		}
+-		const engine = new Engine(method, stateDir, predictor, cursor);
++		const engine = new Engine(method, stateDir, predictor, cursor, this.#profile !== "harness");
+ 		const ingested = await engine.ingest(this.#historyDbPath);
+ 		if (ingested > 0) this.#persistCadence.touch();
+ 		logger.debug("text-predict: engine ready", {
+@@ -388,5 +395,7 @@ export async function startTextPredictDaemonFromEnvironment(): Promise<void> {
+ 	if (!endpoint || !agentDir) {
+ 		throw new Error(`${TEXT_PREDICT_SOCKET_ENV} and ${TEXT_PREDICT_AGENT_DIR_ENV} must be set`);
+ 	}
+-	await new TextPredictDaemon(agentDir).serve(endpoint);
++	await new TextPredictDaemon(agentDir, Bun.env[TEXT_PREDICT_PROFILE_ENV] === "harness" ? "harness" : "default").serve(
++		endpoint,
++	);
+ }
+diff --git a/packages/coding-agent/src/predict/foreign-history.ts b/packages/coding-agent/src/predict/foreign-history.ts
+index 86beea3866..7067f815f3 100644
+--- a/packages/coding-agent/src/predict/foreign-history.ts
++++ b/packages/coding-agent/src/predict/foreign-history.ts
+@@ -14,8 +14,8 @@ import { readForeignJsonRecords } from "../session/foreign-session-jsonl";
+ const PLACEHOLDER = /\[(?:Pasted text|Image) #\d+[^\]]*\]/g;
+ 
+ /** Claude Code then Codex prompts, each in file order; missing or unreadable files contribute nothing. */
+-export async function readForeignPrompts(): Promise<string[]> {
+-	const files = [
++export async function readForeignPrompts(selectedFiles?: readonly string[]): Promise<string[]> {
++	const files = selectedFiles ?? [
+ 		path.join(resolveClaudePaths().configDir, "history.jsonl"),
+ 		path.join(os.homedir(), ".codex", "history.jsonl"),
+ 	];
+diff --git a/packages/coding-agent/src/predict/protocol.ts b/packages/coding-agent/src/predict/protocol.ts
+index f527c28992..23ab979d38 100644
+--- a/packages/coding-agent/src/predict/protocol.ts
++++ b/packages/coding-agent/src/predict/protocol.ts
+@@ -19,6 +19,8 @@ export const TEXT_PREDICT_SOCKET_ENV = "OMP_TEXT_PREDICT_SOCKET";
+ 
+ /** Environment key carrying the agent directory whose history and state the daemon serves. */
+ export const TEXT_PREDICT_AGENT_DIR_ENV = "OMP_TEXT_PREDICT_AGENT_DIR";
++export const TEXT_PREDICT_PROFILE_ENV = "OMP_TEXT_PREDICT_PROFILE";
++export type TextPredictProfile = "default" | "harness";
+ 
+ /** Broker readiness regex matched against {@link textPredictReadyBanner}. */
+ export const TEXT_PREDICT_READY_PATTERN = String.raw`omp text-predict listening on \S+`;
+@@ -36,8 +38,16 @@ export function textPredictReadyBanner(endpoint: string): string {
+  * endpoint inside the broker runtime dir. Different agent directories (profiles,
+  * tests) get separate daemons because history and learned state are per agent dir.
+  */
+-export function textPredictDaemon(runtimeDir: string, agentDir: string): { name: string; endpoint: string } {
+-	const key = Bun.hash.wyhash(path.resolve(agentDir)).toString(16).padStart(16, "0").slice(0, 12);
++export function textPredictDaemon(
++	runtimeDir: string,
++	agentDir: string,
++	profile: TextPredictProfile = "default",
++): { name: string; endpoint: string } {
++	const key = Bun.hash
++		.wyhash(profile === "harness" ? path.resolve(agentDir) + "|harness" : path.resolve(agentDir))
++		.toString(16)
++		.padStart(16, "0")
++		.slice(0, 12);
+ 	return { name: `omp.text-predict.${key}`, endpoint: ipcEndpoint(runtimeDir, `text-predict-${key}`) };
+ }
+ 
+@@ -61,7 +71,16 @@ export type TextPredictRequest =
+ 
+ /** Daemon → client response. */
+ export type TextPredictResponse =
+-	| { id: number; ok: true; op: "ping"; version: string; pid: number; engines: TextPredictMethod[] }
++	| {
++			id: number;
++			ok: true;
++			op: "ping";
++			version: string;
++			pid: number;
++			engines: TextPredictMethod[];
++			profile?: TextPredictProfile;
++			protocol?: number;
++	  }
+ 	| { id: number; ok: true; op: "complete"; suggestion: PredictedWord | null }
+ 	| { id: number; ok: true; op: "feedback" | "shutdown" }
+ 	| { id: number; ok: true; op: "sync"; ingested: number }
+diff --git a/packages/coding-agent/src/ratchet/prelude-definition.ts b/packages/coding-agent/src/ratchet/prelude-definition.ts
+index 6490e232cf..7f7b9ede52 100644
+--- a/packages/coding-agent/src/ratchet/prelude-definition.ts
++++ b/packages/coding-agent/src/ratchet/prelude-definition.ts
+@@ -1,3 +1,8 @@
++import {
++	enforceHarnessRatchetBoundary,
++	notifyHarnessRatchetGate,
++	notifyHarnessRatchetSetup,
++} from "../harness/services/ratchet-boundary";
+ import { type } from "@oh-my-pi/omptype";
+ import type { AgentToolResult, ToolApprovalDecision } from "@oh-my-pi/pi-agent-core";
+ import type { ModelCost } from "@oh-my-pi/pi-catalog/types";
+@@ -194,9 +199,11 @@ async function invokeRatchet(
+ 	lookup: PriceLookup,
+ ): Promise<AgentToolResult<unknown>> {
+ 	const cwd = session.cwd;
++	await enforceHarnessRatchetBoundary(cwd, params);
+ 	const lockKey = `${cwd}\0${params.flow}`;
+ 	if (params.action === "init") {
+ 		const state = await withFlowLock(lockKey, () => initFlow(cwd, params.flow, params));
++		await notifyHarnessRatchetSetup(cwd, params);
+ 		return result(`ratchet flow ${state.flow} ready`, state);
+ 	}
+ 	switch (params.action) {
+@@ -207,6 +214,7 @@ async function invokeRatchet(
+ 				await saveState(cwd, fresh);
+ 				return fresh;
+ 			});
++			await notifyHarnessRatchetSetup(cwd, params);
+ 			return result(`plan updated for ${state.flow}`, state);
+ 		}
+ 		case "split": {
+@@ -216,6 +224,7 @@ async function invokeRatchet(
+ 				await saveState(cwd, fresh);
+ 				return fresh;
+ 			});
++			await notifyHarnessRatchetSetup(cwd, params);
+ 			return result(
+ 				`split ${state.flow}: ${state.train_ids.length} train / ${state.test_ids.length} test (seed ${state.split_seed})`,
+ 				{ train_ids: state.train_ids, test_ids: state.test_ids, seed: state.split_seed },
+@@ -254,6 +263,7 @@ async function invokeRatchet(
+ 			const gate = await withFlowLock(lockKey, async () =>
+ 				gateVariant(cwd, await requireState(cwd, params.flow), params.variant, params.change ?? "", lookup),
+ 			);
++			await notifyHarnessRatchetGate(cwd, params.flow, params.variant, gate);
+ 			const lines = [`${gate.variant}: ${gate.decision} — ${gate.reasons.join("; ")}`];
+ 			for (const warning of gate.warnings) lines.push(`warning: ${warning}`);
+ 			if (gate.plateau)
+diff --git a/packages/coding-agent/src/registry/agent-registry.ts b/packages/coding-agent/src/registry/agent-registry.ts
+index 594f61e003..e3dc562879 100644
+--- a/packages/coding-agent/src/registry/agent-registry.ts
++++ b/packages/coding-agent/src/registry/agent-registry.ts
+@@ -44,6 +44,7 @@ export interface AgentRunLifecycle {
+ 
+ /** Historical identity and telemetry that remain available after the live session is disposed. */
+ export interface AgentHistorySummary {
++	isolated?: boolean;
+ 	agent?: string;
+ 	modelRole?: string;
+ 	resolvedModel?: string;
+@@ -107,6 +108,7 @@ export type RegistryEvent =
+ 	| { type: "registered"; ref: AgentRef }
+ 	| { type: "status_changed"; ref: AgentRef }
+ 	| { type: "metadata_changed"; ref: AgentRef }
++	| { type: "session_changed"; ref: AgentRef; previousSession: AgentSessionHandle | null }
+ 	| { type: "removed"; ref: AgentRef };
+ 
+ /** Listener for {@link AgentRegistryApi.onChange}. */
+@@ -379,8 +381,7 @@ export class AgentRegistry implements AgentRegistryApi {
+ 	/**
+ 	 * Record a short activity gist for the work-aware roster. Display-only and
+ 	 * read on demand (`irc list`, peer roster), so it emits no event — keeping
+-	 * the per-tool-call update rate off the registry listener path (same as
+-	 * `attachSession`, which also bumps `lastActivity` without emitting). Only a
++	 * the per-tool-call update rate off the registry listener path. Only a
+ 	 * `running` agent has current work: a heartbeat for any other status is
+ 	 * dropped, so a late progress flush can't resurrect activity on a ref that
+ 	 * `setStatus` just cleared. Every running heartbeat refreshes `lastActivity`
+@@ -411,6 +412,7 @@ export class AgentRegistry implements AgentRegistryApi {
+ 		// closes the race between a parked reviver claiming the ref and finishing
+ 		// createAgentSession after an explicit kill.
+ 		if (!ref || ref.status === "aborted" || !this.#matchesExpected(ref, expected)) return false;
++		const previousSession = ref.session;
+ 		ref.session = session;
+ 		if (sessionFile !== undefined) {
+ 			// A replacement transcript starts a new cumulative-cost identity.
+@@ -420,13 +422,16 @@ export class AgentRegistry implements AgentRegistryApi {
+ 			ref.sessionFile = sessionFile;
+ 		}
+ 		ref.lastActivity = Date.now();
++		this.#emit({ type: "session_changed", ref, previousSession });
+ 		return true;
+ 	}
+ 
+ 	detachSession(id: string, expected?: AgentRefExpectation): boolean {
+ 		const ref = this.#refs.get(id);
+ 		if (!ref || !this.#matchesExpected(ref, expected)) return false;
++		const previousSession = ref.session;
+ 		ref.session = null;
++		this.#emit({ type: "session_changed", ref, previousSession });
+ 		return true;
+ 	}
+ 
+diff --git a/packages/coding-agent/src/registry/persisted-agents.ts b/packages/coding-agent/src/registry/persisted-agents.ts
+index 7ae5d42a1e..c346a1bc83 100644
+--- a/packages/coding-agent/src/registry/persisted-agents.ts
++++ b/packages/coding-agent/src/registry/persisted-agents.ts
+@@ -402,6 +402,7 @@ async function readPersistedAgentMetadata(
+ 						typeof record.modelRole === "string" ? record.modelRole : (history.modelRole ?? inferred.modelRole),
+ 					resolvedModel: typeof record.resolvedModel === "string" ? record.resolvedModel : history.resolvedModel,
+ 					readOnly: typeof record.readOnly === "boolean" ? record.readOnly : inferred.readOnly,
++					isolated: record.isolated === true,
+ 				};
+ 				return false;
+ 			},
+diff --git a/packages/coding-agent/src/session/agent-session-handle.ts b/packages/coding-agent/src/session/agent-session-handle.ts
+index b9740564fa..a60f2783f4 100644
+--- a/packages/coding-agent/src/session/agent-session-handle.ts
++++ b/packages/coding-agent/src/session/agent-session-handle.ts
+@@ -1,3 +1,4 @@
++import type { ToolSession } from "../tools";
+ /**
+  * Cross-agent views of an {@link AgentSession}.
+  *
+@@ -256,6 +257,12 @@ export function isAgentViewSession(session: AgentSessionHandle): session is Agen
+ 
+ /** Extra surface the TUI reads on a focused subagent (`ctx.viewSession`). */
+ export interface AgentViewSession extends AgentSessionHandle {
++	readonly harnessToolSession?: ToolSession;
++	/** Computer/eval ownership, available on local sessions and worker mirrors. */
++	readonly harnessEvalKernelOwnerId?: string;
++	getHarnessLinkSchemes(): string[];
++	activateHarnessLink(url: string): Promise<boolean>;
++	renameHarnessTitle(title: string): Promise<string | null>;
+ 	/** Agent loop pause flag, live state, and pending tool results. */
+ 	readonly agent: AgentViewLoop;
+ 	/** Agent loop state (same object as `agent.state`). */
+diff --git a/packages/coding-agent/src/session/agent-session-types.ts b/packages/coding-agent/src/session/agent-session-types.ts
+index 8728626367..ac779a20ff 100644
+--- a/packages/coding-agent/src/session/agent-session-types.ts
++++ b/packages/coding-agent/src/session/agent-session-types.ts
+@@ -50,6 +50,7 @@ import type { XdevState } from "../tools/xdev";
+ import type { CodexAutoRedeemCoordinator } from "./codex-auto-reset";
+ import type { SettingsGatedToolDelta } from "./session-tools";
+ import type { CostGateApi } from "./cost-gate";
++import type { CustomMessage } from "./messages";
+ import type { SessionManager } from "./session-manager";
+ 
+ /** Maximum time the interactive shutdown path waits for Mnemopi consolidation. */
+@@ -492,6 +493,8 @@ export interface PromptOptions {
+ 	 * is queued as an aside.
+ 	 */
+ 	onPromptQueued?: (queued: readonly AgentMessage[]) => void;
++	/** Messages injected ahead of the user message in the same turn. */
++	prependMessages?: CustomMessage[];
+ }
+ 
+ /** Payload for {@link AgentSession.setPromptDropped}: a user prompt cancelled
+@@ -508,6 +511,8 @@ export interface DroppedPrompt {
+ 
+ /** Options for AgentSession.followUp(). */
+ export interface FollowUpOptions {
++	/** Harness context delivered and cancelled atomically with a user follow-up. */
++	prependMessages?: CustomMessage[];
+ 	/** Enqueue as a hidden developer message instead of a user follow-up. */
+ 	synthetic?: boolean;
+ 	/** Whether to expand file-based prompt templates (default: true). */
+@@ -520,6 +525,8 @@ export interface FollowUpOptions {
+ 
+ /** Options for AgentSession.steer(). */
+ export interface SteerOptions {
++	/** Harness context delivered and cancelled atomically with a user steer. */
++	prependMessages?: CustomMessage[];
+ 	/** Explicit billing/initiator attribution. */
+ 	attribution?: MessageAttribution;
+ 	/** Called synchronously with the messages pushed onto the steering queue. See {@link PromptOptions.onPromptQueued}. */
+diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
+index e07b344ddf..e3f260bc71 100644
+--- a/packages/coding-agent/src/session/agent-session.ts
++++ b/packages/coding-agent/src/session/agent-session.ts
+@@ -142,6 +142,7 @@ import { getEditStore } from "../edit/store";
+ import { releaseCompletionHandles } from "../eval/completion-bridge";
+ import { releaseJudgmentBatches } from "../eval/judgment-batch-bridge";
+ import type { EvalPreludeDefinition } from "../eval/preludes";
++import { computerUserMessageStarted, computerToolResultDelivered } from "../harness/computer-runtime-lifecycle";
+ import type { PythonResult } from "../eval/py/executor";
+ import { EVAL_STATE_CONTEXT_TYPE, formatEvalStateContext, isEvalStateContext } from "../eval/state";
+ import { WorkPoolRegistry } from "../task/workpool";
+@@ -238,6 +239,7 @@ import {
+ } from "@oh-my-pi/pi-tui/thinking";
+ import { isAttachmentOnlyTitleInput, isLowSignalTitleInput } from "../tiny/text";
+ import type { ImageAttachmentEntry, ToolSession } from "../tools";
++import { createDefaultToolUiContext } from "../tools/context";
+ import { resolveApproval } from "../tools/approval";
+ import { type ApprovalGrantStore, getApprovalGrants } from "../tools/approval-cache";
+ import { type AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
+@@ -836,6 +838,8 @@ type ScheduledAgentContinueOptions = {
+ 	onError?: (error: unknown) => void;
+ 	/** Messages the continued turn answers, handed to the turn observer (see `#startTurnObservation`). */
+ 	turnRecords?: AgentMessage[];
++	/** Harness deferred model/thinking: apply before draining queued user follow-ups. */
++	applyBeforeNextUserTurn?: boolean;
+ };
+ 
+ type ScheduledAgentContinueRequest = {
+@@ -992,6 +996,15 @@ function todoRetryMatches(failed: Record<string, unknown>, retry: Record<string,
+ 	return true;
+ }
+ 
++export interface QueuedMessageEntry {
++	heldFor?: "compaction";
++	id: string;
++	text: string;
++	queue: "steering" | "followUp";
++	state: "queued" | "inFlight" | "held";
++	imageCount: number;
++	editable: boolean;
++}
+ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	/**
+ 	 * Cross-thread identity token (`${homeThreadId}:${snowflake}`), unique per
+@@ -1073,6 +1086,15 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	 * command.
+ 	 */
+ 	readonly #queuedMessageRawText = new WeakMap<AgentMessage, string>();
++	readonly #queuedMessageIds = new WeakMap<AgentMessage, string>();
++	#harnessQueueBarrier: string | undefined;
++	#harnessQueueBarrierAbort: (() => void) | undefined;
++	readonly #heldQueueGroups: Array<{
++		sessionId: string;
++		queue: "steering" | "followUp";
++		messages: AgentMessage[];
++		barrier?: string;
++	}> = [];
+ 
+ 	// Event subscription state
+ 	#unsubscribeAgent?: () => void;
+@@ -1377,6 +1399,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	 *  incremented, so `isStreaming` alone cannot tell a host that a submission is admitted. */
+ 	#admittedSubmissionCount = 0;
+ 	#admittedSubmissionsSettled: PromiseWithResolvers<void> | undefined;
++	#beforeNextUserTurn: (() => Promise<void>) | undefined;
++	#afterUserTurn: (() => Promise<void>) | undefined;
++	#resetConsentHandler:
++		| ((input: { provider: "anthropic" | "openai-codex"; message: string }) => Promise<"Yes" | "No" | undefined>)
++		| undefined;
+ 	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
+ 	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
+ 	// checks in #handleAgentEvent) still fire on the original schedule — only the
+@@ -2067,11 +2094,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 
+ 	/**
+ 	 * Cancel only this session's pending prewalk without changing the active model or settings, and keep
+-	 * `prewalk.auto` from arming again until `/new`.
++	 * `prewalk.auto` from arming again until `/new`. Returns whether a pending prewalk was cancelled.
+ 	 */
+-	disarmPrewalk(): void {
+-		this.#prewalk.disarm();
++	disarmPrewalk(): boolean {
++		const disarmed = this.#prewalk.disarm();
+ 		this.#prewalk.suppressAuto();
++		return disarmed;
+ 	}
+ 
+ 	/** Restore a planning model and re-arm prewalk without partially applying a rejected restart. */
+@@ -2090,7 +2118,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		if (!state?.enabled) {
+ 			throw new ToolError("Plan mode is not active.");
+ 		}
+-		const { planFilePath, title: resolvedTitle } = await resolveApprovedPlan({
++		const {
++			planFilePath,
++			title: resolvedTitle,
++			planContent,
++		} = await resolveApprovedPlan({
+ 			suppliedTitle: title,
+ 			statePlanFilePath: state.planFilePath,
+ 			readPlan: url => this.#readPlanFile(url),
+@@ -2098,7 +2130,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		});
+ 		return {
+ 			content: [{ type: "text", text: "Plan ready for review." }],
+-			details: { planFilePath, title: resolvedTitle, planExists: true },
++			details: { planFilePath, title: resolvedTitle, planExists: true, planContent },
+ 		};
+ 	}
+ 
+@@ -2124,7 +2156,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		this.#reseedTokenRate();
+ 		this.agent.setQueuedMessageGrouping(
+ 			(previous, next) =>
+-				isHiddenUserCompanion(previous) && (isHiddenUserCompanion(next) || isUserQueuedMessage(next)),
++				(this.#queuedMessageIds.has(previous) &&
++					this.#queuedMessageIds.get(previous) === this.#queuedMessageIds.get(next)) ||
++				(isHiddenUserCompanion(previous) && (isHiddenUserCompanion(next) || isUserQueuedMessage(next))),
+ 		);
+ 		this.sessionManager = config.sessionManager;
+ 		this.settings = config.settings;
+@@ -4102,6 +4136,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	 * the recovery wait always sees the in-flight handler and blocks until it — and
+ 	 * everything it schedules — settles. */
+ 	#dispatchAgentEvent = async (event: AgentEvent): Promise<void> => {
++		if (event.type === "message_start") computerUserMessageStarted(this.sessionId, event.message);
++		if (event.type === "tool_execution_end")
++			computerToolResultDelivered(this.sessionId, event.toolCallId, event.result);
+ 		// Revoke before the first await: delayed end-of-turn maintenance must
+ 		// never revoke a foreground-control grant acquired by a later prompt.
+ 		const computerControlRevocation =
+@@ -5381,7 +5418,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 					return;
+ 				}
+ 			}
+-			if (signal.aborted) {
++			if (signal.aborted || this.#abortInProgress || this.#isDisposed) {
+ 				options?.onSkip?.("aborted");
+ 				return;
+ 			}
+@@ -5524,6 +5561,14 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 					this.#skipAgentContinue("should-continue-false", request);
+ 					return;
+ 				}
++				if (options?.applyBeforeNextUserTurn) {
++					try {
++						await this.#runBeforeNextUserTurn();
++					} catch (error) {
++						options?.onError?.(error);
++						return;
++					}
++				}
+ 
+ 				for (;;) {
+ 					const active = this.#activeAgentContinue;
+@@ -5612,6 +5657,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 				delayMs: 100,
+ 				generation: options.generation,
+ 				shouldContinue: () => this.agent.hasQueuedMessages(),
++				applyBeforeNextUserTurn: true,
+ 			});
+ 			return true;
+ 		}
+@@ -5655,6 +5701,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 						source: "auto-continue-queued-message",
+ 						generation,
+ 						shouldContinue: () => this.agent.hasQueuedMessages(),
++						applyBeforeNextUserTurn: true,
+ 					});
+ 					return;
+ 				}
+@@ -5856,6 +5903,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		options?: AgentEndSettleOptions,
+ 	): Promise<void> {
+ 		this.#settledAgentEnd = event;
++		if (!options?.willContinue) await this.#afterUserTurn?.();
+ 		this.#emitRunState("idle");
+ 		// Tagged isTerminal so subscribers can tell final settles from scheduled
+ 		// continuations, and `yielded` so they can tell the agent's own follow-up
+@@ -5961,6 +6009,33 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		await this.#extensionRunner.emit(mapped);
+ 	}
+ 
++	/**
++	 * Hosts such as Harness apply deferred session model/thinking changes here.
++	 * Invoked at the start of the next user prompt, queued follow-up drain, or
++	 * manual retry — not on 503 auto-retry `agent.continue()`.
++	 */
++	setBeforeNextUserTurn(hook: (() => Promise<void>) | undefined): void {
++		this.#beforeNextUserTurn = hook;
++	}
++
++	/** Harness persists its workspace boundary before publishing the completed turn. */
++	setAfterUserTurn(hook: (() => Promise<void>) | undefined): void {
++		this.#afterUserTurn = hook;
++	}
++
++	/** Presentation-neutral reset consent; undefined retains native TUI behavior. */
++	setResetConsentHandler(
++		handler:
++			| ((input: { provider: "anthropic" | "openai-codex"; message: string }) => Promise<"Yes" | "No" | undefined>)
++			| undefined,
++	): void {
++		this.#resetConsentHandler = handler;
++	}
++
++	async #runBeforeNextUserTurn(): Promise<void> {
++		await this.#beforeNextUserTurn?.();
++	}
++
+ 	/**
+ 	 * Subscribe to agent events.
+ 	 * Session persistence is handled internally (saves messages on message_end).
+@@ -6801,6 +6876,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 
+ 	/** Drop the in-memory conversation state after the terminal dispose flush. */
+ 	#releaseRetainedSessionMemory(): void {
++		this.#heldQueueGroups.length = 0;
+ 		this.#releaseQueuedTtsrReservations();
+ 		this.agent.reset();
+ 		this.#tools.releaseRestoredTranscript();
+@@ -7628,6 +7704,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 
+ 	/** Cancel active manual, automatic, and handoff maintenance, preserving an optional source reason. */
+ 	abortCompaction(reason?: unknown): void {
++		this.#harnessQueueBarrierAbort?.();
+ 		void this.#maintenance.abortCompaction(reason);
+ 	}
+ 
+@@ -7683,6 +7760,30 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	}
+ 
+ 	/** All messages including custom types like BashExecutionMessage */
++	/** Shared native tool context for typed Harness services; never creates a second session. */
++	get harnessEvalKernelOwnerId(): string | undefined {
++		return this.harnessToolSession?.getEvalKernelOwnerId?.() ?? undefined;
++	}
++
++	getHarnessLinkSchemes(): string[] {
++		return this.extensionRunner?.getLinkSchemes(true) ?? [];
++	}
++
++	async activateHarnessLink(url: string): Promise<boolean> {
++		return (
++			(await this.extensionRunner?.emitLinkActivate(url, createDefaultToolUiContext(this.sessionId), true)) ?? false
++		);
++	}
++
++	async renameHarnessTitle(title: string): Promise<string | null> {
++		await this.sessionManager.setSessionName(title, "user");
++		return this.sessionManager.getSessionName() ?? null;
++	}
++
++	get harnessToolSession(): ToolSession | undefined {
++		return this.#evalToolSession;
++	}
++
+ 	get messages(): AgentMessage[] {
+ 		return this.agent.state.messages;
+ 	}
+@@ -8564,9 +8665,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 
+ 		const promptAttribution = options?.attribution ?? (options?.synthetic ? "agent" : "user");
+ 
+-		// If streaming, queue via steer()/followUp()/aside based on option
+-		if (this.isStreaming) {
+-			const streamingBehavior = options?.streamingBehavior;
++		// Streaming and queued maintenance admit user follow-ups through the same prepared group path.
++		if (this.isStreaming || (this.#harnessQueueBarrier && !options?.synthetic)) {
++			const streamingBehavior = options?.streamingBehavior ?? (this.#harnessQueueBarrier ? "followUp" : undefined);
+ 			if (!streamingBehavior) {
+ 				// Busy because the agent owns a turn: that turn supersedes the interrupted
+ 				// one (after compaction it is the queued-message drain). Busy only from
+@@ -8581,7 +8682,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 			const queued = await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
+ 				timestamp: submittedAt,
+ 				attribution: promptAttribution,
+-				prependMessages: prependNotices,
++				prependMessages: [...(options?.prependMessages ?? []), ...prependNotices],
+ 				rawText: typedText,
+ 				onPromptQueued: options?.onPromptQueued,
+ 				onPromptAdmitted: options?.onPromptAdmitted,
+@@ -8713,21 +8814,17 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		let dispatched = false;
+ 		const refusalBeforeDispatch = this.#costCapRefusal;
+ 		try {
++			const injected = [
++				...(options?.prependMessages ?? []),
++				...preludeMessages,
++				...keywordNotices,
++				...attachmentSourceNotices,
++				...(imageDescriptionNotice ? [imageDescriptionNotice] : []),
++			];
+ 			dispatched = await this.#promptWithMessage(message, expandedText, {
+ 				...options,
+ 				images: normalizedImages,
+-				prependMessages:
+-					preludeMessages.length > 0 ||
+-					keywordNotices.length > 0 ||
+-					attachmentSourceNotices.length > 0 ||
+-					imageDescriptionNotice
+-						? [
+-								...preludeMessages,
+-								...keywordNotices,
+-								...attachmentSourceNotices,
+-								...(imageDescriptionNotice ? [imageDescriptionNotice] : []),
+-							]
+-						: undefined,
++				prependMessages: injected.length > 0 ? injected : undefined,
+ 			});
+ 		} catch (error) {
+ 			turnError = error;
+@@ -9126,6 +9223,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 			acceptTerminalEmptyStop?: boolean;
+ 		},
+ 	): Promise<boolean> {
++		if (message.role === "user") {
++			await this.#runBeforeNextUserTurn();
++		}
+ 		// Returns false when the prompt was dropped before reaching the agent —
+ 		// every pre-dispatch bail (generation bump from abort, disposal, usage
+ 		// preflight denial) exits silently, and prompt() uses the outcome to hand
+@@ -9410,19 +9510,28 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	 * `onRouted` fires once the command is found, before its handler runs.
+ 	 */
+ 	async #tryExecuteExtensionCommand(text: string, onRouted?: () => void): Promise<boolean> {
+-		if (!this.#extensionRunner) return false;
+-
+ 		// Parse command name and args
+ 		const spaceIndex = text.indexOf(" ");
+ 		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+ 		const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
++		return this.#executeExtensionCommand(commandName, args, onRouted);
++	}
++
++	async #executeExtensionCommand(
++		commandName: string,
++		args: string,
++		onRouted?: () => void,
++		ui?: ExtensionUIContext,
++	): Promise<boolean> {
++		if (!this.#extensionRunner) return false;
+ 
+ 		const command = this.#extensionRunner.getCommand(commandName);
+ 		if (!command) return false;
+ 		onRouted?.();
+ 
+ 		// Get command context from extension runner (includes session control methods)
+-		const ctx = this.#extensionRunner.createCommandContext();
++		const base = this.#extensionRunner.createCommandContext();
++		const ctx = ui ? { ...base, ui, hasUI: true } : base;
+ 
+ 		try {
+ 			await this.#extensionRunner.runScoped(() => command.handler(args, ctx));
+@@ -9530,12 +9639,28 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	 * If the command returns void, returns empty string to indicate it was handled.
+ 	 */
+ 	async #tryExecuteCustomCommand(text: string): Promise<string | null> {
+-		if (this.#customCommands.length === 0 && this.#mcpPromptCommands.length === 0) return null;
+-
+ 		// Parse command name and args
+ 		const spaceIndex = text.indexOf(" ");
+ 		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+ 		const argsString = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
++		return this.#executeCustomCommand(commandName, argsString);
++	}
++
++	/** Typed Harness dispatch shares the native command handlers, including Review's repository picker. */
++	async invokeHarnessCommand(commandName: string, args: string): Promise<boolean> {
++		const ui = createDefaultToolUiContext(this.sessionId);
++		if (await this.#executeExtensionCommand(commandName, args, undefined, ui)) return false;
++		const result = await this.#executeCustomCommand(commandName, args, ui);
++		if (result === null) throw new Error(`Command ${commandName} is no longer registered`);
++		return result ? this.prompt(result, { runCommands: false }) : false;
++	}
++
++	async #executeCustomCommand(
++		commandName: string,
++		argsString: string,
++		ui?: ExtensionUIContext,
++	): Promise<string | null> {
++		if (this.#customCommands.length === 0 && this.#mcpPromptCommands.length === 0) return null;
+ 
+ 		// Find matching command
+ 		const loaded =
+@@ -9547,6 +9672,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		const baseCtx = this.#createCommandContext();
+ 		const ctx = {
+ 			...baseCtx,
++			...(ui ? { ui, hasUI: true } : {}),
+ 			hasQueuedMessages: baseCtx.hasPendingMessages,
+ 		} as unknown as CustomCommandContext;
+ 
+@@ -9589,6 +9715,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		await this.#queueUserMessage(expandedText, images, "steer", {
+ 			timestamp: submittedAt,
+ 			attribution: options?.attribution,
++			prependMessages: options?.prependMessages,
+ 			rawText: text,
+ 			onPromptQueued: options?.onPromptQueued,
+ 		});
+@@ -9615,6 +9742,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 			await this.#queueUserMessage(expandedText, images, "followUp", {
+ 				timestamp: submittedAt,
+ 				attribution: options?.attribution,
++				prependMessages: options?.prependMessages,
+ 				rawText: text,
+ 				onPromptQueued: options?.onPromptQueued,
+ 			});
+@@ -9870,13 +9998,21 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		) {
+ 			return false;
+ 		}
++		if (mode === "aside" && (await this.#sessionGenerationChanged(sessionGeneration))) return false;
++		const userMessage: AgentMessage = {
++			role: "user",
++			content,
++			attribution,
++			timestamp: timestamp ?? Date.now(),
++			...(mode === "steer" ? { steering: true } : {}),
++		};
++		const records: AgentMessage[] = [...prependMessages, ...attachmentSourceNotices];
++		if (imageDescriptionNotice) records.push(imageDescriptionNotice);
++		records.push(userMessage);
++		this.#queuedMessageRawText.set(userMessage, rawText);
++		const groupId = this.#queuedMessageId(userMessage);
++		for (const message of records) this.#queuedMessageIds.set(message, groupId);
+ 		if (mode === "aside") {
+-			if (await this.#sessionGenerationChanged(sessionGeneration)) return false;
+-			const records: AgentMessage[] = [...prependMessages, ...attachmentSourceNotices];
+-			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
+-			const userMessage: AgentMessage = { role: "user", content, attribution, timestamp: timestamp ?? Date.now() };
+-			this.#queuedMessageRawText.set(userMessage, rawText);
+-			records.push(userMessage);
+ 			this.#irc.queueAside(records);
+ 			options?.onPromptAdmitted?.();
+ 			// The awaits above (image normalization / vision description) can span the run's
+@@ -9886,56 +10022,28 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 			this.#resumeStrandedIrcAsides();
+ 			return true;
+ 		}
++		if (mode === "followUp" && this.#holdHarnessFollowUp(records)) {
++			options?.onPromptQueued?.(records);
++			options?.onPromptAdmitted?.();
++			return true;
++		}
+ 		this.#allowQueuedMessageDrainRetry();
+ 		// Publish the complete group without yielding: removal owns contiguous companions.
+ 		// The session-agent notice rides via prependMessages (from prompt()),
+ 		// so it arrives alongside the user message in the same turn (#14093).
+-		let userMessage: AgentMessage;
+ 		if (mode === "followUp") {
+-			for (const notice of prependMessages) this.agent.followUp(notice);
+-			for (const notice of attachmentSourceNotices) this.agent.followUp(notice);
+-			if (imageDescriptionNotice) this.agent.followUp(imageDescriptionNotice);
+-			userMessage = {
+-				role: "user",
+-				content,
+-				attribution,
+-				timestamp: timestamp ?? Date.now(),
+-			};
+-			this.#queuedMessageRawText.set(userMessage, rawText);
+-			this.agent.followUp(userMessage);
++			for (const message of records) this.agent.followUp(message);
+ 		} else {
+-			for (const notice of prependMessages) this.agent.steer(notice);
+-			for (const notice of attachmentSourceNotices) this.agent.steer(notice);
+-			if (imageDescriptionNotice) this.agent.steer(imageDescriptionNotice);
+-			userMessage = {
+-				role: "user",
+-				content,
+-				steering: true,
+-				attribution,
+-				timestamp: timestamp ?? Date.now(),
+-			};
+-			this.#queuedMessageRawText.set(userMessage, rawText);
+-			this.agent.steer(userMessage);
++			for (const message of records) this.agent.steer(message);
+ 			// Wake any listener parked on steering arrival (the ACP permission
+ 			// gate): the message is on the queue now, so its wait ends even
+ 			// though the streaming boundary poll has not run yet. The whole
+ 			// admitted group rides along so the gate promotes exactly these
+ 			// messages — never an agent-authored steer that happened to be
+ 			// enqueued in the same window without firing the signal.
+-			this.#fireSteeringArrival([
+-				...prependMessages,
+-				...attachmentSourceNotices,
+-				...(imageDescriptionNotice ? [imageDescriptionNotice] : []),
+-				userMessage,
+-			]);
++			this.#fireSteeringArrival(records);
+ 		}
+-		// The optional call skips building the group when no caller asked for it.
+-		options?.onPromptQueued?.([
+-			...prependMessages,
+-			...attachmentSourceNotices,
+-			...(imageDescriptionNotice ? [imageDescriptionNotice] : []),
+-			userMessage,
+-		]);
++		options?.onPromptQueued?.(records);
+ 		options?.onPromptAdmitted?.();
+ 		// joinActiveTurn admission must never start an autonomous turn: the
+ 		// live run owns delivery, and an idle queue stays put until the host
+@@ -10105,6 +10213,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		this.#queuedMessageDrainScheduled = true;
+ 		this.#scheduleAgentContinue({
+ 			source: "queued-message-drain",
++			applyBeforeNextUserTurn: true,
+ 			shouldContinue: () => {
+ 				this.#queuedMessageDrainScheduled = false;
+ 				return (
+@@ -10364,6 +10473,16 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 			this.#resumeStrandedIrcAsides();
+ 			return;
+ 		}
++		const preparedGroup = [
++			...prependMessages,
++			...(descriptionNotice ? [descriptionNotice] : []),
++			normalizedAppMessage,
++		];
++		if (deliverAs === "followUp" && this.#holdHarnessFollowUp(preparedGroup)) {
++			onPromptQueued?.(preparedGroup);
++			onPromptAdmitted?.();
++			return;
++		}
+ 		this.#allowQueuedMessageDrainRetry();
+ 		// Keyword notices and their user message must enter the queue in one synchronous phase.
+ 		if (deliverAs === "followUp") {
+@@ -10697,15 +10816,24 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	 *  `forInterrupt` also withdraws input the run already dequeued but never recorded — live-steered
+ 	 *  into the aborted response, or taken for its next model call — and treats it as queued ahead of
+ 	 *  the rest (it was queued first). */
+-	clearQueue(options?: { forInterrupt?: boolean }): {
++	clearQueue(options?: { forInterrupt?: boolean; preserveGroups?: boolean }): {
+ 		steering: RestoredQueuedMessage[];
+ 		followUp: RestoredQueuedMessage[];
+ 	} {
+ 		const withdrawn = options?.forInterrupt ? this.agent.withdrawUndeliveredQueuedMessages() : undefined;
+ 		const steeringAll = [...(withdrawn?.steering ?? []), ...this.agent.peekSteeringQueue()];
+ 		const followUpAll = [...(withdrawn?.followUp ?? []), ...this.agent.peekFollowUpQueue()];
+-		const steering = steeringAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
+-		const followUp = followUpAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
++		if (options?.preserveGroups) {
++			for (const [queue, messages] of [
++				["steering", steeringAll],
++				["followUp", followUpAll],
++			] as const) {
++				for (const group of this.#queuedUserGroups(messages))
++					this.#heldQueueGroups.push({ sessionId: this.sessionId, queue, messages: group.messages });
++			}
++		}
++		const steering = this.#queuedUserGroups(steeringAll).map(group => toRestoredQueuedMessage(group.anchor));
++		const followUp = this.#queuedUserGroups(followUpAll).map(group => toRestoredQueuedMessage(group.anchor));
+ 		const recordable = (m: AgentMessage): boolean =>
+ 			m.role !== "developer" && isDisplayableQueuedMessage(m) && !isUserAuthoredQueuedMessage(m);
+ 		const recordedOnInterrupt = new Set<AgentMessage>();
+@@ -10759,6 +10887,39 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		);
+ 	}
+ 
++	beginHarnessQueueBarrier(id: string, onAbort: () => void): void {
++		this.#harnessQueueBarrier = id;
++		this.#harnessQueueBarrierAbort = onAbort;
++	}
++	get hasHarnessQueueBarrier(): boolean {
++		return this.#harnessQueueBarrier !== undefined;
++	}
++	#holdHarnessFollowUp(messages: AgentMessage[]): boolean {
++		if (!this.#harnessQueueBarrier || !messages.some(isUserAuthoredQueuedMessage)) return false;
++		this.#heldQueueGroups.push({
++			sessionId: this.sessionId,
++			queue: "followUp",
++			messages,
++			barrier: this.#harnessQueueBarrier,
++		});
++		return true;
++	}
++	releaseHarnessQueueBarrier(id: string, restore: boolean): void {
++		if (this.#harnessQueueBarrier === id) {
++			this.#harnessQueueBarrier = undefined;
++			this.#harnessQueueBarrierAbort = undefined;
++		}
++		if (!restore) return;
++		const ids = this.#heldQueueGroups
++			.filter(group => group.sessionId === this.sessionId && group.barrier === id)
++			.flatMap(group => this.#queuedUserGroups(group.messages).map(row => row.id));
++		for (const queued of ids) this.restoreQueuedMessage(queued);
++	}
++
++	get hasHeldQueuedMessages(): boolean {
++		return this.#heldQueueGroups.some(group => group.sessionId === this.sessionId);
++	}
++
+ 	/** Whether an empty submit should interrupt the streaming turn: displayable input is
+ 	 *  queued, or live steering sits in the in-flight response, which the abort requeues
+ 	 *  for the continuation turn. */
+@@ -10768,17 +10929,154 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 
+ 	/** Chip texts for the queue display. Steering live steering took for the streaming response
+ 	 *  stays listed until the transcript records it, when the model actually switches to it. */
++
++	/** Stable object identities are private to this Runtime generation, never text matched. */
++	#queuedMessageId(message: AgentMessage): string {
++		let id = this.#queuedMessageIds.get(message);
++		if (!id) {
++			id = Bun.randomUUIDv7();
++			this.#queuedMessageIds.set(message, id);
++		}
++		return id;
++	}
++	#queuedUserGroups(messages: readonly AgentMessage[]) {
++		const groups: Array<{ id: string; messages: AgentMessage[]; anchor: AgentMessage }> = [];
++		for (let index = messages.length - 1; index >= 0; index--) {
++			const anchor = messages[index];
++			if (!isUserAuthoredQueuedMessage(anchor)) continue;
++			const start = this.#queuedUserGroupStart(messages, index);
++			const id = this.#queuedMessageId(anchor);
++			const group = messages.slice(start, index + 1);
++			for (const message of group) this.#queuedMessageIds.set(message, id);
++			groups.push({ id, messages: group, anchor });
++			index = start;
++		}
++		return groups.reverse();
++	}
++	#queuedMessageGroups() {
++		const rows: Array<{
++			id: string;
++			queue: "steering" | "followUp";
++			state: "queued" | "inFlight" | "held";
++			messages: AgentMessage[];
++			anchor: AgentMessage;
++			heldFor?: "compaction";
++		}> = [];
++		for (const [queue, state, messages] of [
++			["steering", "inFlight", this.agent.peekLiveSteeredMessages()],
++			["steering", "queued", this.agent.peekSteeringQueue()],
++			["followUp", "queued", this.agent.peekFollowUpQueue()],
++		] as const) {
++			for (const group of this.#queuedUserGroups(messages)) rows.push({ ...group, queue, state });
++		}
++		for (const held of this.#heldQueueGroups)
++			if (held.sessionId === this.sessionId)
++				for (const group of this.#queuedUserGroups(held.messages))
++					rows.push({
++						...group,
++						queue: held.queue,
++						state: "held",
++						...(held.barrier && held.barrier === this.#harnessQueueBarrier
++							? { heldFor: "compaction" as const }
++							: {}),
++					});
++		return rows;
++	}
++	getHarnessQueueSnapshot() {
++		return this.#queuedMessageGroups()
++			.filter(row => row.state !== "held")
++			.map(({ id, queue, state, anchor }) => ({
++				id,
++				queue,
++				state: state === "inFlight" ? ("delivering" as const) : ("pending" as const),
++				text: this.#queuedMessageRawText.get(anchor) ?? queueChipText(anchor),
++				imageCount: toRestoredQueuedMessage(anchor).images?.length ?? 0,
++			}));
++	}
++	getHarnessQueueDraft(id: string) {
++		const row = this.#queuedMessageGroups().find(row => row.id === id);
++		if (!row || row.state !== "queued") return undefined;
++		const draft = toRestoredQueuedMessage(row.anchor);
++		return { ...draft, text: this.#queuedMessageRawText.get(row.anchor) ?? draft.text };
++	}
++	steerHarnessQueuedMessage(id: string): boolean {
++		const row = this.#queuedMessageGroups().find(row => row.id === id);
++		return !!row && row.state === "queued" && (row.queue === "steering" || this.promoteQueuedMessage({ id }));
++	}
++	removeHarnessQueuedMessage(id: string): boolean {
++		const row = this.#queuedMessageGroups().find(row => row.id === id);
++		return !!row && row.state === "queued" && this.removeQueuedMessage({ id }, row.queue);
++	}
++
+ 	getQueuedMessages(): { steering: readonly string[]; followUp: readonly string[]; liveSteered: number } {
+-		const liveSteered = this.agent.peekLiveSteeredMessages().filter(isUserAuthoredQueuedMessage).length;
++		const live = this.#queuedUserGroups(this.agent.peekLiveSteeredMessages());
+ 		return {
+-			steering: [...this.agent.peekLiveSteeredMessages(), ...this.agent.peekSteeringQueue()]
+-				.filter(isUserAuthoredQueuedMessage)
+-				.map(queueChipText),
+-			followUp: this.agent.peekFollowUpQueue().filter(isUserAuthoredQueuedMessage).map(queueChipText),
+-			liveSteered,
++			steering: [...live, ...this.#queuedUserGroups(this.agent.peekSteeringQueue())].map(group =>
++				queueChipText(group.anchor),
++			),
++			followUp: this.#queuedUserGroups(this.agent.peekFollowUpQueue()).map(group => queueChipText(group.anchor)),
++			liveSteered: live.length,
+ 		};
+ 	}
+ 
++	/** Stable identities refer to the native message object, never to display text or position. */
++	getQueuedMessageEntries(): QueuedMessageEntry[] {
++		return this.#queuedMessageGroups().map(({ id, queue, state, anchor, heldFor }) => ({
++			...(heldFor ? { heldFor } : {}),
++			id,
++			queue,
++			state,
++			text: queueChipText(anchor),
++			imageCount: toRestoredQueuedMessage(anchor).images?.length ?? 0,
++			editable: state !== "inFlight" && anchor.role === "user",
++		}));
++	}
++
++	/** Edit prepared text in place. Keep images, attribution and hidden companions; never replay commands. */
++	editQueuedMessage(id: string, queue: "steering" | "followUp", expectedText: string, text: string): boolean {
++		const held = this.#heldQueueGroups.find(
++			group =>
++				group.sessionId === this.sessionId &&
++				group.queue === queue &&
++				group.messages.some(message => this.#queuedMessageIds.get(message) === id),
++		);
++		const messages =
++			held?.messages ?? (queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue());
++		const index = this.#findQueuedUserMessage(messages, { id });
++		const message = messages[index];
++		if (!message || message.role !== "user" || queueChipText(message) !== expectedText) return false;
++		if (!text.trim() || text.length > 32768) throw new Error("Invalid queue text");
++		const images = typeof message.content === "string" ? [] : message.content.filter(part => part.type !== "text");
++		message.content = [{ type: "text", text }, ...images];
++		this.#queuedMessageRawText.set(message, text);
++		if (!held) {
++			this.agent.replaceQueue(queue, [...messages]);
++			this.#reconcileQueuedMessageDrain();
++		}
++		return true;
++	}
++
++	/** Return a held original group to execution only after an explicit operator action. */
++	restoreQueuedMessage(id: string): boolean {
++		const index = this.#heldQueueGroups.findIndex(
++			group =>
++				group.sessionId === this.sessionId &&
++				group.messages.some(message => this.#queuedMessageIds.get(message) === id),
++		);
++		if (index < 0) return false;
++		if (this.#harnessQueueBarrier) {
++			return false;
++		}
++		const [group] = this.#heldQueueGroups.splice(index, 1);
++		this.#advisors.autoResumeSuppressed = false;
++		if (group.queue === "steering")
++			this.agent.moveFollowUpsToSteering([...this.agent.peekFollowUpQueue()], group.messages);
++		else this.agent.replaceQueue("followUp", [...this.agent.peekFollowUpQueue(), ...group.messages]);
++		this.#allowQueuedMessageDrainRetry();
++		this.#scheduleIdleQueueDrain();
++		return true;
++	}
++
+ 	/** Last {@link getQueuedMessages} snapshot emitted as a `queue_update` event.
+ 	 *  Coalesces the agent's internal `onQueueChange` notification down to the
+ 	 *  externally observable transitions RPC/ACP/TUI subscribers actually care
+@@ -10821,7 +11119,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	 * already delivered target changes nothing; repeated calls may remove further
+ 	 * duplicates.
+ 	 */
+-	removeQueuedMessage(text: string, queue: "steering" | "followUp"): boolean {
++	removeQueuedMessage(text: string | { id: string }, queue: "steering" | "followUp"): boolean {
+ 		return this.takeQueuedMessage(text, queue) !== undefined;
+ 	}
+ 
+@@ -10843,7 +11141,19 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	 * {@link removeQueuedMessage}, returning the removed message as editor-restorable
+ 	 * content (its chip text and images); undefined when nothing matched.
+ 	 */
+-	takeQueuedMessage(text: string, queue: "steering" | "followUp"): RestoredQueuedMessage | undefined {
++	takeQueuedMessage(text: string | { id: string }, queue: "steering" | "followUp"): RestoredQueuedMessage | undefined {
++		if (typeof text !== "string") {
++			const held = this.#heldQueueGroups.findIndex(
++				group =>
++					group.sessionId === this.sessionId &&
++					group.queue === queue &&
++					group.messages.some(message => this.#queuedMessageIds.get(message) === text.id),
++			);
++			if (held >= 0) {
++				const [group] = this.#heldQueueGroups.splice(held, 1);
++				return toRestoredQueuedMessage(group.messages[group.messages.length - 1]);
++			}
++		}
+ 		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
+ 		const index = this.#findQueuedUserMessage(selected, text);
+ 		if (index < 0) return undefined;
+@@ -10860,7 +11170,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	 * {@link removeQueuedMessage}; agent-attributed handoffs are never promoted. A missing
+ 	 * or already delivered target changes nothing; repeated calls may promote duplicates.
+ 	 */
+-	promoteQueuedMessage(text: string): boolean {
++	promoteQueuedMessage(text: string | { id: string }): boolean {
+ 		const followUp = this.agent.peekFollowUpQueue();
+ 		const index = this.#findQueuedUserMessage(followUp, text);
+ 		if (index < 0) return false;
+@@ -10886,7 +11196,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	 * matches the raw text the caller originally submitted first, then the queued chip text
+ 	 * itself (exact); -1 when nothing matches.
+ 	 */
+-	#findQueuedUserMessage(queue: readonly AgentMessage[], text: string): number {
++	#findQueuedUserMessage(queue: readonly AgentMessage[], text: string | { id: string }): number {
++		if (typeof text !== "string")
++			return queue.findLastIndex(
++				message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageIds.get(message) === text.id,
++			);
+ 		let index = queue.findIndex(
+ 			message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageRawText.get(message) === text,
+ 		);
+@@ -10899,7 +11213,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	/** Companions are inserted contiguously before their user; this is where that group starts. */
+ 	#queuedUserGroupStart(queue: readonly AgentMessage[], userIndex: number): number {
+ 		let start = userIndex;
+-		while (start > 0 && isHiddenUserCompanion(queue[start - 1])) start--;
++		const id = this.#queuedMessageIds.get(queue[userIndex]);
++		while (
++			start > 0 &&
++			(isHiddenUserCompanion(queue[start - 1]) ||
++				(id !== undefined && this.#queuedMessageIds.get(queue[start - 1]) === id))
++		)
++			start--;
+ 		return start;
+ 	}
+ 
+@@ -11643,7 +11963,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		deliverQueuedMessages?: boolean;
+ 		/** Internal `/compact` startup keeps the manual-compaction marker alive while aborting the active turn. */
+ 		preserveCompaction?: boolean;
++		/** Harness keeps unsubmitted input groups in Runtime until explicitly restored or removed. */
++		preserveQueuedInput?: boolean;
+ 	}): Promise<void> {
++		if (!options?.preserveCompaction) this.#harnessQueueBarrierAbort?.();
++		if (options?.preserveQueuedInput) this.clearQueue({ forInterrupt: true, preserveGroups: true });
+ 		const userInterrupt = options?.reason === USER_INTERRUPT_LABEL;
+ 		this.#pendingAbortErrorId = userInterrupt ? AIError.create(AIError.Flag.UserInterrupt) : undefined;
+ 		// Latch only when the interrupt stops something; an idle Esc would otherwise fold
+@@ -11755,6 +12079,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 				} else this.#recordWithoutTurn([message]);
+ 			}
+ 		} finally {
++			if (options?.preserveQueuedInput) this.clearQueue({ forInterrupt: true, preserveGroups: true });
+ 			this.#abortInProgress = false;
+ 			this.#drainStrandedQueuedMessages();
+ 			if (forceQueuedDelivery) this.#forcedQueuedMessageDeliveryCount--;
+@@ -12907,6 +13232,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 
+ 	/** Retry the last failed assistant turn when the session is idle. */
+ 	async retry(): Promise<boolean> {
++		if (!this.isStreaming && !this.isCompacting) {
++			await this.#runBeforeNextUserTurn();
++		}
+ 		const didRetry = await this.#recovery.retry();
+ 		// A manual retry is the user resuming the run they interrupted, so it lifts the
+ 		// interrupt's auto-resume suppression the same way a typed prompt does.
+@@ -14218,6 +14546,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		options: {
+ 			summarize?: boolean;
+ 			customInstructions?: string;
++			exactLeaf?: boolean;
++			restoreRoot?: boolean;
+ 			/**
+ 			 * Opts into the two-phase `ask` toolResult re-answer protocol
+ 			 * (issue #5642): set only by the interactive `/tree` selector, which
+@@ -14269,7 +14599,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		// navigated straight onto the ask result), and must still return
+ 		// `reopenAsk` / branch the new answer instead of silently reporting a
+ 		// no-op (chatgpt-codex review on #5895).
+-		if (targetId === oldLeafId && !targetIsUserMessage && !(options.allowAskReopen && targetIsAskResult)) {
++		if (
++			targetId === oldLeafId &&
++			(options.exactLeaf || !targetIsUserMessage) &&
++			!options.restoreRoot &&
++			!(options.allowAskReopen && targetIsAskResult)
++		) {
+ 			return { cancelled: false };
+ 		}
+ 
+@@ -14411,7 +14746,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		// model consumes it, mirroring a live `ask` completion (issue #6483).
+ 		let isAskReanswerCompletion = false;
+ 
+-		if (isTranscriptEntry(targetEntry) && isUserRequestEntry(targetEntry)) {
++		if (options.restoreRoot) {
++			newLeafId = null;
++		} else if (options.exactLeaf) {
++			newLeafId = targetId;
++		} else if (isTranscriptEntry(targetEntry) && isUserRequestEntry(targetEntry)) {
+ 			// User request (plain prompt, or a user-invoked skill/collab prompt): leaf = parent
+ 			// (null if root), the draft the user typed goes back to the editor with its images.
+ 			newLeafId = targetEntry.parentId;
+@@ -14824,7 +15163,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		const settingsKey = provider === "anthropic" ? "claudeResets.autoRedeem" : "codexResets.autoRedeem";
+ 		const source = provider === "anthropic" ? "claude-auto-reset" : "codex-auto-reset";
+ 		const runner = this.#extensionRunner;
+-		if (!runner?.hasUI() || !this.#interactivePrompts) {
++		if (!this.#resetConsentHandler && (!runner?.hasUI() || !this.#interactivePrompts)) {
+ 			const approved = headlessApprovedResetActions(actions);
+ 			const waiting = actions.find(action => !approved.some(spend => spend.attemptKey === action.attemptKey));
+ 			if (waiting && !coordinator.notifiedKeys.has(waiting.attemptKey)) {
+@@ -14866,16 +15205,18 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 				? `Spend a saved ${providerLabel} rate-limit reset?\n${lines[0]}`
+ 				: `Spend ${actions.length} saved ${providerLabel} rate-limit resets?\n${lines.join("\n")}`;
+ 		try {
+-			const choice = await runner.getUIContext().select(question, [
+-				{
+-					label: "Yes",
+-					description: `Redeem now and remember yes for future eligible ${providerLabel} resets.`,
+-				},
+-				{
+-					label: "No",
+-					description: `Do not auto-redeem saved ${providerLabel} resets.`,
+-				},
+-			]);
++			const choice = this.#resetConsentHandler
++				? await this.#resetConsentHandler({ provider, message: question })
++				: await runner!.getUIContext().select(question, [
++						{
++							label: "Yes",
++							description: `Redeem now and remember yes for future eligible ${providerLabel} resets.`,
++						},
++						{
++							label: "No",
++							description: `Do not auto-redeem saved ${providerLabel} resets.`,
++						},
++					]);
+ 			if (choice === "Yes") {
+ 				if (provider === "anthropic") cfgClaudeResetsAutoRedeem.set(this.settings, "yes");
+ 				else cfgCodexResetsAutoRedeem.set(this.settings, "yes");
+@@ -15434,7 +15775,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 	 * @returns the archive path and member names, or `undefined` when the main
+ 	 * session has no messages.
+ 	 */
+-	async dumpSessionArchiveToTmpDir(): Promise<SessionDumpArchive | undefined> {
++	async dumpSessionArchiveToTmpDir(outputPath?: string): Promise<SessionDumpArchive | undefined> {
+ 		const messages = this.messages;
+ 		if (messages.length === 0) return undefined;
+ 		const entries: Array<readonly [string, string]> = [["session.md", `${this.formatSessionAsText()}\n`]];
+@@ -15477,7 +15818,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 			entries.push([`subagents/${key}.md`, `${text}\n`]);
+ 			subagentCount++;
+ 		}
+-		const filePath = path.join(os.tmpdir(), `omp-dump-${Snowflake.next()}.zip`);
++		const filePath = outputPath ?? path.join(os.tmpdir(), `omp-dump-${Snowflake.next()}.zip`);
+ 		await writeArchive(filePath, "zip", entries);
+ 		return { path: filePath, files: entries.map(([name]) => name), subagentCount, subagentError };
+ 	}
+diff --git a/packages/coding-agent/src/session/context-usage-runtime.ts b/packages/coding-agent/src/session/context-usage-runtime.ts
+index bcb2b2bcd8..f2333f705e 100644
+--- a/packages/coding-agent/src/session/context-usage-runtime.ts
++++ b/packages/coding-agent/src/session/context-usage-runtime.ts
+@@ -12,6 +12,7 @@ import type { AgentSession } from "./agent-session";
+ import { resolveSpeculationMethod } from "./compaction-methods";
+ import { estimateInlineSavings } from "./snapcompact-inline";
+ import { resolveModelCompactionSettings } from "./model-compaction-threshold";
++import { resolveSessionCompactionSettings } from "../harness/services/session-compaction-policy";
+ import { resolveSpeculationLeadTokens } from "./speculation-lead";
+ 
+ import { cfgSkillful } from "./settings";
+@@ -56,7 +57,7 @@ export function computeSessionContextBreakdown(
+ 		}
+ 	}
+ 	return computeContextBreakdown(session, {
+-		compaction: resolveModelCompactionSettings(session.settings, session.model),
++		compaction: resolveSessionCompactionSettings(session.settings, session.model, session.sessionManager),
+ 		sourceRevision: session.settings.revision,
+ 		skillful: cfgSkillful.get(session.settings),
+ 		snapcompact,
+diff --git a/packages/coding-agent/src/session/prewalk.ts b/packages/coding-agent/src/session/prewalk.ts
+index 08f8086306..b36eb3086f 100644
+--- a/packages/coding-agent/src/session/prewalk.ts
++++ b/packages/coding-agent/src/session/prewalk.ts
+@@ -407,9 +407,9 @@ export class PrewalkCoordinator {
+ 	}
+ 
+ 	/** Drops a pending prewalk hand-off (e.g. `prewalk.enabled` turned off); no-op when none is armed. */
+-	disarm(): void {
++	disarm(): boolean {
+ 		const active = this.#prewalk;
+-		if (!active) return;
++		if (!active) return false;
+ 		this.#scrubPlanNudge(undefined, true);
+ 		this.#clearPrewalkState();
+ 		this.#host.emitNotice(
+@@ -417,6 +417,7 @@ export class PrewalkCoordinator {
+ 			`Prewalk: disarmed; staying on the active model instead of switching to ${active.target.provider}/${active.target.id}.`,
+ 			"prewalk",
+ 		);
++		return true;
+ 	}
+ 
+ 	/** Arms a prewalk immediately for an explicit slash-command request; it takes over a matching auto arm. */
+diff --git a/packages/coding-agent/src/session/session-entries.ts b/packages/coding-agent/src/session/session-entries.ts
+index 7e65f1964c..c25735c499 100644
+--- a/packages/coding-agent/src/session/session-entries.ts
++++ b/packages/coding-agent/src/session/session-entries.ts
+@@ -22,6 +22,10 @@ export const SESSION_TITLE_SLOT_ENTRY_TYPE = "title";
+ 
+ export const TITLE_CHANGE_ENTRY_TYPE = "title_change";
+ 
++export const HARNESS_HOST_SESSION_ORIGIN = "harness-host";
++
++export type HarnessSessionOrigin = typeof HARNESS_HOST_SESSION_ORIGIN;
++
+ export type SessionTitleSource = "auto" | "user";
+ 
+ /** Fixed-width first-line slot carrying the mutable current session title. */
+@@ -72,6 +76,8 @@ export interface SessionHeader {
+ 	 * source: `history://`, `artifact://`, and `agent://` read them from there.
+ 	 */
+ 	seanceSource?: string;
++	/** Optional creation marker ignored by unpatched OMP readers. */
++	harnessOrigin?: HarnessSessionOrigin;
+ }
+ 
+ export interface NewSessionOptions {
+@@ -88,6 +94,10 @@ export interface NewSessionOptions {
+ 	additionalDirectories?: string[];
+ 	/** Directory for the new session file (and later `/new` sessions); defaults to the current session directory. */
+ 	sessionDir?: string;
++	/** Creation marker for a fresh session; never applied while opening an existing session. */
++	harnessOrigin?: HarnessSessionOrigin;
++	/** Reset inherited usage totals when forking a session. */
++	resetInheritedCost?: boolean;
+ }
+ 
+ export interface SessionEntryBase {
+diff --git a/packages/coding-agent/src/session/session-maintenance.ts b/packages/coding-agent/src/session/session-maintenance.ts
+index 64271eea64..253bb5cf79 100644
+--- a/packages/coding-agent/src/session/session-maintenance.ts
++++ b/packages/coding-agent/src/session/session-maintenance.ts
+@@ -126,7 +126,7 @@ import {
+ 	cfgContextPromotionEnabled,
+ 	cfgSnapcompactShape,
+ } from "./context-settings";
+-import { resolveModelCompactionSettings } from "./model-compaction-threshold";
++import { resolveSessionCompactionSettings } from "../harness/services/session-compaction-policy";
+ import { cfgProvidersOpenaiCodexDaybreak, cfgRetry } from "./settings";
+ 
+ export type CompactionCheckResult = Readonly<{
+@@ -624,7 +624,7 @@ export class SessionMaintenance {
+ 
+ 	/** Compaction policy in force for the active model (its `compaction.modelThresholds` entry applied). */
+ 	get #compactionSettings(): CompactionSettings {
+-		return resolveModelCompactionSettings(this.#host.settings, this.#model);
++		return resolveSessionCompactionSettings(this.#host.settings, this.#model, this.#host.sessionManager);
+ 	}
+ 
+ 	get #tokenizer() {
+@@ -4958,7 +4958,7 @@ export class SessionMaintenance {
+ 	#archiveTextBudget(model: Model): number | undefined {
+ 		const contextWindow = model.contextWindow ?? 0;
+ 		if (contextWindow <= 0) return undefined;
+-		const settings = resolveModelCompactionSettings(this.#host.settings, model);
++		const settings = resolveSessionCompactionSettings(this.#host.settings, model, this.#host.sessionManager);
+ 		return Math.floor(SNAPCOMPACT_POST_COMPACTION_TARGET * resolveThresholdTokens(contextWindow, settings));
+ 	}
+ 
+diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/coding-agent/src/session/session-manager.ts
+index 97c726b71c..10a1411d22 100644
+--- a/packages/coding-agent/src/session/session-manager.ts
++++ b/packages/coding-agent/src/session/session-manager.ts
+@@ -1,3 +1,5 @@
++import { splitCardTitle } from "../utils/title-card";
++import type { SessionTitleCard } from "../harness/session-titles-protocol";
+ import * as fs from "node:fs";
+ import * as path from "node:path";
+ import type {
+@@ -50,6 +52,7 @@ import {
+ 	buildSessionContext,
+ 	type SessionContext,
+ 	snapcompactHistoryBlockOptions,
++	getRestorableSessionModels,
+ } from "./session-context";
+ import {
+ 	type BranchSummaryEntry,
+@@ -76,6 +79,7 @@ import {
+ 	type SessionMessageEntry,
+ 	type SessionTitleSource,
+ 	type SessionTreeNode,
++	type HarnessSessionOrigin,
+ 	type ThinkingLevelChangeEntry,
+ 	TITLE_CHANGE_ENTRY_TYPE,
+ 	type TitleChangeEntry,
+@@ -963,7 +967,12 @@ export class SessionManager {
+ 	#titleUpdatedAt = "";
+ 	#hasTitleSlot = true;
+ 	#entries: SessionEntry[] = [];
++	#customEntryIndex: { entries: SessionEntry[]; length: number; byType: Map<string, CustomEntry[]> } | undefined;
+ 	#index = new SessionEntryIndex();
++	#reservedMessageIds: Array<{ role: "user" | "assistant" | "system"; id: string }> = [];
++	#reservedCustomMessageIds = new Map<string, string[]>();
++	#reservedCompactionIds: string[] = [];
++	#reservedMessageIdSet = new Set<string>();
+ 
+ 	/** File reflects all current entries; appends can go incrementally. */
+ 	#fileIsCurrent = false;
+@@ -1051,6 +1060,8 @@ export class SessionManager {
+ 	 * back to the most-recent session instead of being treated as a fresh crumb.
+ 	 */
+ 	#breadcrumbFresh = false;
++	/** Creation marker inherited by future `/new` sessions without mutating the currently opened header. */
++	#newSessionHarnessOrigin: HarnessSessionOrigin | undefined;
+ 	#sessionNameChangedCallbacks = new Set<() => void>();
+ 	#persistenceErrorCallbacks = new Set<(error: Error) => void>();
+ 	#persistenceNoticeCallbacks = new Set<(notice: SessionPersistenceNotice) => void>();
+@@ -2086,6 +2097,8 @@ export class SessionManager {
+ 			providerPromptCacheKey: options?.providerPromptCacheKey,
+ 			taskPromptCacheKey: options?.taskPromptCacheKey,
+ 		};
++		const harnessOrigin = options?.harnessOrigin ?? this.#newSessionHarnessOrigin;
++		if (harnessOrigin) this.#header.harnessOrigin = harnessOrigin;
+ 		const workspace = normalizeSessionWorkspace({
+ 			cwd: this.#cwd,
+ 			directories: options?.additionalDirectories ?? [],
+@@ -2098,6 +2111,7 @@ export class SessionManager {
+ 
+ 		this.#entries = [];
+ 		this.#index.clear();
++		this.clearReservedMessageIds();
+ 		this.#fileIsCurrent = false;
+ 		this.#rewriteRequired = false;
+ 		this.#loadedMalformedRecords = 0;
+@@ -2135,17 +2149,108 @@ export class SessionManager {
+ 		const repairedUsage = normalizeLoadedUsage(entries);
+ 		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
+ 		this.#index.rebuild(entries);
++		this.clearReservedMessageIds();
+ 	}
+ 
+-	#freshEntryFields(): { id: string; parentId: string | null; timestamp: string; runtime: RuntimeIdentity } {
++	#occupiedIds(): { has(id: string): boolean } {
++		return { has: id => this.#index.has(id) || this.#reservedMessageIdSet.has(id) };
++	}
++
++	#nextId(): string {
++		return generateId(this.#occupiedIds());
++	}
++
++	#takeReservedMessageId(role: "user" | "assistant" | "system"): string | undefined {
++		const index = this.#reservedMessageIds.findIndex(item => item.role === role);
++		if (index < 0) return undefined;
++		const [reserved] = this.#reservedMessageIds.splice(index, 1);
++		this.#reservedMessageIdSet.delete(reserved.id);
++		return reserved.id;
++	}
++
++	#freshEntryFields(id = this.#nextId()): {
++		id: string;
++		parentId: string | null;
++		timestamp: string;
++		runtime: RuntimeIdentity;
++	} {
+ 		return {
+-			id: generateId(this.#index),
++			id,
+ 			parentId: this.#index.leafId(),
+ 			timestamp: nowIso(),
+ 			runtime: currentRuntimeIdentity(),
+ 		};
+ 	}
+ 
++	/**
++	 * Reserve a SessionEntry id from the same `generateId` pool used by persist.
++	 * `appendMessage` for that role reuses the oldest matching reservation.
++	 */
++	reserveMessageId(role: "user" | "assistant" | "system"): string {
++		const id = this.#nextId();
++		this.#reservedMessageIdSet.add(id);
++		this.#reservedMessageIds.push({ role, id });
++		return id;
++	}
++
++	/** Reserve a visible custom message independently of the user/assistant message FIFO. */
++	reserveCustomMessageId(customType: string, timestamp: number): string {
++		const key = JSON.stringify([customType, timestamp]);
++		const id = this.#nextId();
++		this.#reservedMessageIdSet.add(id);
++		const ids = this.#reservedCustomMessageIds.get(key) ?? [];
++		ids.push(id);
++		this.#reservedCustomMessageIds.set(key, ids);
++		return id;
++	}
++
++	#takeReservedCustomMessageId(customType: string, timestamp: number | undefined): string | undefined {
++		if (timestamp === undefined) return undefined;
++		const key = JSON.stringify([customType, timestamp]);
++		const ids = this.#reservedCustomMessageIds.get(key);
++		const id = ids?.shift();
++		if (!ids?.length) this.#reservedCustomMessageIds.delete(key);
++		if (id) this.#reservedMessageIdSet.delete(id);
++		return id;
++	}
++
++	/** Allocate an entry id without enqueueing it for `appendMessage`. */
++	allocateEntryId(): string {
++		return this.#nextId();
++	}
++
++	/**
++	 * Reserve a SessionEntry id for a forthcoming `appendCompaction`.
++	 * Does not consume the message-id FIFO.
++	 */
++	reserveCompactionId(): string {
++		const id = this.#nextId();
++		this.#reservedMessageIdSet.add(id);
++		this.#reservedCompactionIds.push(id);
++		return id;
++	}
++
++	releaseCompactionId(id: string): void {
++		const index = this.#reservedCompactionIds.indexOf(id);
++		if (index < 0) return;
++		this.#reservedCompactionIds.splice(index, 1);
++		this.#reservedMessageIdSet.delete(id);
++	}
++
++	#takeReservedCompactionId(): string | undefined {
++		const id = this.#reservedCompactionIds.shift();
++		if (id === undefined) return undefined;
++		this.#reservedMessageIdSet.delete(id);
++		return id;
++	}
++
++	clearReservedMessageIds(): void {
++		this.#reservedCustomMessageIds.clear();
++		this.#reservedMessageIds.length = 0;
++		this.#reservedCompactionIds.length = 0;
++		this.#reservedMessageIdSet.clear();
++	}
++
+ 	#setLeaf(id: string | null): void {
+ 		this.#index.setLeaf(id);
+ 		const batch = this.#atomicEntryBatch;
+@@ -3252,6 +3357,10 @@ export class SessionManager {
+ 		return this.#sessionId;
+ 	}
+ 
++	setNewSessionHarnessOrigin(origin: HarnessSessionOrigin | undefined): void {
++		this.#newSessionHarnessOrigin = origin;
++	}
++
+ 	getSessionFile(): string | undefined {
+ 		return this.#sessionFile;
+ 	}
+@@ -3414,6 +3523,70 @@ export class SessionManager {
+ 		return this.#sessionName;
+ 	}
+ 
++	/**
++	 * The card index of the current title, if it has one. Read from the latest
++	 * title change rather than stored beside the title (header, title slot,
++	 * listings): a rename that passes no card drops it, and a resumed session
++	 * gets it back from its own entries.
++	 */
++	getSessionTitleCard(): SessionTitleCard | undefined {
++		return SessionManager.#cardForTitle(this.#sessionName, this.#entries);
++	}
++
++	static #cardForTitle(title: string | undefined, entries: readonly FileEntry[]): SessionTitleCard | undefined {
++		if (!title) return undefined;
++		const parsed = splitCardTitle(title);
++		if (parsed) return { code: parsed.code, emoji: parsed.icon };
++		// Legacy Harness sessions kept the card beside the title.
++		for (let i = entries.length - 1; i >= 0; i--) {
++			const entry = entries[i]!;
++			if (entry.type !== TITLE_CHANGE_ENTRY_TYPE) continue;
++			if (entry.title !== title || !("card" in entry) || !entry.card || typeof entry.card !== "object")
++				return undefined;
++			const old = entry.card as Record<string, unknown>;
++			if (typeof old.code !== "string") return undefined;
++			return {
++				code: old.code,
++				...(typeof old.emoji === "string" ? { emoji: old.emoji } : {}),
++				...(typeof old.nf === "string" ? { nf: old.nf } : {}),
++			};
++		}
++		return undefined;
++	}
++
++	/** Read only title metadata without acquiring session ownership or writing migrations. */
++	static async peekSessionTitle(
++		filePath: string,
++		storage: SessionStorage = new FileSessionStorage(),
++	): Promise<{ sessionId: string; title?: string; source?: SessionTitleSource; card?: SessionTitleCard }> {
++		const [prefix, suffix] = await storage.readTextSlices(filePath, 64 * 1024, 64 * 1024);
++		const loaded = parseSessionContent(prefix);
++		const header = loaded.entries[0];
++		if (loaded.invalidHeader || !header || header.type !== "session")
++			throw new Error("The saved session is incomplete or damaged; title inspection cannot continue");
++		let card = SessionManager.#cardForTitle(header.title, []);
++		if (header.title && !card) {
++			const tail = parseSessionContent(suffix.slice(suffix.indexOf("\n") + 1)).entries;
++			let latest = tail.findLast(entry => entry.type === TITLE_CHANGE_ENTRY_TYPE);
++			if (!latest) {
++				await visitEntriesFromFile(
++					filePath,
++					entry => {
++						if (entry.type === TITLE_CHANGE_ENTRY_TYPE) latest = entry;
++					},
++					storage,
++				);
++			}
++			if (latest) card = SessionManager.#cardForTitle(header.title, [latest]);
++		}
++		return {
++			sessionId: header.id,
++			...(header.title ? { title: header.title } : {}),
++			...(header.titleSource ? { source: header.titleSource } : {}),
++			...(card ? { card } : {}),
++		};
++	}
++
+ 	onSessionNameChanged(cb: () => void): () => void {
+ 		this.#sessionNameChangedCallbacks.add(cb);
+ 		return () => {
+@@ -3583,7 +3756,13 @@ export class SessionManager {
+ 			| PythonExecutionMessage
+ 			| FileMentionMessage,
+ 	): string {
+-		const entry: SessionMessageEntry = { type: "message", ...this.#freshEntryFields(), message };
++		const role = message.role;
++		const reserved = role === "user" || role === "assistant" ? this.#takeReservedMessageId(role) : undefined;
++		const entry: SessionMessageEntry = {
++			type: "message",
++			...this.#freshEntryFields(reserved),
++			message,
++		};
+ 		this.#recordEntry(entry);
+ 		return entry.id;
+ 	}
+@@ -3738,9 +3917,10 @@ export class SessionManager {
+ 			tokensAfter?: number;
+ 		} = {},
+ 	): string {
++		const reserved = this.#takeReservedCompactionId();
+ 		const entry: CompactionEntry<T> = {
+ 			type: "compaction",
+-			...this.#freshEntryFields(),
++			...this.#freshEntryFields(reserved),
+ 			summary,
+ 			shortSummary,
+ 			firstKeptEntryId,
+@@ -3801,7 +3981,7 @@ export class SessionManager {
+ 		timestamp?: number,
+ 	): string {
+ 		const normalized = normalizeCustomMessagePayload<T>({ customType, content, display, details, attribution });
+-		const fresh = this.#freshEntryFields();
++		const fresh = this.#freshEntryFields(this.#takeReservedCustomMessageId(normalized.customType, timestamp));
+ 		const entry: CustomMessageEntry<T> = {
+ 			type: "custom_message",
+ 			customType: normalized.customType,
+@@ -4037,6 +4217,22 @@ export class SessionManager {
+ 		return conversationTip(this.#entries, this.#index.branchView());
+ 	}
+ 
++	findLastCustomEntry(customType: string, predicate: (entry: CustomEntry) => boolean): CustomEntry | undefined {
++		let index = this.#customEntryIndex;
++		if (!index || index.entries !== this.#entries || index.length > this.#entries.length) {
++			index = { entries: this.#entries, length: 0, byType: new Map() };
++			this.#customEntryIndex = index;
++		}
++		for (; index.length < this.#entries.length; index.length++) {
++			const entry = this.#entries[index.length];
++			if (entry.type !== "custom") continue;
++			let entries = index.byType.get(entry.customType);
++			if (!entries) index.byType.set(entry.customType, (entries = []));
++			entries.push(entry);
++		}
++		return index.byType.get(customType)?.findLast(predicate);
++	}
++
+ 	/**
+ 	 * The session as a tree. A well-formed session has exactly one root; orphaned
+ 	 * entries (broken parent chain) are returned as roots too.
+@@ -4239,10 +4435,16 @@ export class SessionManager {
+ 	 * @param cwd Working directory (stored in the session header)
+ 	 * @param sessionDir Optional session directory; defaults to the cwd-derived dir.
+ 	 */
+-	static create(cwd: string, sessionDir?: string, storage: SessionStorage = new FileSessionStorage()): SessionManager {
++	static create(
++		cwd: string,
++		sessionDir?: string,
++		storage: SessionStorage = new FileSessionStorage(),
++		options?: NewSessionOptions,
++	): SessionManager {
+ 		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
+ 		const manager = new SessionManager(cwd, dir, true, storage);
+-		manager.#resetToNewSession();
++		manager.#newSessionHarnessOrigin = options?.harnessOrigin;
++		manager.#resetToNewSession(options);
+ 		return manager;
+ 	}
+ 
+@@ -4292,6 +4494,7 @@ export class SessionManager {
+ 			copyArtifacts?: boolean;
+ 			suppressBreadcrumb?: boolean;
+ 			sessionFile?: string;
++			harnessOrigin?: HarnessSessionOrigin;
+ 			resetInheritedCost?: boolean;
+ 			repairInterruptedTail?: boolean;
+ 			seance?: boolean;
+@@ -4300,6 +4503,7 @@ export class SessionManager {
+ 		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
+ 		const manager = new SessionManager(cwd, dir, true, storage);
+ 		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
++		manager.#newSessionHarnessOrigin = options?.harnessOrigin;
+ 
+ 		// A missing source must fail instead of forking an empty parentless session:
+ 		// the loader swallows ENOENT by default for fresh-session opens, so fork opts out.
+@@ -4322,6 +4526,7 @@ export class SessionManager {
+ 				parentSession: sourceHeader?.id,
+ 				providerPromptCacheKey: SessionManager.getInheritedProviderPromptCacheKey(sourceHeader),
+ 				taskPromptCacheKey: sourceHeader?.taskPromptCacheKey,
++				harnessOrigin: options?.harnessOrigin,
+ 			},
+ 			options?.sessionFile,
+ 		);
+@@ -4475,6 +4680,38 @@ export class SessionManager {
+ 		return manager;
+ 	}
+ 
++	/** Read saved model roles without taking a writer lock, migrating disk data, or changing breadcrumbs. */
++	static async peekRestoreModels(
++		filePath: string,
++		storage: SessionStorage = new FileSessionStorage(),
++	): Promise<{ sessionId: string; selectors: string[]; thinking?: string }> {
++		if (storage.statSync(filePath).size > 32 * 1024 * 1024)
++			throw new Error("Session exceeds the 32 MiB model-inspection limit");
++		const loaded = await loadSessionFile(filePath, storage, { throwIfMissing: true });
++		const header = loaded.entries[0];
++		if (loaded.invalidHeader || !header || header.type !== "session" || loaded.malformedRecords > 0)
++			throw new Error("The saved session is incomplete or damaged; model inspection cannot continue");
++		if ((loaded.sourceSize ?? 0) > 32 * 1024 * 1024)
++			throw new Error("Session exceeds the 32 MiB model-inspection limit");
++		migrateToCurrentVersion(loaded.entries);
++		const entries = loaded.entries.slice(1) as SessionEntry[];
++		const index = new SessionEntryIndex();
++		index.rebuild(entries);
++		const context = buildSessionContext(entries, index.leafId(), index.entriesById());
++		const lastRole = index.pathTo(index.leafId()).findLast(entry => entry.type === "model_change");
++		const selectors = getRestorableSessionModels(
++			context.models,
++			lastRole?.type === "model_change" ? (lastRole.role ?? "default") : undefined,
++		);
++		return {
++			sessionId: header.id,
++			selectors,
++			...((context.configuredThinkingLevel ?? context.thinkingLevel)
++				? { thinking: context.configuredThinkingLevel ?? context.thinkingLevel }
++				: {}),
++		};
++	}
++
+ 	/**
+ 	 * Whether `session` was recorded in a worktree of `cwd`'s repository that no
+ 	 * longer exists, e.g. a `/wt` worktree removed since. Resume such a session
+@@ -4574,7 +4811,10 @@ export class SessionManager {
+ 		cwd: string,
+ 		sessionDir?: string,
+ 		storage: SessionStorage = new FileSessionStorage(),
+-		options: { onSessionContinuation?: (continuation: SessionContinuation) => void } = {},
++		options: {
++			harnessOrigin?: HarnessSessionOrigin;
++			onSessionContinuation?: (continuation: SessionContinuation) => void;
++		} = {},
+ 	): Promise<SessionManager> {
+ 		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
+ 		const resolvedCwd = path.resolve(cwd);
+@@ -4594,7 +4834,8 @@ export class SessionManager {
+ 				(!sessionDir || pathIsWithin(dir, path.dirname(breadcrumb.sessionFile)))
+ 			) {
+ 				const manager = new SessionManager(cwd, dir, true, storage);
+-				manager.#resetToNewSession();
++				manager.#newSessionHarnessOrigin = options?.harnessOrigin;
++				manager.#resetToNewSession({ harnessOrigin: options?.harnessOrigin });
+ 				return manager;
+ 			}
+ 
+@@ -4694,8 +4935,9 @@ export class SessionManager {
+ 		}
+ 
+ 		const manager = new SessionManager(cwd, dir, true, storage);
++		manager.#newSessionHarnessOrigin = options?.harnessOrigin;
+ 		if (chosenSession) await manager.setSessionFile(chosenSession);
+-		else manager.#resetToNewSession();
++		else manager.#resetToNewSession({ harnessOrigin: options?.harnessOrigin });
+ 		return manager;
+ 	}
+ 
+diff --git a/packages/coding-agent/src/session/session-transfer.ts b/packages/coding-agent/src/session/session-transfer.ts
+index fe0d01485b..e6c5cf7b05 100644
+--- a/packages/coding-agent/src/session/session-transfer.ts
++++ b/packages/coding-agent/src/session/session-transfer.ts
+@@ -93,6 +93,8 @@ export interface PackSessionResult {
+ 
+ /** Options for {@link unpackSession}. */
+ export interface UnpackSessionOptions {
++	/** Always fork when a local copy exists; desktop imports never replace an existing transcript. */
++	preserveExisting?: boolean;
+ 	/** Directory the session continues in on this machine; becomes the header `cwd`. */
+ 	cwd: string;
+ 	/** Session directory to land in; defaults to `cwd`'s session directory. */
+@@ -573,6 +575,34 @@ async function placeSession(
+  * copy diverged, the incoming transcript lands as a fork with a new id whose
+  * `parentSession` is the original id, and local copies stay untouched.
+  */
++export async function inspectSessionArchive(
++	archivePath: string,
++	cwd: string,
++): Promise<{
++	id: string;
++	title: string;
++	cwd: string;
++	omp: string;
++	messages: number;
++	artifacts: number;
++	blobs: number;
++	conflicts: boolean;
++}> {
++	const contents = await readSessionArchive(path.resolve(archivePath));
++	await requireDirectory(path.resolve(cwd));
++	const copies = await findLocalCopies(contents.header.id, SessionManager.getDefaultSessionDir(cwd));
++	return {
++		id: contents.header.id,
++		title: contents.header.title || contents.header.id,
++		cwd: contents.header.cwd || contents.manifest.cwd,
++		omp: contents.manifest.omp,
++		messages: contents.entries.filter(entry => entry.type === "message").length,
++		artifacts: contents.artifacts.length,
++		blobs: contents.blobs.length,
++		conflicts: copies.length > 0,
++	};
++}
++
+ export async function unpackSession(archivePath: string, options: UnpackSessionOptions): Promise<UnpackSessionResult> {
+ 	const archive = path.resolve(archivePath);
+ 	const cwd = path.resolve(options.cwd);
+@@ -607,7 +637,7 @@ export async function unpackSession(archivePath: string, options: UnpackSessionO
+ 			if (!isTranscriptPrefix(entries, contents.entries)) diverged = true;
+ 		}
+ 
+-		if (diverged) {
++		if (diverged || (options.preserveExisting && localCopies.length > 0)) {
+ 			const placed = await placeSession(() => SessionManager.forkFrom(stagedFile, cwd, sessionDir), arrival);
+ 			logger.info("Unpacked session as a fork of a diverged local copy", { parent: id, ...placed });
+ 			return { ...placed, mode: "forked" };
+diff --git a/packages/coding-agent/src/session/turn-recovery.ts b/packages/coding-agent/src/session/turn-recovery.ts
+index e49b33e119..3d5f8a1799 100644
+--- a/packages/coding-agent/src/session/turn-recovery.ts
++++ b/packages/coding-agent/src/session/turn-recovery.ts
+@@ -389,6 +389,8 @@ export class TurnRecovery {
+ 	readonly #host: TurnRecoveryHost;
+ 	readonly #unexpectedStopJudgeTimeoutMs: number;
+ 	#retryAbortController: AbortController | undefined;
++	/** Sticky cancel so abort wins even if the backoff controller is created after `abortRetry()`. */
++	#retryCancelled = false;
+ 	#retryAttempt = 0;
+ 	/**
+ 	 * Selectors a classifier refusal has already moved off in the current retry saga; see the walk
+@@ -553,6 +555,7 @@ export class TurnRecovery {
+ 		this.#streamStallContinueCount = 0;
+ 		this.#acceptTerminalEmptyStopForPrompt = false;
+ 		this.#activeFallbackCreditRedemption = undefined;
++		this.#retryCancelled = false;
+ 	}
+ 
+ 	/** Sets whether one terminal empty stop is accepted for the current prompt. */
+@@ -1249,6 +1252,17 @@ export class TurnRecovery {
+ 			attribution: "agent",
+ 			timestamp: Date.now(),
+ 		});
++		await this.#host.emitSessionEvent({
++			type: "notice",
++			level: "warning",
++			source: "unexpected-stop",
++			message:
++				"Assistant stop recovered automatically (" +
++				this.#unexpectedStopRetryCount +
++				"/" +
++				UNEXPECTED_STOP_MAX_RETRIES +
++				")",
++		});
+ 		this.#host.scheduleAgentContinue({
+ 			source: "unexpected-stop-retry",
+ 			generation: this.#host.promptGeneration(),
+@@ -2669,6 +2683,7 @@ export class TurnRecovery {
+ 		// not a retry loop, so it runs even when the user disabled retries: it switches
+ 		// the model once and lets the base turn proceed.
+ 		if (!retrySettings.enabled && !options?.fireworksFastFallback) return false;
++		if (this.#retryCancelled || this.#host.abortInProgress() || this.#host.isDisposed()) return false;
+ 		const classifierRefusal = this.isClassifierRefusal(message);
+ 
+ 		const generation = this.#host.promptGeneration();
+@@ -3125,6 +3140,10 @@ export class TurnRecovery {
+ 		// Quota resets elapse while the machine sleeps; capture the deadline before event delivery.
+ 		const usageResetDeadline = AIError.is(id, AIError.Flag.UsageLimit) ? Date.now() + delayMs : undefined;
+ 
++		if (this.#retryWasCancelled(generation)) {
++			return await this.#abandonRetry({ announced: this.#retryAttempt > 1 });
++		}
++
+ 		await this.#host.emitSessionEvent({
+ 			type: "auto_retry_start",
+ 			attempt: this.#retryAttempt,
+@@ -3150,6 +3169,10 @@ export class TurnRecovery {
+ 		this.#maybeInjectThinkingLoopRedirect(id);
+ 		this.#maybeInjectMalformedFunctionCallRedirect(id, maxRetries, preserveFailedTurn, switchedModel);
+ 
++		if (this.#retryWasCancelled(generation)) {
++			return await this.#abandonRetry({ announced: true });
++		}
++
+ 		// Quota waits follow the wall clock; ordinary backoff stays monotonic.
+ 		const retryAbortController = new AbortController();
+ 		this.#retryAbortController?.abort();
+@@ -3164,13 +3187,16 @@ export class TurnRecovery {
+ 			if (this.#retryAbortController !== retryAbortController) {
+ 				return false;
+ 			}
+-			// Aborted during sleep - emit end event so UI can clean up
+-			return this.#endCancelledRetry();
++			return await this.#abandonRetry({ announced: true });
+ 		}
+ 		if (this.#retryAbortController === retryAbortController) {
+ 			this.#retryAbortController = undefined;
+ 		}
+ 
++		if (this.#retryWasCancelled(generation)) {
++			return await this.#abandonRetry({ announced: true });
++		}
++
+ 		// The identity-keyed removal above can miss when a context rebuild
+ 		// recreated the failed turn's message object between settle and retry
+ 		// (fresh identity, same failed tail — issue #5382). Agent.continue()
+@@ -3184,6 +3210,10 @@ export class TurnRecovery {
+ 			this.#stripFailedAssistantTail();
+ 		}
+ 
++		if (this.#retryWasCancelled(generation)) {
++			return await this.#abandonRetry({ announced: true });
++		}
++
+ 		// Retry via continue() outside the agent_end event callback chain. A
+ 		// continuation that still fails locally must close the retry saga —
+ 		// otherwise auto_retry_end never fires, retryPromise stays pending, and
+@@ -3313,11 +3343,37 @@ export class TurnRecovery {
+ 	 * Cancel in-progress retry.
+ 	 */
+ 	abortRetry(): void {
++		this.#retryCancelled = true;
+ 		this.#retryAbortController?.abort();
+-		// Note: _retryAttempt is reset in the catch block of _autoRetry
+ 		this.resolveRetry();
+ 	}
+ 
++	#retryWasCancelled(generation: number): boolean {
++		return (
++			this.#retryCancelled ||
++			this.#host.abortInProgress() ||
++			this.#host.isDisposed() ||
++			this.#host.promptGeneration() !== generation
++		);
++	}
++
++	async #abandonRetry(options: { announced: boolean }): Promise<false> {
++		const attempt = this.#retryAttempt;
++		this.#retryAttempt = 0;
++		this.#retryAbortController = undefined;
++		if (options.announced) {
++			await this.#host.emitSessionEvent({
++				type: "auto_retry_end",
++				success: false,
++				attempt,
++				finalError: "Retry cancelled",
++			});
++		}
++		this.#clearPendingRetryErrors();
++		this.resolveRetry();
++		return false;
++	}
++
+ 	async #promptAgentWithIdleRetry(
+ 		messages: AgentMessage[],
+ 		options?: { toolChoice?: ToolChoice },
+@@ -3457,6 +3513,7 @@ export class TurnRecovery {
+ 		}
+ 
+ 		// Reset retry budget for a fresh attempt
++		this.#retryCancelled = false;
+ 		this.#retryAttempt = 0;
+ 
+ 		// Re-attempt the turn
+diff --git a/packages/coding-agent/src/task/executor.ts b/packages/coding-agent/src/task/executor.ts
+index ba9afb6257..bba8535740 100644
+--- a/packages/coding-agent/src/task/executor.ts
++++ b/packages/coding-agent/src/task/executor.ts
+@@ -5194,6 +5194,10 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+ 				// even when the workspace was retained for recovery.
+ 				isolated: worktree !== undefined || undefined,
+ 			});
++			const registryAgentId = session.getAgentId();
++			if (worktree !== undefined && registryAgentId !== undefined) {
++				AgentRegistry.global().setHistory(registryAgentId, { isolated: true });
++			}
+ 
+ 			abortSignal.addEventListener(
+ 				"abort",
+diff --git a/packages/coding-agent/src/task/isolation-runner.ts b/packages/coding-agent/src/task/isolation-runner.ts
+index c572029c34..8a89204388 100644
+--- a/packages/coding-agent/src/task/isolation-runner.ts
++++ b/packages/coding-agent/src/task/isolation-runner.ts
+@@ -86,6 +86,7 @@ export function renderIsolationSummary(context: IsolationSummaryContext): string
+ /** Record artifact locations for `agent://` and mark the result as an isolated run. */
+ function rememberAgentArtifacts(result: SingleResult): SingleResult {
+ 	AgentRegistry.global().setHistory(result.id, {
++		isolated: true,
+ 		outputPath: result.outputPath,
+ 		patchPath: result.patchPath,
+ 		branchName: result.branchName,
+diff --git a/packages/coding-agent/src/task/worktree.ts b/packages/coding-agent/src/task/worktree.ts
+index bf1f39b42d..86d131227b 100644
+--- a/packages/coding-agent/src/task/worktree.ts
++++ b/packages/coding-agent/src/task/worktree.ts
+@@ -385,7 +385,7 @@ function parseDiffGitLinePaths(line: string): string[] {
+ 	return [...new Set(paths)];
+ }
+ 
+-function patchTouchedFiles(patch: string): string[] {
++export function patchTouchedFiles(patch: string): string[] {
+ 	const files = new Set<string>();
+ 	for (const line of patch.split("\n")) {
+ 		for (const file of parseDiffGitLinePaths(line)) files.add(file);
+@@ -773,7 +773,7 @@ function collectWipPatches(wip: BaselineWipContext | undefined): string[] {
+ }
+ 
+ /** Keep only the `diff --git` sections of `patch` that touch one of `files`. */
+-function filterPatchFiles(patch: string, files: ReadonlySet<string>): string {
++export function filterPatchFiles(patch: string, files: ReadonlySet<string>): string {
+ 	const sections = patch.split(/^(?=diff --git )/m);
+ 	return sections.filter(section => parseDiffGitLinePaths(section.split("\n", 1)[0]).some(f => files.has(f))).join("");
+ }
+diff --git a/packages/coding-agent/src/thread/remote-agent-session.ts b/packages/coding-agent/src/thread/remote-agent-session.ts
+index acaeaf5dd9..665db297dd 100644
+--- a/packages/coding-agent/src/thread/remote-agent-session.ts
++++ b/packages/coding-agent/src/thread/remote-agent-session.ts
+@@ -174,6 +174,8 @@ export function emptyMirrorState(): SessionMirrorState {
+ function emptyViewState(): SessionViewState {
+ 	return {
+ 		providerSessionId: "",
++		harnessEvalKernelOwnerId: undefined,
++		harnessLinkSchemes: [],
+ 		sessionName: undefined,
+ 		seanceSourceArtifactsDir: null,
+ 		leafId: null,
+@@ -478,6 +480,22 @@ export class RemoteAgentSession implements AgentViewSession {
+ 		return this.#view.isGeneratingHandoff;
+ 	}
+ 
++	get harnessEvalKernelOwnerId(): string | undefined {
++		return this.#view.harnessEvalKernelOwnerId;
++	}
++
++	getHarnessLinkSchemes(): string[] {
++		return this.#view.harnessLinkSchemes;
++	}
++
++	activateHarnessLink(url: string): Promise<boolean> {
++		return this.#command("activateHarnessLink", url);
++	}
++
++	renameHarnessTitle(title: string): Promise<string | null> {
++		return this.#command("renameHarnessTitle", title);
++	}
++
+ 	get isRetrying(): boolean {
+ 		return this.#view.isRetrying;
+ 	}
+diff --git a/packages/coding-agent/src/thread/services/index.ts b/packages/coding-agent/src/thread/services/index.ts
+index 1346f7794c..811b94240f 100644
+--- a/packages/coding-agent/src/thread/services/index.ts
++++ b/packages/coding-agent/src/thread/services/index.ts
+@@ -17,6 +17,7 @@ import { runtimeThreadService } from "./runtime";
+ import { runtimeIdentityThreadService } from "./runtime-identity";
+ import { settingsThreadService } from "./settings";
+ import { telemetryThreadService } from "./telemetry";
++import { harnessThreadService } from "../../harness/services/harness-thread-service";
+ 
+ export const THREAD_SERVICES: readonly ThreadService[] = [
+ 	identityThreadService,
+@@ -32,6 +33,7 @@ export const THREAD_SERVICES: readonly ThreadService[] = [
+ 	integrationsThreadService,
+ 	runtimeThreadService,
+ 	asyncJobsThreadService,
++	harnessThreadService,
+ 	// Last: its entry points run subagents against every service above.
+ 	executorThreadService,
+ ];
+diff --git a/packages/coding-agent/src/thread/session-mirror.ts b/packages/coding-agent/src/thread/session-mirror.ts
+index 92a5336b4a..44923efc1e 100644
+--- a/packages/coding-agent/src/thread/session-mirror.ts
++++ b/packages/coding-agent/src/thread/session-mirror.ts
+@@ -149,6 +149,8 @@ export interface SessionApprovalState {
+ 
+ /** View-only data of a worker-homed session, published while main watches it (see the module doc). */
+ export interface SessionViewState {
++	harnessEvalKernelOwnerId: string | undefined;
++	harnessLinkSchemes: string[];
+ 	/** Provider-facing session id (`AgentSession.sessionId`). */
+ 	providerSessionId: string;
+ 	sessionName: string | undefined;
+@@ -235,6 +237,8 @@ export interface SessionAbortOptions {
+  * event-stream watch toggle.
+  */
+ export type SessionHostProtocol = {
++	activateHarnessLink: RpcMethod<[url: string], boolean>;
++	renameHarnessTitle: RpcMethod<[title: string], string | null>;
+ 	prompt: RpcMethod<[text: string, options?: PromptOptions], boolean>;
+ 	steer: RpcMethod<[text: string, images?: ImageContent[], options?: SteerOptions], void>;
+ 	abort: RpcMethod<[options?: SessionAbortOptions], void>;
+diff --git a/packages/coding-agent/src/thread/session-publisher.ts b/packages/coding-agent/src/thread/session-publisher.ts
+index 3df09f34f8..935c9c19ac 100644
+--- a/packages/coding-agent/src/thread/session-publisher.ts
++++ b/packages/coding-agent/src/thread/session-publisher.ts
+@@ -55,6 +55,7 @@ import type { Skill } from "../extensibility/skills";
+ import { deobfuscateAssistantContent } from "../secrets/message-transform";
+ import type { SecretObfuscator } from "../secrets/obfuscator";
+ import type { AgentSession } from "../session/agent-session";
++import { HarnessConversationEntryIdentity } from "../harness/services/conversation-entry-identity";
+ import type { AgentSessionEvent } from "../session/agent-session-events";
+ import type { AgentViewToolSchema } from "../session/agent-session-handle";
+ import {
+@@ -220,7 +221,9 @@ export class SessionPublisher {
+ 	#closed = false;
+ 	readonly #gate: QueuedMessageGate;
+ 	readonly #unsubscribe: () => void;
++	readonly #harnessIdentity: HarnessConversationEntryIdentity;
+ 	readonly #unsubscribeRunState: () => void;
++	readonly #unsubscribePause: () => void;
+ 	readonly #unsubscribeIrcWakeHolds: () => void;
+ 
+ 	constructor(session: AgentSession, bridge: SessionBridgeClient) {
+@@ -250,8 +253,10 @@ export class SessionPublisher {
+ 			},
+ 		};
+ 		session.agent.queuedMessageGate = this.#gate;
++		this.#harnessIdentity = new HarnessConversationEntryIdentity(session.sessionManager);
+ 		this.#unsubscribe = session.subscribe(event => this.#onEvent(event));
+ 		this.#unsubscribeRunState = session.subscribeRunState(state => this.#onRunState(state));
++		this.#unsubscribePause = session.agent.subscribePause(() => this.schedule());
+ 		// `ircWakesPending` gates main's idle parking and changes without an event.
+ 		this.#unsubscribeIrcWakeHolds = session.subscribeIrcWakeHolds(() => this.schedule());
+ 		session.addDisposer(() => this.close());
+@@ -300,6 +305,7 @@ export class SessionPublisher {
+ 		if (this.session.agent.queuedMessageGate === this.#gate) this.session.agent.queuedMessageGate = undefined;
+ 		this.#unsubscribe();
+ 		this.#unsubscribeRunState();
++		this.#unsubscribePause();
+ 		this.#unsubscribeIrcWakeHolds();
+ 		this.#bridge.remote.notify("closed", this.#key);
+ 	}
+@@ -315,6 +321,7 @@ export class SessionPublisher {
+ 
+ 	#onEvent(event: AgentSessionEvent): void {
+ 		if (this.#closed) return;
++		event = this.#harnessIdentity.prepare(event);
+ 		// Streaming ticks only move the cursor; main derives `streamMessage` from forwarded updates.
+ 		const tick = event.type === "message_update" || event.type === "tool_execution_update";
+ 		if (!this.#watched) {
+@@ -472,6 +479,8 @@ export class SessionPublisher {
+ 		const followUp = session.agent.peekFollowUpQueue().filter(isUserAuthoredQueuedMessage);
+ 		return {
+ 			providerSessionId: session.sessionId,
++			harnessEvalKernelOwnerId: session.harnessEvalKernelOwnerId,
++			harnessLinkSchemes: session.getHarnessLinkSchemes(),
+ 			sessionName: manager.getSessionName(),
+ 			seanceSourceArtifactsDir: manager.getSeanceSourceArtifactsDir(),
+ 			leafId: manager.getLeafId(),
+@@ -553,6 +562,8 @@ function localModel(session: AgentSession, model: Model): Model {
+ 
+ /** Worker-side implementation of {@link SessionHostProtocol}; commands flush state before their result posts. */
+ export const SESSION_HOST_SERVE: RpcServe<SessionPublisher, SessionHostProtocol> = {
++	activateHarnessLink: (publisher, url) => publisher.session.activateHarnessLink(url),
++	renameHarnessTitle: (publisher, title) => settle(publisher, publisher.session.renameHarnessTitle(title)),
+ 	prompt: async (publisher, text, options) => settle(publisher, publisher.session.prompt(text, options)),
+ 	steer: async (publisher, text, images, options) => settle(publisher, publisher.session.steer(text, images, options)),
+ 	abort: async (publisher, options) => settle(publisher, publisher.session.abort(options)),
+diff --git a/packages/tui/src/status-line/context-usage.ts b/packages/tui/src/status-line/context-usage.ts
+index 30cef3a672..c715dfb2cd 100644
+--- a/packages/tui/src/status-line/context-usage.ts
++++ b/packages/tui/src/status-line/context-usage.ts
+@@ -246,16 +246,17 @@ export function toolSchemaFragments(tool: ContextTool, options: ToolSchemaFragme
+ 	// parameters value whose wire schema stringifies to `undefined` (e.g. a
+ 	// callable schema that escaped normalization). A non-string fragment is
+ 	// fatal inside the native tokenizer, so only real strings are kept.
+-	const { name, description, parameters } = tool;
+ 	const fragments: string[] = [];
+ 	const display: string[] | undefined = displayIndent === undefined ? undefined : [];
+ 	const push = (wire: string, shown: string = wire): void => {
+ 		fragments.push(wire);
+ 		display?.push(shown);
+ 	};
+-	if (typeof name === "string") push(name);
+-	if (!pruneDescriptions && typeof description === "string") push(description);
+ 	try {
++		// Optional tool metadata may be a getter that fails; retain other tools' estimates.
++		const { name, description, parameters } = tool;
++		if (typeof name === "string") push(name);
++		if (!pruneDescriptions && typeof description === "string") push(description);
+ 		const wireTool: AiTool = {
+ 			name,
+ 			description,

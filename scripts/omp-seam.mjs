@@ -1,0 +1,243 @@
+// Seam layer definition for the OMP vendor fork.
+//
+// Harness's changes to the pinned upstream tree split into two layers:
+//
+//   overlay   omp-patch/overlay/**  — files that do not exist upstream at all
+//             (`packages/coding-agent/src/harness/**` and the `harness-*` tests).
+//             These are plain tracked sources in this repository; they are
+//             copied into the vendor tree, never expressed as a patch.
+//
+//   seam      omp-patch/patches/*.patch — the only edits that touch files
+//             upstream owns. Grouped by upstream subsystem so an upstream bump
+//             maps to a small, predictable set of patches to refresh.
+//
+// SEAM_GROUPS is the authoritative mapping. `npm run omp:patches:regen`
+// regenerates each patch from the vendor working tree using these path lists,
+// and the group order defines the apply order recorded in series.json.
+//
+// Adding a seam file means adding it to the right group here, then rerunning
+// the regen script — never hand-editing a .patch.
+
+export const OVERLAY_DIRECTORY = "omp-patch/overlay";
+export const PATCHES_SUBDIRECTORY = "omp-patch/patches";
+
+/**
+ * Overlay file whose `PATCHSET_VERSION` the Runtime reports in its Harness
+ * Hello. It must equal `series.json` `patchsetVersion`: packaging probes the
+ * built binary and refuses to sign an artifact whose reported identity
+ * disagrees with the series, so a stale constant otherwise fails only after a
+ * full native build.
+ */
+export const PATCHSET_VERSION_FILE = "packages/coding-agent/src/harness/bridge-server.ts";
+export const UPSTREAM_COMMIT_FILES = [PATCHSET_VERSION_FILE,
+  "packages/coding-agent/src/harness/services/command-manifest-service.ts"];
+
+export function readUpstreamCommitConstant(source) {
+  const match = /^const UPSTREAM_COMMIT = "([a-f0-9]{40})";/mu.exec(source);
+  if (!match) throw new Error("Runtime source does not declare a valid UPSTREAM_COMMIT");
+  return match[1];
+}
+
+/** Upstream paths intentionally left unpatched even when the vendor tree changes them. */
+export const SEAM_EXCLUDED = Object.freeze([
+  // Fork-local changelog prose conflicts on every upstream release and carries
+  // no runtime behaviour. Harness's history lives in this repository instead.
+  "packages/coding-agent/CHANGELOG.md",
+]);
+
+export const SEAM_GROUPS = Object.freeze([
+  {
+    file: "0001-harness-cli-entry.patch",
+    title: "Harness host CLI entry, flags, and process classification",
+    paths: [
+      "packages/coding-agent/package.json",
+      "packages/coding-agent/src/cli.ts",
+      "packages/coding-agent/src/cli/args.ts",
+      "packages/coding-agent/src/cli/flag-tables.ts",
+      // `OMP_STATS_NO_OPEN`: Harness frames the dashboard, so no external browser.
+      "packages/coding-agent/src/cli/stats-cli.ts",
+      "packages/coding-agent/test/stats-cli.test.ts",
+      "packages/coding-agent/src/commands/launch-help.ts",
+      "packages/coding-agent/src/config/settings.ts",
+      "packages/coding-agent/src/config/registry.ts",
+      "packages/coding-agent/src/config/models-config-schema-bundle.ts",
+      "packages/coding-agent/src/thread/services/settings.ts",
+      "packages/coding-agent/src/main.ts",
+      "packages/coding-agent/test/main-host-classification.test.ts",
+    ],
+  },
+  {
+    file: "0002-harness-session-runtime.patch",
+    title: "Session runtime hooks: origin, prewalk, model control, retry abort",
+    paths: [
+      "packages/coding-agent/src/plan-mode/approved-plan.ts",
+      "packages/tui/src/status-line/context-usage.ts",
+      "packages/coding-agent/src/registry/agent-registry.ts",
+      "packages/coding-agent/src/registry/persisted-agents.ts",
+      "packages/coding-agent/src/session/agent-session-types.ts",
+      "packages/coding-agent/src/session/agent-session-handle.ts",
+      "packages/agent/src/agent.ts",
+      "packages/coding-agent/src/thread/session-publisher.ts",
+      "packages/coding-agent/src/thread/session-mirror.ts",
+      "packages/coding-agent/src/thread/remote-agent-session.ts",
+      "packages/coding-agent/src/thread/services/index.ts",
+      "packages/coding-agent/src/session/agent-session.ts",
+      "packages/coding-agent/src/session/session-maintenance.ts",
+      "packages/coding-agent/src/session/context-usage-runtime.ts",
+      "packages/coding-agent/src/session/prewalk.ts",
+      "packages/coding-agent/src/session/session-entries.ts",
+      "packages/coding-agent/src/session/session-manager.ts",
+      "packages/coding-agent/src/session/session-transfer.ts",
+      "packages/coding-agent/src/archive/archive.ts",
+      "packages/coding-agent/src/cli/gc-cli.ts",
+      "packages/coding-agent/src/cli/usage-cli.ts",
+      "packages/coding-agent/src/predict/client.ts",
+      "packages/coding-agent/src/predict/protocol.ts",
+      "packages/coding-agent/src/predict/daemon.ts",
+      "packages/coding-agent/src/predict/foreign-history.ts",
+      "packages/coding-agent/src/session/turn-recovery.ts",
+      "packages/coding-agent/src/task/executor.ts",
+      "packages/coding-agent/src/ratchet/prelude-definition.ts",
+      "packages/coding-agent/src/if-bench/runner.ts",
+      "packages/coding-agent/src/task/worktree.ts",
+      "packages/coding-agent/src/task/isolation-runner.ts",
+    ],
+  },
+  {
+    file: "0003-harness-modes-and-pause.patch",
+    title: "Interactive mode, pause screen, mode slash commands, job manager",
+    paths: [
+      "packages/coding-agent/src/async/job-manager.ts",
+      "packages/coding-agent/src/job-widgets/registry.ts",
+      "packages/coding-agent/src/job-widgets/types.ts",
+      "packages/coding-agent/src/thread/services/async-jobs.ts",
+      "packages/coding-agent/src/thread/services/async-jobs-protocol.ts",
+      "packages/coding-agent/src/thread/services/async-jobs-remote.ts",
+      "packages/tui/src/overlays/pause-screen.ts",
+      "packages/tui/src/charts/chart-plan.ts",
+      "packages/tui/src/charts/chart-svg.ts",
+      "packages/tui/src/charts/table-data.ts",
+      "packages/coding-agent/src/modes/controllers/composer-prediction-controller.ts",
+      "packages/coding-agent/src/modes/controllers/command-controller.ts",
+      "packages/coding-agent/src/modes/interactive-mode.ts",
+      "packages/coding-agent/src/modes/rpc/rpc-mode.ts",
+      "packages/coding-agent/src/modes/types.ts",
+      "packages/coding-agent/src/slash-commands/builtin-modes.ts",
+      "packages/coding-agent/src/slash-commands/builtin-control.ts",
+      "packages/coding-agent/test/interactive-mode-loop.test.ts",
+      "packages/coding-agent/test/modes/components/pause-screen.test.ts",
+    ],
+  },
+  {
+    file: "0004-harness-extensibility.patch",
+    title: "Extension UI transport, SDK surface, and tool context plumbing",
+    paths: [
+      "packages/stats/src/rollup.ts",
+      "packages/stats/src/db.ts",
+      "packages/stats/src/frustration.ts",
+      "packages/coding-agent/src/ida/worker.py",
+      "packages/coding-agent/src/ida/supervisor.ts",
+      "packages/coding-agent/src/ida/protocol.ts",
+      "packages/stats/test/helpers/temp-agent.ts",
+      "packages/coding-agent/src/extensibility/extensions/types.ts",
+      "packages/coding-agent/src/extensibility/extensions/runner.ts",
+      "packages/coding-agent/src/extensibility/extensions/wrapper.ts",
+      "packages/coding-agent/src/sdk.ts",
+      "packages/coding-agent/src/launch/services.ts",
+      "packages/coding-agent/src/launch/protocol.ts",
+      "packages/coding-agent/src/launch/broker.ts",
+      "packages/coding-agent/src/tools/bash.ts",
+      "packages/coding-agent/src/prompts/tools/bash.md",
+      "packages/coding-agent/src/eval/judgment-batch-bridge.ts",
+      "packages/coding-agent/src/cli/bench-cli.ts",
+      "packages/coding-agent/src/tools/image-gen.ts",
+      "packages/coding-agent/src/live/controller.ts",
+      "packages/coding-agent/src/stt/stt-controller.ts",
+      "packages/coding-agent/src/stt/submit-trigger.ts",
+      "packages/coding-agent/src/stt/models.ts",
+      "packages/coding-agent/test/stt-submit-trigger.test.ts",
+      "packages/coding-agent/test/stt-preflight.test.ts",
+      "packages/coding-agent/src/skillshare/client.ts",
+      "packages/coding-agent/src/tools/context.ts",
+      "packages/coding-agent/src/internal-urls/out-protocol.ts",
+      "packages/coding-agent/src/stt/downloader.ts",
+      "packages/coding-agent/src/internal-urls/cfg-protocol.ts",
+      "packages/coding-agent/src/tools/ask.ts",
+      "packages/coding-agent/src/tools/browser.ts",
+      "packages/coding-agent/src/tools/browser/tab-supervisor.ts",
+      "packages/coding-agent/src/tools/browser/registry.ts",
+      "packages/coding-agent/src/tools/browser/tab-protocol.ts",
+      "packages/coding-agent/src/tools/browser/tab-worker.ts",
+      "packages/coding-agent/src/tools/browser/downloads.ts",
+      "packages/coding-agent/src/tools/browser/relay/kind.ts",
+      "packages/coding-agent/src/tools/browser/relay/protocol.ts",
+      "packages/coding-agent/src/tools/browser/relay/server.ts",
+      "packages/coding-agent/src/tools/browser/relay/bridge.ts",
+      "packages/coding-agent/src/tools/index.ts",
+      "packages/coding-agent/src/tools/eval.ts",
+      "packages/coding-agent/src/eval/backend.ts",
+      "packages/coding-agent/src/eval/preludes.ts",
+      "packages/coding-agent/src/eval/executor-base.ts",
+      "packages/coding-agent/src/eval/js/index.ts",
+      "packages/coding-agent/src/eval/js/executor.ts",
+      "packages/coding-agent/src/eval/js/context-manager.ts",
+      "packages/coding-agent/test/eval/kernel-restart-notice.test.ts",
+      "packages/coding-agent/src/eval/js/tool-bridge.ts",
+      "packages/coding-agent/src/eval/py/index.ts",
+      "packages/coding-agent/src/eval/py/executor.ts",
+      "packages/coding-agent/src/eval/py/tool-bridge.ts",
+      "packages/coding-agent/src/tools/computer.ts",
+      "packages/coding-agent/src/tools/computer/protocol.ts",
+      "packages/coding-agent/src/tools/computer/supervisor.ts",
+      "packages/coding-agent/src/tools/computer/worker.ts",
+      "crates/pi-natives/src/desktop/mod.rs",
+      "crates/pi-natives/src/desktop/types.rs",
+      "crates/pi-natives/src/desktop/ax.rs",
+      "crates/pi-natives/src/desktop/frame.rs",
+      "packages/natives/native/index.d.ts",
+      "packages/coding-agent/test/extensions-runner.test.ts",
+    ],
+  },
+]);
+
+export function seamPatchNames() {
+  return SEAM_GROUPS.map(group => group.file);
+}
+
+export function seamPathOwner(filePath) {
+  return SEAM_GROUPS.find(group => group.paths.includes(filePath));
+}
+
+const PATCHSET_VERSION_PATTERN = /^const PATCHSET_VERSION = "([^"]+)";$/mu;
+
+/**
+ * Placeholder substituted for the version literal when hashing the overlay.
+ *
+ * The literal is derived *from* the overlay digest, so hashing it verbatim
+ * would be circular: writing the newly derived version back into the file
+ * would change the digest and demand another bump, forever. Provenance does
+ * not lose the version — the artifact manifest records `runtimeVersion`, and
+ * packaging probes the built binary to confirm it reports exactly that.
+ */
+const PATCHSET_VERSION_PLACEHOLDER = 'const PATCHSET_VERSION = "<derived-from-series>";';
+
+/** The `PATCHSET_VERSION` literal declared in an overlay `bridge-server.ts`. */
+export function readPatchsetVersionConstant(source) {
+  const match = PATCHSET_VERSION_PATTERN.exec(source);
+  if (match === null) {
+    throw new Error(`${PATCHSET_VERSION_FILE} does not declare a PATCHSET_VERSION constant`);
+  }
+  return match[1];
+}
+
+/** Same source with the version literal replaced; unchanged when already equal. */
+export function withPatchsetVersionConstant(source, patchsetVersion) {
+  readPatchsetVersionConstant(source);
+  return source.replace(PATCHSET_VERSION_PATTERN, `const PATCHSET_VERSION = "${patchsetVersion}";`);
+}
+
+/** Version-independent view of an overlay file, for digesting. */
+export function digestibleOverlaySource(overlayRelativePath, source) {
+  if (overlayRelativePath !== PATCHSET_VERSION_FILE) return source;
+  return source.replace(PATCHSET_VERSION_PATTERN, PATCHSET_VERSION_PLACEHOLDER);
+}
