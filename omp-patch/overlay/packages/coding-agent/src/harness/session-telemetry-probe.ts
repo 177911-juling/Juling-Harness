@@ -316,6 +316,7 @@ export async function deriveProbeSessionInputs(options: {
 		includeModelInPrompt: cfgIncludeModelInPrompt.get(options.settings),
 		personality: cfgPersonality.get(options.settings),
 		taskBatch: cfgTaskBatch.get(options.settings),
+		readOnly: true,
 		securityEnabled: cfgSecurityEnabled.get(options.settings),
 		renderMermaid: cfgTuiRenderMermaid.get(options.settings),
 	});

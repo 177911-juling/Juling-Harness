@@ -124,9 +124,7 @@ describe("session transcript contract mirror", () => {
 
 	test("rejects extra keys, missing fields, branch_summary, and over-limit pages", () => {
 		expect(() => parseConversationTranscriptPage({ ...page, extra: true })).toThrow(HarnessConversationError);
-		expect(() => parseConversationTranscriptPage({ ...page, hasMoreBefore: "yes" })).toThrow(
-			HarnessConversationError,
-		);
+		expect(() => parseConversationTranscriptPage({ ...page, hasMoreBefore: "yes" })).toThrow(HarnessConversationError);
 		expect(() =>
 			parseConversationTranscriptPage({
 				...page,

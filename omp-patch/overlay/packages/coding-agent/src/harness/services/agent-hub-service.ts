@@ -18,6 +18,7 @@ import { isAgentViewSession } from "../../session/agent-session-handle";
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { AgentKind, AgentRef, RegistryEvent } from "../../registry/agent-registry";
+import type { TaskStepState } from "@oh-my-pi/pi-tui/tools/task";
 
 const MAX_MESSAGE_TEXT = 64 * 1024;
 const MAX_ID_LENGTH = 512;
@@ -88,6 +89,8 @@ export interface HarnessAgentSnapshot {
 	hasTranscript: boolean;
 	unreadCount: number;
 	activeJobIds: string[];
+	/** Structured native prompt-group execution state, from the task job or session record. */
+	taskSteps?: TaskStepState;
 	/** Current stage of the task job running this agent, from its completion probe. */
 	stage?: string;
 	/** The running task's own completion estimate, 0–100. */
@@ -191,6 +194,7 @@ export interface HarnessAgentSpawnRequest {
 	model?: string[];
 	definition: string;
 	assignment?: string;
+	steps?: string[];
 	solutionSpace?: string;
 	context?: string;
 	async?: boolean;
@@ -216,11 +220,7 @@ export interface HarnessAgentSpawnerPort {
 
 /** Raw page from the native incremental transcript reader (offsets are internal). */
 export interface HarnessTranscriptReaderPort {
-	read(args: {
-		agentId: string;
-		offset: number;
-		limit: number;
-	}): Promise<{ messages: HarnessMessage[]; eof: boolean }>;
+	read(args: { agentId: string; offset: number; limit: number }): Promise<{ messages: HarnessMessage[]; eof: boolean }>;
 }
 
 export type HarnessDestructiveAction = { kind: "release"; agentId: string; generation: number; risk: "destructive" };
@@ -263,8 +263,14 @@ export interface HarnessAgentHubServiceOptions {
 	confirmationGate?: HarnessConfirmationGate;
 	/** Active job ids for an agent; production wiring reads AsyncJobManager rows. */
 	activeJobIdsFor?: (agentId: string) => string[];
-	/** Stage / completion estimate of the running task job behind an agent. */
-	taskProgressFor?: (agentId: string) => { stage?: string; completionPercent?: number } | undefined;
+	/** Native prompt-group state and completion-probe estimate of an agent's task job. */
+	taskProgressFor?: (agentId: string) =>
+		| {
+				taskSteps?: TaskStepState;
+				stage?: string;
+				completionPercent?: number;
+		  }
+		| undefined;
 	/** Live usage/model/summary source; production wiring reads AgentSession. */
 	telemetry?: HarnessAgentTelemetryPort;
 	maxListLimit?: number;
@@ -278,6 +284,7 @@ interface HarnessTerminalRecord {
 	kind: AgentKind;
 	parentAgentId?: string;
 	status: "aborted" | "released";
+	taskSteps?: TaskStepState;
 	generation: number;
 	startedAt?: string;
 	updatedAt: string;
@@ -508,6 +515,7 @@ export class HarnessAgentHubService {
 		model?: string[];
 		definition: string;
 		assignment?: string;
+		steps?: string[];
 		solutionSpace?: string;
 		context?: string;
 		async?: boolean;
@@ -519,7 +527,20 @@ export class HarnessAgentHubService {
 			throw new HarnessAgentHubError("INVALID_ARGUMENT", "Select one exact per-call model");
 		const definition = args.definition.trim();
 		const assignment = args.assignment;
-		if (!assignment?.trim()) throw new HarnessAgentHubError("INVALID_ARGUMENT", "Provide inline instructions");
+		if (!!assignment?.trim() === (args.steps !== undefined))
+			throw new HarnessAgentHubError("INVALID_ARGUMENT", "Provide inline instructions or ordered steps");
+		if (
+			args.steps !== undefined &&
+			(!Array.isArray(args.steps) ||
+				args.steps.length === 0 ||
+				args.steps.some(step => typeof step !== "string" || !step.trim()) ||
+				args.steps.reduce((size, step) => size + step.length, 0) > MAX_MESSAGE_TEXT)
+		) {
+			throw new HarnessAgentHubError(
+				"INVALID_ARGUMENT",
+				"Task steps must contain non-empty instructions within 64 KiB",
+			);
+		}
 		if (
 			args.solutionSpace !== undefined &&
 			(!args.solutionSpace.trim() || args.solutionSpace.length > MAX_MESSAGE_TEXT)
@@ -544,7 +565,7 @@ export class HarnessAgentHubService {
 		try {
 			receipt = await this.#spawner.spawn({
 				definition,
-				assignment,
+				...(args.steps === undefined ? { assignment } : { steps: args.steps }),
 				...(args.model ? { model: args.model } : {}),
 				...(args.solutionSpace !== undefined ? { solutionSpace: args.solutionSpace } : {}),
 				...(args.context !== undefined ? { context: args.context } : {}),
@@ -892,6 +913,7 @@ export class HarnessAgentHubService {
 			kind: terminal.kind,
 			displayName: terminal.displayName,
 			status: terminal.status,
+			...(terminal.taskSteps === undefined ? {} : { taskSteps: terminal.taskSteps }),
 			...(terminal.startedAt !== undefined ? { startedAt: terminal.startedAt } : {}),
 			updatedAt: terminal.updatedAt,
 			hasLiveSession: false,
@@ -911,6 +933,7 @@ export class HarnessAgentHubService {
 
 	#terminalRecord(ref: AgentRef, status: "aborted" | "released", generation: number): HarnessTerminalRecord {
 		const history = ref.history;
+		const taskSteps = this.#taskProgressFor?.(ref.id)?.taskSteps;
 		return {
 			agentId: ref.id,
 			displayName: ref.displayName,
@@ -918,6 +941,7 @@ export class HarnessAgentHubService {
 			...(ref.parentId !== undefined ? { parentAgentId: ref.parentId } : {}),
 			status,
 			generation,
+			...(taskSteps === undefined ? {} : { taskSteps }),
 			startedAt: new Date(ref.createdAt).toISOString(),
 			updatedAt: new Date().toISOString(),
 			hasTranscript: ref.session !== null || ref.sessionFile !== null,

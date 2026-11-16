@@ -175,11 +175,7 @@ export class HarnessOmfgService {
 		return normalized;
 	}
 
-	async #generateCandidate(
-		complaint: string,
-		promptText: string,
-		candidateId?: string,
-	): Promise<HarnessOmfgCandidate> {
+	async #generateCandidate(complaint: string, promptText: string, candidateId?: string): Promise<HarnessOmfgCandidate> {
 		if (this.#running) throw new HarnessOmfgError("COMMAND_BLOCKED", "An OMFG generation is already running");
 		this.#running = true;
 		try {

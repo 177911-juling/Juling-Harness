@@ -1,4 +1,10 @@
 import { RUNTIME_VIEW_KINDS, isRuntimeViewKind, type RuntimeViewOperation } from "./runtime-views-protocol";
+import { isSelectiveCommitKind, validateSelectiveCommitOperation } from "./commit-protocol";
+import {
+	MODEL_SERVICES_COMMAND_KINDS,
+	isModelServicesKind,
+	type ModelServicesOperation,
+} from "./model-services-protocol";
 import type { SessionOwnerOperation } from "./session-owner-protocol";
 import { COMPUTER_WORKSPACE_QUERY_KINDS } from "./computer-workspace-protocol";
 import { CONTEXT_VIEW_KINDS, isContextViewKind, type ContextViewOperation } from "./context-view-protocol";
@@ -37,15 +43,6 @@ export const HARNESS_PROTOCOL_NAME = "juling-harness" as const;
 export const HARNESS_PROTOCOL_VERSION = 1 as const;
 export const DEFAULT_MAX_CONTROL_FRAME_BYTES = 1024 * 1024;
 const LENGTH_PREFIX_BYTES = 4;
-/** Must match packages/harness-protocol/src/frame-codec.ts. */
-export const IMAGE_ATTACHMENT_FRAME_RESERVE_BYTES = 64 * 1024;
-export const IMAGE_ATTACHMENT_JSON_OVERHEAD_BYTES = 128;
-export const MAX_IMAGE_ATTACHMENT_BYTES = Math.floor(
-	((DEFAULT_MAX_CONTROL_FRAME_BYTES - IMAGE_ATTACHMENT_FRAME_RESERVE_BYTES - IMAGE_ATTACHMENT_JSON_OVERHEAD_BYTES) *
-		3) /
-		4,
-);
-export const MAX_IMAGE_ATTACHMENT_BASE64_CHARS = 4 * Math.ceil(MAX_IMAGE_ATTACHMENT_BYTES / 3);
 
 export interface HarnessRetryState {
 	attempt: number;
@@ -95,6 +92,7 @@ export type HarnessOperation =
 	| SessionOwnerOperation
 	| ContextViewOperation
 	| RuntimeViewOperation
+	| ModelServicesOperation
 	| PredictionOperation
 	| WorkbenchOperation
 	| UpgradeOperation
@@ -182,6 +180,7 @@ export type HarnessOperation =
 			definition: string;
 			model?: string[];
 			assignment?: string;
+			steps?: string[];
 			solutionSpace?: string;
 			context?: string;
 			async?: boolean;
@@ -214,6 +213,7 @@ export type HarnessOperation =
 			kind: "interaction.respond";
 			interactionId: string;
 			commandId: string;
+			leaseGeneration?: number;
 			decision: "submit" | "cancel";
 			value?: unknown;
 	  };
@@ -234,6 +234,10 @@ export type HarnessRemoteInteractionRequest =
 			title: string;
 			options: Array<{ id: string; label: string; description?: string }>;
 			multiple?: boolean;
+			initialIndex?: number;
+			selectionMarker?: "radio" | "checkbox";
+			checkedIndices?: readonly number[];
+			markableCount?: number;
 	  }
 	| {
 			kind: "input";
@@ -271,6 +275,16 @@ export type HarnessRemoteInteractionRequest =
 			commandId: string;
 			title: string;
 			questions: HarnessAskQuestion[];
+	  }
+	| {
+			kind: "form";
+			interactionId: string;
+			commandId: string;
+			title: string;
+			summary: string;
+			fieldCount: number;
+			sectionCount: number;
+			timeoutMs?: number;
 	  };
 
 export type HarnessAskOption = {
@@ -560,16 +574,6 @@ function nonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value.length > 0;
 }
 
-function validateImageAttachmentBudget(images: object[]): void {
-	for (const image of images) {
-		if (!("data" in image)) continue;
-		const data = image.data;
-		if (typeof data === "string" && data.length > MAX_IMAGE_ATTACHMENT_BASE64_CHARS) {
-			throw new HarnessFrameError("Image attachment exceeds the Base64 and control-frame budget");
-		}
-	}
-}
-
 function assertJsonValue(value: unknown, seen = new Set<object>()): void {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return;
 	if (typeof value === "number") {
@@ -634,7 +638,12 @@ export function parseHarnessRequest(value: unknown): HarnessRequest {
 		throw new HarnessFrameError("Invalid Harness request");
 	}
 	if (operation.kind === "session.owner.update") return input as unknown as HarnessRequest;
+	if (isSelectiveCommitKind(operation.kind)) {
+		validateSelectiveCommitOperation(operation);
+		return input as unknown as HarnessRequest;
+	}
 	if (isRuntimeViewKind(operation.kind)) return input as unknown as HarnessRequest;
+	if (isModelServicesKind(operation.kind)) return input as unknown as HarnessRequest;
 	if (isContextViewKind(operation.kind)) return input as unknown as HarnessRequest;
 	if (isEvaluationOperationKind(operation.kind)) {
 		validateEvaluationOperation(operation);
@@ -903,6 +912,7 @@ export function parseHarnessRequest(value: unknown): HarnessRequest {
 				"kind",
 				"definition",
 				"assignment",
+				"steps",
 				"context",
 				"async",
 				"isolation",
@@ -971,7 +981,6 @@ export function parseHarnessRequest(value: unknown): HarnessRequest {
 				) {
 					throw new HarnessFrameError("Invalid image attachments");
 				}
-				validateImageAttachmentBudget(operation.images);
 			}
 			break;
 		case "agent.kill":
@@ -1100,7 +1109,7 @@ export function parseHarnessRequest(value: unknown): HarnessRequest {
 			if ("arguments" in operation) assertJsonValue(operation.arguments);
 			break;
 		case "interaction.respond":
-			exactKeys(operation, ["kind", "interactionId", "commandId", "decision", "value"]);
+			exactKeys(operation, ["kind", "interactionId", "commandId", "leaseGeneration", "decision", "value"]);
 			if (!nonEmptyString(operation.interactionId) || !nonEmptyString(operation.commandId)) {
 				throw new HarnessFrameError("Invalid interaction identity");
 			}
@@ -1163,7 +1172,6 @@ export function parseHarnessRequest(value: unknown): HarnessRequest {
 				) {
 					throw new HarnessFrameError("Invalid image attachments");
 				}
-				validateImageAttachmentBudget(operation.images);
 			}
 			break;
 		default:
@@ -1192,6 +1200,7 @@ export const HARNESS_IMPLEMENTED_CAPABILITIES = [
 	...COMPUTER_WORKSPACE_QUERY_KINDS,
 	...CONTEXT_VIEW_KINDS,
 	...RUNTIME_VIEW_KINDS,
+	...MODEL_SERVICES_COMMAND_KINDS,
 	"settings.approval",
 	"prediction.query",
 	"composer.predictions",
@@ -1274,6 +1283,8 @@ export const HARNESS_IMPLEMENTED_CAPABILITIES = [
 	"interaction.respond",
 	"tui.transfer",
 	"remoteUi.standard",
+	"remoteUi.leaseGeneration",
+	"harness.locale",
 	"tui.manualCompatibility",
 ] as const;
 

@@ -27,10 +27,7 @@ export function harnessTabIdentity(tab: TabSession): string {
 }
 function current(tab: TabSession): ControlLease | undefined {
 	const lease = controls.get(tab);
-	if (
-		lease &&
-		(lease.expiresAt <= Date.now() || tab.state !== "alive" || lease.identity !== harnessTabIdentity(tab))
-	) {
+	if (lease && (lease.expiresAt <= Date.now() || tab.state !== "alive" || lease.identity !== harnessTabIdentity(tab))) {
 		clearTimeout(lease.timer);
 		controls.delete(tab);
 		return undefined;

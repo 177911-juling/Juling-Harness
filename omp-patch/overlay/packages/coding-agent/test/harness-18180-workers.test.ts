@@ -133,19 +133,15 @@ test("nine concurrent Harness agents reach native workers and retain conversatio
 					});
 			} else if (
 				index === 8 &&
-				!body.messages.some(message => message.role === "tool" && text(message.content).includes("Proceed"))
+				!body.messages.some(
+					message => message.role === "tool" && text(message.content).includes('"check": "proceed"'),
+				)
 			) {
 				return response({
 					name: "ask",
 					id: "harness-ask",
 					args: {
-						html: `<form>
-							<label for="check">Continue the worker check?</label>
-							<select id="check" name="check">
-								<option>Proceed</option>
-								<option>Stop</option>
-							</select>
-						</form>`,
+						html: '<form><fieldset><legend>Continue the worker check?</legend><label><input type="radio" name="check" value="proceed" checked>Proceed</label><label><input type="radio" name="check" value="stop">Stop</label></fieldset></form>',
 					},
 				});
 			}
@@ -233,9 +229,11 @@ test("nine concurrent Harness agents reach native workers and retain conversatio
 		signal: aborts[index]!.signal,
 	});
 	const pending = Array.from({ length: 9 }, (_, index) => runSubprocess(options(index)));
-	let workerDone = false;
-	void pending[8]!.then(() => {
+	let workerDone = false,
+		workerDetail = "";
+	void pending[8]!.then(result => {
 		workerDone = true;
+		workerDetail = JSON.stringify(result);
 	});
 	const events: ConversationRuntimeEvent[] = [];
 	let projector: ConversationLiveProjector | undefined;
@@ -288,17 +286,21 @@ test("nine concurrent Harness agents reach native workers and retain conversatio
 				tools: worker.messages.filter(message => message.role === "toolResult"),
 			}),
 		);
-		await waitFor(() => interaction.pending()?.request.kind === "select", "worker select after resume");
-		expect(interaction.pending()?.request.kind).toBe("select");
+		expect(
+			interaction.pending()?.request.kind,
+			workerDetail + "\n" + JSON.stringify(worker.messages).slice(-12000),
+		).toBe("form");
 		const ask = interaction.pending()!.request;
-		if (ask.kind !== "select") throw new Error("expected worker select");
-		expect(ask.options.map(option => option.label)).toEqual(["Proceed", "Stop"]);
+		const presented = interaction.readForm(ask.interactionId, interaction.pending()!.leaseGeneration).form;
+		expect(presented.fields.map(field => field.name)).toEqual(["check"]);
+		expect(presented.defaults).toEqual({ check: "proceed" });
 		interaction.respond({
 			kind: "interaction.respond",
 			commandId: ask.commandId,
 			interactionId: ask.interactionId,
+			leaseGeneration: interaction.pending()!.leaseGeneration,
 			decision: "submit",
-			value: "option:0",
+			value: { data: { check: "proceed" } },
 		});
 		const result = await pending[8]!;
 		expect(result.error).toBeUndefined();

@@ -104,9 +104,9 @@ describe("harness real tool approval and ask E2E", () => {
 		return { port, ui: factory(toolCall), toolCall };
 	}
 
-	async function waitForInput(port: HarnessRemoteInteractionPort): Promise<void> {
-		for (let attempt = 0; attempt < 100 && port.pending()?.request.kind !== "input"; attempt++) await Bun.sleep(10);
-		expect(port.pending()?.request.kind).toBe("input");
+	async function waitForInteraction(port: HarnessRemoteInteractionPort): Promise<void> {
+		for (let attempt = 0; attempt < 100 && !port.pending(); attempt++) await Bun.sleep(10);
+		expect(port.pending()).toBeDefined();
 	}
 
 	async function respond(
@@ -184,38 +184,44 @@ describe("harness real tool approval and ask E2E", () => {
 		expect(port.pending()).toBeUndefined();
 	});
 
-	test("Live Ask HTML form returns native select and input answers", async () => {
+	test("Live native Ask reads one safe form and returns named data with option notes", async () => {
 		const askTool = new AskTool(session as never);
 		const { port, ui, toolCall } = remoteUi();
 		const result = askTool.execute(
 			"e2e-ask-1",
 			{
-				html: `<form>
-					<label for="backend">Which backend?</label>
-					<select id="backend" name="backend">
-						<option>SQLite</option>
-						<option>PostgreSQL</option>
-					</select>
-					<label for="cache">Cache layer?</label>
-					<input id="cache" name="cache" type="text" />
-				</form>`,
+				html: `<form><input type="hidden" name="kind" value="deploy"><fieldset><legend>Storage</legend><p>Which backend?</p><label><input type="radio" name="backend" value="sqlite" checked>SQLite</label><label><input type="radio" name="backend" value="pg">PostgreSQL</label></fieldset><fieldset><legend>Cache layer?</legend><select name="cache"><option value="redis">Redis</option><option value="memory">Memory</option></select></fieldset></form>`,
 			},
 			undefined,
 			undefined,
 			{ hasUI: true, ui, toolCall } as AgentToolContext,
 		);
-		expect(port.pending()?.request).toMatchObject({
-			kind: "select",
+		await waitForInteraction(port);
+		const pending = port.pending();
+		expect(pending?.request).toMatchObject({
+			kind: "form",
 			commandId: "harness-tool:e2e-call-1",
-			title: "Which backend?",
+			fieldCount: 2,
+			sectionCount: 2,
 		});
-		await respond(port, "submit", "option:1");
-		await waitForInput(port);
-		expect(port.pending()?.request).toMatchObject({ kind: "input", title: "Cache layer?" });
-		await respond(port, "submit", "Redis");
+		if (pending?.request.kind !== "form") throw new Error("expected native form");
+		const dto = port.readForm(pending.request.interactionId, pending.leaseGeneration).form;
+		expect(dto.fields.map(field => field.name)).toEqual(["backend", "cache"]);
+		expect(dto.defaults).toEqual({ kind: "deploy", backend: "sqlite", cache: "redis" });
+		await respond(port, "submit", {
+			data: { kind: "not-editable", backend: "pg", cache: "redis" },
+			notes: [{ name: "backend", value: "pg", text: "Use replicas" }],
+		});
 		const outcome = await result;
-		expect(textOf(outcome)).toContain("PostgreSQL");
-		expect(textOf(outcome)).toContain("Redis");
+		expect(textOf(outcome)).toContain('"backend": "pg"');
+		expect(textOf(outcome)).toContain('"kind": "deploy"');
+		expect(outcome.details?.answers).toEqual([
+			{ name: "backend", question: "Which backend?", answer: "PostgreSQL" },
+			{ name: "cache", question: "Cache layer?", answer: "Redis" },
+		]);
+		expect(outcome.details?.notes).toEqual([
+			{ name: "backend", question: "Which backend?", option: "PostgreSQL", value: "pg", text: "Use replicas" },
+		]);
 		expect(port.pending()).toBeUndefined();
 	});
 });

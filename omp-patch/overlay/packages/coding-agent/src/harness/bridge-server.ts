@@ -2,6 +2,7 @@ import { RUNTIME_VIEW_KINDS } from "./runtime-views-protocol";
 import { CONTEXT_VIEW_KINDS } from "./context-view-protocol";
 import { isComputerWorkspaceQuery, type ComputerWorkspaceQuery } from "./computer-workspace-protocol";
 import { SessionControlError } from "./services/session-control-service";
+import { setRuntimeLocale } from "./locale";
 import { isConcurrentHarnessOperation } from "./command-arbiter";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
@@ -23,19 +24,20 @@ import {
 import { HarnessStateProjector } from "./state-projector";
 import type { HarnessBridgeLifecycle, HarnessHostRuntime } from "./harness-host-mode";
 
-const UPSTREAM_COMMIT = "04cd1a7549a02d62ad1d24826198d52507595683";
+const UPSTREAM_COMMIT = "7c49c11aa5bbaf3f418406583096168ad5b8c6dc";
 /**
  * Must match `omp-patch/patches/series.json` `patchsetVersion`. The Runtime
  * reports `${VERSION}-${PATCHSET_VERSION}` in its Harness Hello, and packaging
  * refuses to sign an artifact whose probed identity disagrees with the series,
  * so a stale value here fails the build (see `scripts/build-omp-host.mjs`).
  */
-const PATCHSET_VERSION = "harness.18";
+const PATCHSET_VERSION = "harness.6";
 
 /** Reads and interrupts must not wait for `core.prompt` to finish. Prompt holds
  *  `#dispatchQueue` for the whole turn, including 503 auto-retry backoff. */
 const CONCURRENT_DISPATCH_OPERATION_KINDS = new Set<string>([
 	"prediction.query",
+	"runtime.shutdown",
 	...CONTEXT_VIEW_KINDS,
 	...RUNTIME_VIEW_KINDS,
 	"session.owner.update",
@@ -293,6 +295,12 @@ export class HarnessBridgeServer implements HarnessBridgeLifecycle {
 							frame.header.runtimeEpoch !== runtime.runtimeEpoch
 						)
 							throw new Error("Stale Runtime epoch");
+						const locale = frame.body as { type?: string; locale?: unknown };
+						if (locale.type === "harness.locale") {
+							if (locale.locale !== "zh" && locale.locale !== "en") throw new Error("Invalid Harness locale");
+							setRuntimeLocale(locale.locale);
+							continue;
+						}
 						if (
 							frame.body &&
 							typeof frame.body === "object" &&

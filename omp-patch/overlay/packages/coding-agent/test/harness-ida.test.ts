@@ -1,5 +1,4 @@
 import { test, expect } from "bun:test";
-import { fileURLToPath } from "node:url";
 import { HarnessIdaService, type HarnessIdaDb, type HarnessIdaPort } from "../src/harness/services/ida-service";
 test("IDA mutations require a single-use review and native database identity/version", async () => {
 	let version = 1;
@@ -105,10 +104,15 @@ assert page['text']=='0x1f4  "test"\\n0x1f5  "test"'
 assert calls==['rename','comment']
 print('fence and exactly-once execution passed')
 `;
-	const child = Bun.spawn(["python", "-c", script, fileURLToPath(new URL("../src/ida/worker.py", import.meta.url))], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
+	const child = Bun.spawn(
+		[
+			"python",
+			"-c",
+			script,
+			new URL("../src/ida/worker.py", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
+		],
+		{ stdout: "pipe", stderr: "pipe" },
+	);
 	const err = await new Response(child.stderr).text();
 	expect(await child.exited, err).toBe(0);
 });

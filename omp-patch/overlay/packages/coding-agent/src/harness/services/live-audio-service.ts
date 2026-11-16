@@ -223,8 +223,7 @@ export class HarnessLiveAudioService {
 		const reserve = this.#operations.then(() => {
 			if (this.#disposed || operation.sessionId !== this.session.sessionId)
 				throw new HarnessLiveError("COMMAND_BLOCKED", "Live requires the active session");
-			if (!operation.sdpOffer?.trim())
-				throw new HarnessLiveError("INVALID_ARGUMENT", "WebRTC requires an SDP offer");
+			if (!operation.sdpOffer?.trim()) throw new HarnessLiveError("INVALID_ARGUMENT", "WebRTC requires an SDP offer");
 			if (this.running)
 				throw new HarnessLiveError("COMMAND_BLOCKED", "Stop Live or dictation before starting another call");
 			if (!this.#control) throw new HarnessLiveError("CAPABILITY_UNAVAILABLE", "Live controller is unavailable");
@@ -437,8 +436,7 @@ export class HarnessLiveAudioService {
 			);
 		const id = randomUUID(),
 			token = randomBytes(32).toString("hex");
-		const endpoint =
-			process.platform === "win32" ? `\\\\.\\pipe\\juling-harness-audio-${id}` : this.#socketEndpoint(id);
+		const endpoint = process.platform === "win32" ? `\\\\.\\pipe\\juling-harness-audio-${id}` : this.#socketEndpoint(id);
 		const descriptor = path.join(this.#root, "audio", `${id}.json`);
 		const server = createServer(socket => this.#peer(capture, socket));
 		const capture: Capture = {

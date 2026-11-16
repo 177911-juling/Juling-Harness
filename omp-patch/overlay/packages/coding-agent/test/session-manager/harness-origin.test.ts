@@ -90,6 +90,5 @@ describe("Harness session origin compatibility", () => {
 		expect(classifyHarnessSessionOrigin({})).toBe("cli");
 		expect(classifyHarnessSessionOrigin({ harnessOrigin: "harness-host" })).toBe("harness");
 		expect(classifyHarnessSessionOrigin({ harnessOrigin: "future-origin" })).toBe("cli");
-		expect(classifyHarnessSessionOrigin({ studioOrigin: "studio-host" })).toBe("harness");
 	});
 });

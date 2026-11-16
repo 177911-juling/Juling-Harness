@@ -33,10 +33,10 @@ index 3fb839429e..1ead4784d3 100644
  
  	return path.join(getAgentDir(), "agents");
 diff --git a/packages/coding-agent/src/cli/auth-broker-cli.ts b/packages/coding-agent/src/cli/auth-broker-cli.ts
-index c868b36af8..9494d9a66c 100644
+index 14e381bcaa..1ff8faf18a 100644
 --- a/packages/coding-agent/src/cli/auth-broker-cli.ts
 +++ b/packages/coding-agent/src/cli/auth-broker-cli.ts
-@@ -192,7 +192,9 @@ async function runToken(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
+@@ -197,7 +197,9 @@ async function runToken(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
  
  async function runLogin(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
  	if (flags.via && !flags.provider) {
@@ -45,9 +45,9 @@ index c868b36af8..9494d9a66c 100644
 +			`Usage: ${APP_NAME} auth-broker login <provider> --via=user@host (provider required for remote login)`,
 +		);
  	}
+ 	applyUnpausedProviders(await resolveEffectiveSettings());
  	const providers = getOAuthProviders();
- 	// One interface for picker + login prompts; closed before `--via` hands
-@@ -403,7 +405,7 @@ async function loadImportPlan(
+@@ -410,7 +412,7 @@ async function loadImportPlan(
  		if (!provider) {
  			skipped.push({
  				file,
@@ -56,7 +56,7 @@ index c868b36af8..9494d9a66c 100644
  			});
  			continue;
  		}
-@@ -449,7 +451,9 @@ function describeImportEntry(entry: ImportPlanEntry): string {
+@@ -456,7 +458,9 @@ function describeImportEntry(entry: ImportPlanEntry): string {
  async function runImport(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
  	const target = flags.source;
  	if (!target) {
@@ -67,7 +67,7 @@ index c868b36af8..9494d9a66c 100644
  	}
  	const resolvedTarget = path.resolve(target.startsWith("~") ? target.replace(/^~/, os.homedir()) : target);
  	const { entries, skipped } = await loadImportPlan(resolvedTarget, flags.provider, flags.includeDisabled === true);
-@@ -580,7 +584,7 @@ async function runMigrate(flags: AuthBrokerCommandArgs["flags"]): Promise<void>
+@@ -587,7 +591,7 @@ async function runMigrate(flags: AuthBrokerCommandArgs["flags"]): Promise<void>
  	}
  	if (flags.fromLocal !== true) {
  		throw new Error(
@@ -77,7 +77,7 @@ index c868b36af8..9494d9a66c 100644
  	}
  
 diff --git a/packages/coding-agent/src/cli/auth-gateway-cli.ts b/packages/coding-agent/src/cli/auth-gateway-cli.ts
-index c08601cc6a..cdc0fcb0f3 100644
+index 78374cde2e..30e08fc903 100644
 --- a/packages/coding-agent/src/cli/auth-gateway-cli.ts
 +++ b/packages/coding-agent/src/cli/auth-gateway-cli.ts
 @@ -44,6 +44,7 @@ import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
@@ -88,7 +88,7 @@ index c08601cc6a..cdc0fcb0f3 100644
  import chalk from "@oh-my-pi/pi-utils/chalk";
  import { ModelRegistry } from "../config/model-registry";
  import { cfgDisabledProviders, cfgModelProviderOrder } from "../config/model-settings";
-@@ -353,7 +354,7 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
+@@ -354,7 +355,7 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
  	const brokerConfig = await resolveAuthBrokerConfig();
  	if (!brokerConfig) {
  		throw new Error(
@@ -97,7 +97,7 @@ index c08601cc6a..cdc0fcb0f3 100644
  		);
  	}
  	if (flags.clients !== undefined && flags.noAuth) {
-@@ -606,7 +607,7 @@ async function runStatus(flags: AuthGatewayCommandArgs["flags"]): Promise<void>
+@@ -608,7 +609,7 @@ async function runStatus(flags: AuthGatewayCommandArgs["flags"]): Promise<void>
  			);
  			if (!tokenPresent) {
  				process.stdout.write(
@@ -106,7 +106,7 @@ index c08601cc6a..cdc0fcb0f3 100644
  				);
  			}
  		}
-@@ -850,7 +851,7 @@ async function runCheck(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
+@@ -852,7 +853,7 @@ async function runCheck(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
  	const brokerConfig = await resolveAuthBrokerConfig();
  	if (!brokerConfig) {
  		throw new Error(
@@ -282,10 +282,10 @@ index ca5346ff16..88eab71acd 100644
  export async function initXdg(): Promise<void> {
  	if (process.platform !== "linux" && process.platform !== "darwin") {
 diff --git a/packages/coding-agent/src/cli/help-extra.ts b/packages/coding-agent/src/cli/help-extra.ts
-index 485c271d1e..cff9f91395 100644
+index 16eef2b37b..0fccb07103 100644
 --- a/packages/coding-agent/src/cli/help-extra.ts
 +++ b/packages/coding-agent/src/cli/help-extra.ts
-@@ -69,7 +69,7 @@ export function getExtraHelpText(): string {
+@@ -82,7 +82,7 @@ export function getExtraHelpText(): string {
  
    ${chalk.dim("# Configuration")}
    OMP_PROFILE                 - Named profile for isolated agent state (same as --profile)
@@ -294,7 +294,7 @@ index 485c271d1e..cff9f91395 100644
    PI_CODING_AGENT_DIR        - Session storage directory (default: ~/${CONFIG_DIR_NAME}/agent)
    PI_PACKAGE_DIR             - Override package directory (for Nix/Guix store paths)
    PI_SMOL_MODEL              - Override smol/fast model (see --smol)
-@@ -99,6 +99,6 @@ ${chalk.bold("Plugin Options:")}
+@@ -105,6 +105,6 @@ ${chalk.bold("Plugin Options:")}
    --plugin-dir <path>        Load plugin from directory (repeatable)
  
  ${chalk.bold("Useful Commands:")}
@@ -428,7 +428,7 @@ index 39ec6c3a2f..b38ef89707 100644
   */
  export function findAllNearestProjectConfigDirs(subpath: string, cwd: string = getProjectDir()): ConfigDirEntry[] {
 diff --git a/packages/coding-agent/src/discovery/builtin.ts b/packages/coding-agent/src/discovery/builtin.ts
-index e68600459d..53c57d769b 100644
+index d4b72e47f6..380e24820e 100644
 --- a/packages/coding-agent/src/discovery/builtin.ts
 +++ b/packages/coding-agent/src/discovery/builtin.ts
 @@ -40,11 +40,13 @@ import {
@@ -533,7 +533,7 @@ index e68600459d..53c57d769b 100644
  
  	// User-level scan from ~/.omp/agent/skills/
 diff --git a/packages/coding-agent/src/discovery/helpers.ts b/packages/coding-agent/src/discovery/helpers.ts
-index e514d84e6b..c931c8f7e9 100644
+index 2b9f062d7b..a816ba9131 100644
 --- a/packages/coding-agent/src/discovery/helpers.ts
 +++ b/packages/coding-agent/src/discovery/helpers.ts
 @@ -9,6 +9,7 @@ import {
@@ -561,7 +561,7 @@ index e514d84e6b..c931c8f7e9 100644
  	claude: {
  		userBase: ".claude",
  		userAgent: ".claude",
-@@ -1049,11 +1060,17 @@ export function getProjectDiscoveryCeilings(): ReadonlySet<string> {
+@@ -1053,11 +1064,17 @@ export function getProjectDiscoveryCeilings(): ReadonlySet<string> {
  
  /** The current user's config roots are never project anchors. */
  export function isUserConfigRoot(root: string): boolean {
@@ -585,7 +585,7 @@ index e514d84e6b..c931c8f7e9 100644
  
  /**
 diff --git a/packages/coding-agent/src/modes/acp/acp-agent.ts b/packages/coding-agent/src/modes/acp/acp-agent.ts
-index 25d9a28646..5cdb953752 100644
+index 000a1f49cb..d5aeb27db3 100644
 --- a/packages/coding-agent/src/modes/acp/acp-agent.ts
 +++ b/packages/coding-agent/src/modes/acp/acp-agent.ts
 @@ -3,6 +3,7 @@ import * as path from "node:path";
@@ -596,7 +596,7 @@ index 25d9a28646..5cdb953752 100644
  import {
  	type Agent,
  	type AgentSideConnection,
-@@ -1033,23 +1034,23 @@ export class AcpAgent implements Agent {
+@@ -1057,23 +1058,23 @@ export class AcpAgent implements Agent {
  			{
  				id: "agent",
  				name: "Use existing local credentials",
@@ -733,7 +733,7 @@ index bc6756c983..80a3e40495 100644
  	if (actions) meta.push(`a=${actions}`);
  	const urgency = osc99Urgency(n.urgency);
 diff --git a/packages/utils/src/dirs.ts b/packages/utils/src/dirs.ts
-index 9845f67070..7c2e222809 100644
+index c5f9c5d5d4..b464f490e2 100644
 --- a/packages/utils/src/dirs.ts
 +++ b/packages/utils/src/dirs.ts
 @@ -1,14 +1,16 @@
@@ -1143,7 +1143,7 @@ index 9845f67070..7c2e222809 100644
  		}
  		dirs = new DirResolver({ agentDirOverride: preProfileAgentDirEnv });
  	}
-@@ -1233,14 +1300,17 @@ let cachedInstallId: string | null = null;
+@@ -1238,14 +1305,17 @@ let cachedInstallId: string | null = null;
  
  const INSTALL_ID_FILE = "install-id";
  /**

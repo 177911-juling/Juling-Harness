@@ -200,7 +200,6 @@ export const SEAM_GROUPS = Object.freeze([
       "packages/coding-agent/src/tools/browser/relay/protocol.ts",
       "packages/coding-agent/src/tools/browser/relay/server.ts",
       "packages/coding-agent/src/tools/browser/relay/bridge.ts",
-      "packages/coding-agent/test/tools/browser-open-lease.test.ts",
       "packages/coding-agent/src/tools/index.ts",
       "packages/coding-agent/src/tools/eval.ts",
       "packages/tui/src/tools/eval.ts",

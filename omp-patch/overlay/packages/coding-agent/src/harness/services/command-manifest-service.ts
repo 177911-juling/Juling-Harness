@@ -5,6 +5,8 @@ import type { AgentSession } from "../../session/agent-session";
 import { SKILL_PROMPT_MESSAGE_TYPE } from "../../session/messages";
 import { BUILTIN_SLASH_COMMANDS_INTERNAL, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
 import type { SlashCommandRuntime } from "../../slash-commands/types";
+import type { HarnessCommitService } from "./commit-service";
+import { captureHarnessSessionInput } from "./session-control-service";
 
 export interface HarnessOperatorCommand {
 	side?: boolean;
@@ -31,7 +33,7 @@ export interface HarnessOperatorCommandManifest {
 	unclassifiedBuiltins: string[];
 }
 
-const UPSTREAM_COMMIT = "04cd1a7549a02d62ad1d24826198d52507595683";
+const UPSTREAM_COMMIT = "7c49c11aa5bbaf3f418406583096168ad5b8c6dc";
 const HARNESS_SESSION_TITLE_ENSURE_ID = "harness.session-title.ensure";
 const DESTRUCTIVE = new Set(["delete", "drop", "clear", "fork"]);
 const READ_ONLY = new Set(["help", "version", "stats", "models", "tree", "branch", "goal"]);
@@ -51,7 +53,10 @@ export class HarnessCommandManifestService {
 	#current: HarnessOperatorCommandManifest;
 	#commandsById = new Map<string, HarnessOperatorCommand>();
 
-	constructor(private readonly session: AgentSession) {
+	constructor(
+		private readonly session: AgentSession,
+		readonly prepareCommit?: HarnessCommitService["prepareFromArgs"],
+	) {
 		this.#current = this.#replace(baselineCommands());
 	}
 
@@ -133,6 +138,22 @@ export class HarnessCommandManifestService {
 		if (argumentText && !command.allowArgs) {
 			throw new HarnessCommandManifestError("INVALID_ARGUMENT", `/${command.name} does not accept arguments`);
 		}
+		if (command.name === "commit") {
+			if (!this.prepareCommit)
+				throw new HarnessCommandManifestError("COMMAND_UNKNOWN", "Selective commit is unavailable in this Runtime");
+			const prepared = await this.prepareCommit(argumentText);
+			const { view, runtimeEpoch, expiresAt } = prepared.draft;
+			return {
+				output: [],
+				result: {
+					consumed: true,
+					requiresConfirmation: true,
+					selectiveCommit: { draftId: view.id, revision: view.revision, runtimeEpoch, expiresAt },
+					instructions: prepared.instructions,
+				},
+			};
+		}
+		const checkInput = captureHarnessSessionInput(this.session);
 		const output: string[] = [];
 		const runtime: SlashCommandRuntime = {
 			session: this.session,
@@ -152,6 +173,11 @@ export class HarnessCommandManifestService {
 			{ name: command.name, args: argumentText, text: `/${command.name}${argumentText ? ` ${argumentText}` : ""}` },
 			runtime,
 		);
+		if (result && "prompt" in result) {
+			checkInput();
+			const started = await this.session.prompt(result.prompt, { runCommands: false, streamingBehavior: "steer" });
+			return { output, result: { consumed: true, started } };
+		}
 		return { output, result: result ?? { consumed: true } };
 	}
 
@@ -207,6 +233,7 @@ export class HarnessCommandManifestService {
 	}
 
 	async #invokeDynamic(command: HarnessOperatorCommand, argumentText: string): Promise<unknown> {
+		const checkInput = captureHarnessSessionInput(this.session);
 		const text = `/${command.name}${argumentText ? ` ${argumentText}` : ""}`;
 		if (command.source === "skill") {
 			const parsed = parseSkillInvocation(text);
@@ -216,6 +243,7 @@ export class HarnessCommandManifestService {
 				throw new HarnessCommandManifestError("COMMAND_UNKNOWN", "Skill command is no longer available");
 			}
 			const built = await buildSkillPromptMessage(skill, parsed, "user");
+			checkInput();
 			await this.session.promptCustomMessage(
 				{
 					customType: SKILL_PROMPT_MESSAGE_TYPE,
@@ -233,7 +261,7 @@ export class HarnessCommandManifestService {
 			const source = this.session.slashCommands.find(row => row.name === command.name);
 			if (!source) throw new HarnessCommandManifestError("COMMAND_UNKNOWN", "File command is no longer available");
 			started = await this.session.prompt(renderFileSlashCommand(source, argumentText), { runCommands: false });
-		} else started = await this.session.invokeHarnessCommand(command.name, argumentText);
+		} else started = await this.session.invokeHarnessCommand(command.name, argumentText, checkInput);
 		return { started, consumed: !started, source: command.source };
 	}
 }

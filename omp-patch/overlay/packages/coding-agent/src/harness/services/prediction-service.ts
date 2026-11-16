@@ -89,8 +89,7 @@ export class HarnessPredictionService {
 			.JULING_HARNESS_MEDIA_ROOT,
 		readonly socketDirectory = process.env.JULING_HARNESS_SOCKET_DIR,
 	) {
-		this.directory =
-			typeof directoryOrOptions === "string" ? directoryOrOptions : process.env.JULING_HARNESS_MEDIA_ROOT;
+		this.directory = typeof directoryOrOptions === "string" ? directoryOrOptions : process.env.JULING_HARNESS_MEDIA_ROOT;
 		this.#engine = new HarnessPredictionEngine(
 			session,
 			typeof directoryOrOptions === "object" ? directoryOrOptions : {},

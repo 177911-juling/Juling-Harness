@@ -90,14 +90,14 @@ export const GUI_SETTING_DEFINITIONS = {
 		type: "enum",
 		values: ["unset", "yes", "no"],
 		default: "unset",
-		zh: "Codex 5 小时重置券策略",
+		zh: "Codex 5 小时窗口重置",
 		en: "Codex 5-hour reset policy",
 	},
 	"codexResets.autoRedeemWeekly": {
 		type: "enum",
 		values: ["unset", "yes", "no"],
 		default: "unset",
-		zh: "Codex 每周重置券策略",
+		zh: "Codex 周窗口重置",
 		en: "Codex weekly reset policy",
 	},
 	"codexResets.minBlockedMinutes": {

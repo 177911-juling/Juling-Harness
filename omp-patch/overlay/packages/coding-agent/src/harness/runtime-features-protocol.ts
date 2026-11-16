@@ -52,7 +52,12 @@ export interface JobWidgetView {
 }
 
 /** Upstream `AsyncJobInspection` for one job. */
+import type { TaskStepState } from "@oh-my-pi/pi-tui/tools/task";
+import type { JobActionsView } from "./job-actions-protocol";
+
 export interface JobInspection {
+	actions?: JobActionsView;
+	taskSteps?: TaskStepState;
 	purpose?: string;
 	caption?: string;
 	jobId: string;
@@ -102,6 +107,9 @@ export type RuntimeFeatureOperation =
 	| { kind: "seance.ask"; sessionId: string; source: string; task: string; model?: string };
 export interface RuntimeFeatureResultMap {
 	"agent.spawn.options": {
+		stepsAdvertised: boolean;
+		autoParallel: "off" | "suggest" | "on";
+		effortSelection: boolean;
 		modelSelection: boolean;
 		maxEffort: string;
 		models: Array<{ selector: string; name: string; thinkingLevels: readonly string[] }>;
@@ -141,20 +149,6 @@ export const RUNTIME_FEATURE_READ_KINDS = [
 export function isRuntimeFeatureKind(kind: string): kind is RuntimeFeatureOperation["kind"] {
 	return (RUNTIME_FEATURE_KINDS as readonly string[]).includes(kind);
 }
-
-const FIELDS: Record<RuntimeFeatureOperation["kind"], readonly string[]> = {
-	"agent.spawn.options": ["definition"],
-	"btw.inject": ["injectId"],
-	"session.history.rename": ["targetSessionId", "title"],
-	"session.history.pin": ["targetSessionId", "pinned"],
-	"session.lease.inspect": ["targetSessionIds"],
-	"approvals.forget": [],
-	"jobs.inspect": ["jobId"],
-	"mcp.auth.reauth": ["name"],
-	"mcp.auth.unauth": ["name"],
-	"mcp.auth.reconnect": ["name"],
-	"seance.ask": ["source", "task", "model"],
-};
 function text(value: unknown, field: string, max = 512): void {
 	if (typeof value !== "string" || !value.trim() || value.includes("\0") || value.length > max)
 		throw new Error(`Invalid ${field}`);
@@ -165,8 +159,6 @@ export function validateRuntimeFeatureOperation(value: unknown): asserts value i
 	const input = value as Record<string, unknown>;
 	const kind = input.kind;
 	if (typeof kind !== "string" || !isRuntimeFeatureKind(kind)) throw new Error("Unknown Runtime feature operation");
-	const allowed = ["kind", "sessionId", ...FIELDS[kind]];
-	if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error("Unknown Runtime feature field");
 	text(input.sessionId, "sessionId");
 	if (kind === "jobs.inspect") text(input.jobId, "jobId");
 	if (kind.startsWith("mcp.auth.")) text(input.name, "name");
@@ -176,4 +168,3 @@ export function validateRuntimeFeatureOperation(value: unknown): asserts value i
 		if (input.model !== undefined) text(input.model, "model");
 	}
 }
-

@@ -1,6 +1,18 @@
 import type { SessionCompactionState } from "./session-compaction-protocol";
 /** Additive settings surface for Runtime 18.10; the published settings payload stays unchanged. */
 export const FEATURE_SETTING_KEYS = [
+	"models.noJudge",
+	"models.noSpotlight",
+	"models.offline",
+	"find.verifyModel",
+	"find.hitThreshold",
+	"encourageEdits",
+	"commit.enabled",
+	"todo.midRunNudges",
+	"shellPath",
+	"bash.allowedEnvVars",
+	"bash.patterns",
+	"ttsr.repeatMode",
 	"magicKeywords.enabled",
 	"magicKeywords.chillax",
 	"out.enabled",
@@ -9,6 +21,8 @@ export const FEATURE_SETTING_KEYS = [
 	"display.shellVisualization",
 	"title.refreshAfterPrompts",
 	"display.advisorCollapsedLines",
+	"task.steps",
+	"task.autoParallel",
 	"task.perCallModel",
 	"task.perCallModelAllow",
 	"task.workerThreads",
@@ -77,6 +91,8 @@ export interface FeatureSettingRow {
 	key: FeatureSettingKey;
 	value: FeatureSettingValue;
 	source: "env" | "runtime" | "overlay" | "project" | "global" | "default";
+	/** Authored layers, before project merging and path resolution. */
+	editableValues?: { global: FeatureSettingValue; session: FeatureSettingValue };
 }
 export interface PoolAccountOption {
 	provider: string;
@@ -147,14 +163,8 @@ export const FEATURE_SETTINGS_READ_KINDS = [
 export function isFeatureSettingsKind(kind: string): kind is FeatureSettingsOperation["kind"] {
 	return (FEATURE_SETTINGS_KINDS as readonly string[]).includes(kind);
 }
-function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
-	if (
-		!value ||
-		typeof value !== "object" ||
-		Array.isArray(value) ||
-		Object.keys(value).some(key => !keys.includes(key))
-	)
-		throw Error("Invalid feature settings payload");
+function record(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("Invalid feature settings payload");
 	return value as Record<string, unknown>;
 }
 function text(value: unknown, max = 1024, empty = false): void {
@@ -162,7 +172,8 @@ function text(value: unknown, max = 1024, empty = false): void {
 		throw Error("Invalid feature settings text");
 }
 export function validateFeatureSettingValue(value: unknown, depth = 0): asserts value is FeatureSettingValue {
-	if (depth > 4) throw Error("Setting nesting exceeds limit");
+	// Authored path groups can nest rule lists with their per-rule env arrays.
+	if (depth > 8) throw Error("Setting nesting exceeds limit");
 	if (value === null || typeof value === "boolean") return;
 	if (typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 100_000_000) return;
 	if (typeof value === "string") {
@@ -197,42 +208,29 @@ export function validateFeatureSettingsOperation(value: unknown): void {
 		(value as FeatureSettingsOperation)?.kind === "session.compaction.set"
 	)
 		return;
-	const row = record(value, ["kind", "sessionId", "key", "value", "scope", "selector", "input", "confirmed"]);
+	const row = record(value);
 	if (typeof row.kind !== "string" || !isFeatureSettingsKind(row.kind))
 		throw Error("Unknown feature settings operation");
 	text(row.sessionId, 128);
 	if (row.kind === "models.compaction.set") {
-		record(value, ["kind", "sessionId", "selector", "input", "confirmed"]);
 		text(row.selector);
 		text(row.input, 64, true);
 		if (row.confirmed !== undefined && typeof row.confirmed !== "boolean") throw Error("Invalid confirmation");
 		return;
 	}
 	if (row.kind === "models.compaction.preview") {
-		record(value, ["kind", "sessionId", "selector", "input"]);
 		text(row.selector);
 		text(row.input, 64, true);
 		return;
 	}
 	if (row.kind === "preferences.features.get" || row.kind === "accounts.pool.options") {
-		record(value, ["kind", "sessionId"]);
 		return;
 	}
 	if (!(FEATURE_SETTING_KEYS as readonly unknown[]).includes(row.key)) throw Error("Unknown feature setting");
 	if (row.kind === "preferences.features.clearOverride") {
-		record(value, ["kind", "sessionId", "key"]);
 		return;
 	}
-	record(value, ["kind", "sessionId", "key", "value", "scope"]);
 	if (row.scope !== "session" && row.scope !== "global") throw Error("Invalid settings scope");
 	validateFeatureSettingValue(row.value);
 	if (JSON.stringify(row.value).length > 32768) throw Error("Setting exceeds limit");
 }
-function setting(value: unknown): void {
-	const row = record(value, ["key", "value", "source"]);
-	if (!(FEATURE_SETTING_KEYS as readonly unknown[]).includes(row.key)) throw Error("Unknown feature setting");
-	if (!["env", "runtime", "overlay", "project", "global", "default"].includes(row.source as string))
-		throw Error("Invalid setting source");
-	validateFeatureSettingValue(row.value);
-}
-
