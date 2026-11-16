@@ -14,7 +14,9 @@ let currentLocale: DesktopLocale = normalizeDesktopLocale(
 const listeners = new Set<(locale: DesktopLocale) => void>();
 
 export function normalizeDesktopLocale(locale: string | undefined | null): DesktopLocale {
-  return typeof locale === "string" && locale.toLowerCase().startsWith("zh") ? "zh" : "en";
+  // The product is Chinese-first: only an explicit non-Chinese locale opts into English.
+  if (locale === undefined || locale === null || locale === "") return "zh";
+  return locale.toLowerCase().startsWith("zh") ? "zh" : "en";
 }
 
 export function parseDesktopLanguagePayload(value: unknown): DesktopLocale | undefined {

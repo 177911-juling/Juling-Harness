@@ -174,7 +174,7 @@ export async function ensureSelectedSessionActive(
     if (target.selectedThreadId === undefined) {
       throw { code: "INVALID_ARGUMENT", message: "当前历史会话缺少 threadId，无法自动恢复后发送。" };
     }
-    const handle = await client.command("session.resume", { threadId: target.selectedThreadId });
+    const handle = await client.command("session.resume", { threadId: target.selectedThreadId, ...(target.model === undefined ? {} : { model: target.model }) });
     const snapshot = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId, 30_000);
     if (snapshot.sessionId !== target.selectedSessionId) {
       throw {

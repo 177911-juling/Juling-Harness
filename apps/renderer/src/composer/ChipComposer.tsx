@@ -3,7 +3,7 @@ import { GitHubReferencePreview } from "./GitHubReferencePreview";
 import type { GitHubReferenceSnapshot } from "./githubReference";
 import type { GitCommitReferenceSnapshot } from "./gitCommitReference";
 import type { BrowserReferenceSnapshot } from "./browserReference";
-import { parseChipPayload } from "./ingest";
+import { ImageAttachmentBudgetError, parseChipPayload } from "./ingest";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { useWordPrediction, type ComposerPrediction } from "./useWordPrediction";
 import { isPrimaryModifier } from "../keyboard/shortcuts";

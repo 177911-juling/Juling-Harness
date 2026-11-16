@@ -176,9 +176,4 @@ export function validateRuntimeFeatureOperation(value: unknown): asserts value i
 		if (input.model !== undefined) text(input.model, "model");
 	}
 }
-export function validateRuntimeFeatureResult(_kind: RuntimeFeatureOperation["kind"], value: unknown): void {
-	if (!value || typeof value !== "object" || Array.isArray(value))
-		throw new Error("Expected a Runtime feature result");
-	if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 800000)
-		throw new Error("Runtime feature result exceeds the wire budget");
-}
+

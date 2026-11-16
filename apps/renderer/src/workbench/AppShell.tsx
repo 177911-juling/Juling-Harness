@@ -1548,7 +1548,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       });
     sessionCreateWaitRef.current = pending;
   }, [client, dock.store, commitDockSelection, setSelectedProvisionalSessionId]);
-  const ensureNewSession = useCallback(() => {
+  const ensureNewSession = useCallback((model?: string) => {
     if (previewMode.preview || sessionCreateWaitRef.current) return;
     runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
       const handle = await client.command("session.create", model === undefined ? {} : { model });

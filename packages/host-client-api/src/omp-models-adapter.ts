@@ -2871,7 +2871,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       }
       const text = await readConfigText(paths.configPath);
       await writeConfigText(paths.configPath, upsertYamlScalar(text, "modelRoleStorage", input.storage));
-      return { ...WRITE_OK, message: input.storage === "project" ? "角色写入项目 .juling/config.yml" : "已恢复全局角色配置" };
+      return { ...writeOk(), message: input.storage === "project" ? "角色写入项目 .juling/config.yml" : "已恢复全局角色配置" };
     },
 
     async setFallback(input): Promise<ConfigWriteResult> {

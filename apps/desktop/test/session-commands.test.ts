@@ -167,8 +167,8 @@ test("delete reports native partial cleanup while still removing telemetry, bind
   });
   const result = await commands.delete!({ threadId: threadIdFor("session-a") as ThreadId });
   assert.equal(result.applied, true);
-  assert.match(result.message ?? "", /partial.*native-purge-partial/);
-  assert.match(result.message ?? "", /Managed artifact cleanup failed/);
+  assert.match(result.message ?? "", /native-purge-partial/);
+  assert.match(result.message ?? "", /托管产物清理失败|Managed artifact cleanup failed/);
   assert.deepEqual(cleaned, ["artifacts", "telemetry", "binding", "lease"]);
 });
 

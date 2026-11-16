@@ -277,7 +277,7 @@ function ConversationWindow({ view, store, hosts, bounds, order, snapLayer }: { 
       onTitleDrag={event => { if (!nativeKey) dragConversation(event, store, { viewId: view.id }); }}
       onRectChange={rect => store.setWindow(view.id, { rect })}
       onControl={action => { if (nativeKey) void globalThis.julingHarnessChrome!.controlFloatWindow!({ key: nativeKey, action }); else control(action); }}
-      onClose={() => store.close(view.id)} closeLabel="关闭对话视图"
+      onClose={() => store.close(view.id)} closeLabel={resolvedLanguage === "zh" ? "关闭对话视图" : "Close conversation view"}
       titleContent={<HeaderSlot hosts={hosts} id={view.documentId} kind="title" fallback={record.title} />}
       titleExtra={view.pin !== "none" ? <span className="dock-pin-status"><Icon name={native ? "external" : "pin"} extra="sm" /></span> : null}
       maximizeButton={!nativeKey ? <WindowSnapButton manager={store.manager} window={store.manager.get(view.id)!} locked={locked} onMaximize={() => control("maximize")} /> : undefined}

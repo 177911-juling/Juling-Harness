@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import type { ConfigWriteResult, StatsDashboardReadModel, TokenUsageReadModel } from "@juling-harness/client-contract";
 
 import { getStatsDbPathsForRead } from "./omp-discovery/paths.js";
+import { hostText } from "./locale.js";
 import { sanitizeDisplayText } from "./read-models.js";
 import type { HostUsageService } from "./services.js";
 
@@ -46,13 +47,13 @@ const openOk = (): ConfigWriteResult => ({
   applied: true,
   runtimeEffect: "immediate",
   message: "正在打开 Juling Stats 仪表盘。",
-};
+});
 
 const openedOk = (): ConfigWriteResult => ({
   applied: true,
   runtimeEffect: "immediate",
   message: "已在浏览器打开 Juling Stats 仪表盘。",
-};
+});
 
 export interface OmpUsageAdapterOptions {
   readonly home?: string;

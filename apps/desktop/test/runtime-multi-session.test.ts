@@ -337,18 +337,18 @@ test("update restart postpones interactions, queued commands and background work
   const profileDirectory = await mkdtemp(join(tmpdir(), "omp-restart-blocked-"));
   const { port, state } = createHarness();
   const blockers: Array<[Partial<OperatorStateSnapshot>, RegExp]> = [
-    [{ isStreaming: true }, /Tasks are still running/],
-    [{ isCompacting: true }, /compacting/],
-    [{ pendingInteraction: { interactionId: "approval" } as never }, /interactions/],
-    [{ plan: { status: "review" } as never }, /plan review/],
-    [{ pendingMessages: 1 }, /Queued messages/],
-    [{ activeCommandIds: ["command" as never] }, /Commands/],
+    [{ isStreaming: true }, /Tasks are still running|任务仍在运行/],
+    [{ isCompacting: true }, /compacting|压缩/],
+    [{ pendingInteraction: { interactionId: "approval" } as never }, /interactions|交互/],
+    [{ plan: { status: "review" } as never }, /plan review|计划审阅/],
+    [{ pendingMessages: 1 }, /Queued messages|排队消息/],
+    [{ activeCommandIds: ["command" as never] }, /Commands|命令/],
     ...["starting", "running", "reviving"].map(status => [
-      { agents: [{ status, activeJobIds: [] }] as never }, /Background tasks/,
+      { agents: [{ status, activeJobIds: [] }] as never }, /Background tasks|后台任务/,
     ] as [Partial<OperatorStateSnapshot>, RegExp]),
-    [{ agents: [{ status: "idle", activeJobIds: ["job"] }] as never }, /Background tasks/],
+    [{ agents: [{ status: "idle", activeJobIds: ["job"] }] as never }, /Background tasks|后台任务/],
     ...["queued", "running"].map(status => [
-      { jobs: [{ status }] as never }, /Background tasks/,
+      { jobs: [{ status }] as never }, /Background tasks|后台任务/,
     ] as [Partial<OperatorStateSnapshot>, RegExp]),
   ];
   try {

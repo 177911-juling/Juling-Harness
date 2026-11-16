@@ -354,8 +354,8 @@ export class HarnessBridgeClient {
           wireRequest = { ...request, operation };
         }
         socket.write(encodeFrame(`request:${request.requestId}`, request.runtimeEpoch, wireRequest));
-      } catch {
-        if (timer !== undefined) clearTimeout(timer);
+      } catch (error) {
+        clearTimeout(timer);
         this.#pendingRequests.delete(request.requestId);
         reject(error instanceof FrameCodecError
           ? new HarnessBridgeRequestError("INVALID_ARGUMENT", error.message)

@@ -81,36 +81,7 @@ export function createWorkspaceFileService({ registry }: { readonly registry: Wo
   }
   async function inspect(input: WorkspaceFileTarget): Promise<WorkspaceFileInfo> {
     const { target, path } = await targetFor(input);
-    const info = await lstat(target);
-    const writable = await access(target, constants.W_OK).then(() => true, () => false);
-    const identity = process.platform === "win32" ? target.toLowerCase() : target;
-    return { workspaceId: input.workspaceId, path, id: createHash("sha256").update(identity).digest("hex"), name: basename(target), mime: workspaceFileMime(target), size: info.size, version: versionOf(info), writable };
-  }
-  const writes = new Map<string, Promise<unknown>>();
-  async function writeText(input: WorkspaceFileWrite): Promise<WorkspaceFileSaveResult> {
-    const { target } = await targetFor(input);
-    const previous = writes.get(target) ?? Promise.resolve();
-    const operation = previous.catch(() => {}).then(async (): Promise<WorkspaceFileSaveResult> => {
-      const file = await inspect(input);
-      if (file.version !== input.expectedVersion) return { saved: false, conflict: true, file };
-      if (file.size > EDITABLE_FILE_BYTES) throw new Error("文件超过内置编辑器的 8 MiB 编辑范围，请使用外部编辑器");
-      const text = input.text.replace(/\r\n/g, "\n").replace(/\n/g, input.lineEnding === "crlf" ? "\r\n" : "\n");
-      let bytes = Buffer.from(text, input.encoding === "utf8" ? "utf8" : "utf16le");
-      if (input.encoding === "utf16be") bytes.swap16();
-      if (input.bom) bytes = Buffer.concat([Buffer.from(input.encoding === "utf8" ? [239, 187, 191] : input.encoding === "utf16le" ? [255, 254] : [254, 255]), bytes]);
-      if (bytes.length > EDITABLE_FILE_BYTES) throw new Error("保存内容超过 8 MiB，请使用外部编辑器");
-      const temporary = resolve(dirname(target), `.juling-save-${randomUUID()}`);
-      try {
-        const mode = (await lstat(target)).mode;
-        await writeFile(temporary, bytes, { flag: "wx", mode });
-        const current = await inspect(input);
-        if (current.version !== input.expectedVersion) return { saved: false, conflict: true, file: current };
-        await rename(temporary, target);
-        return { saved: true, file: await inspect(input) };
-      } finally { await unlink(temporary).catch(error => { if (error.code !== "ENOENT") throw error; }); }
-    });
-    writes.set(target, operation);
-    try { return await operation; } finally { if (writes.get(target) === operation) writes.delete(target); }
+    return { ...await inspectFile(target), workspaceId: input.workspaceId, path };
   }
 
   async function directory(root: string, requestedPath?: string): Promise<WorkspaceFileNode[]> {

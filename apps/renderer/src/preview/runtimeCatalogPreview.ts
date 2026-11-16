@@ -108,15 +108,6 @@ const connectedTools: Record<string, Tool[]> = {
   github: [tool("github", "get_pull_request", "读取 Pull Request", true), tool("github", "list_issues", "查看仓库 Issue", true), tool("github", "get_file_contents", "读取仓库文件", true), tool("github", "create_issue", "创建 Issue", false)],
   docs: [tool("docs", "search_docs", "搜索项目文档", true), tool("docs", "read_document", "读取文档正文", true)],
 };
-export const PREVIEW_MCP_RUNTIME: McpRuntimeStatus = {
-  available: true, startupTimeoutMs: 250, ready: false, settled: false, total: 3,
-  servers: [
-    { name: "filesystem", state: "ready", transport: "stdio", source: { providerName: "Juling", level: "project" }, tools: 11, toolInfo: filesystemTools },
-    { name: "github", state: "pending", transport: "http", source: { providerName: "Juling", level: "user" }, tools: 0 },
-    { name: "docs", state: "failed", transport: "sse", source: { providerName: "Juling", level: "project" }, tools: 0, error: "连接超时：文档服务未在等待期限内响应。" },
-  ],
-};
-
 function buildFilesystemTools(zh: boolean): Tool[] {
   return [
     tool("filesystem", "read_file", zh ? "读取文件内容" : "Read file contents", true),

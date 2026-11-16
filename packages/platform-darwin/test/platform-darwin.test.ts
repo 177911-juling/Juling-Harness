@@ -14,7 +14,7 @@ describe("DarwinPlatformPort", () => {
       attachProcess() {}, requestProcessStop() {}, forceProcessStop() {}, releaseProcess() {},
     }, "linux");
     assert.equal(port.platform, "linux");
-    assert.equal(port.runtimeExecutableName(), "omp");
+    assert.equal(port.runtimeExecutableName(), "juling");
     assert.deepEqual(await port.createPrivateEndpoint(await port.appDataDirectory()), { kind: "unix-socket", authority: "linux-authority" });
     await port.openExternal("https://github.com/177911-juling/juling-harness");
     assert.deepEqual(opened, ["https://github.com/177911-juling/juling-harness"]);

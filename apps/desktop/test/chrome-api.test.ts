@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createJulingHarnessChromeApi, type IpcRendererLike } from "../src/chrome-api.js";
+import { DESKTOP_LANGUAGE_CHANNEL, getDesktopLanguage, initDesktopLanguage, onDesktopLanguageChange, setDesktopLanguage } from "../src/desktop-language-shared.js";
 import { DICTATION_AUDIO_CHANNELS, type DictationDesktopEvent, type DictationAudioAttach } from "../src/dictation-audio-shared.js";
 
 test("dictation preload methods preserve Main faults, use fixed private channels, and unsubscribe exactly", async () => {

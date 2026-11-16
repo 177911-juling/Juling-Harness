@@ -235,7 +235,7 @@ export function createDesktopSemanticCommands(options: {
               // idempotent at the product command boundary.
               if ((error as { readonly code?: string })?.code !== "SESSION_ALREADY_ARCHIVED") throw error;
             }
-            return { applied: true, runtimeEffect: "immediate", message: "Session archived to the Juling cold archive" };
+            return { applied: true, runtimeEffect: "immediate", message: "Session archived to the OMP cold archive" };
           },
           unarchive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
             const sessionId = await resolveCatalogSessionId(options, threadId);
