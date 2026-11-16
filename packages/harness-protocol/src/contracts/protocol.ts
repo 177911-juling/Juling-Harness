@@ -126,6 +126,15 @@ export interface HarnessReceipt<TResult = unknown> {
 }
 
 /**
+ * Locale switch the Host writes after `harness.hello`: Runtime localization
+ * follows the desktop UI without restarting sessions.
+ */
+export interface HarnessLocaleFrame {
+  type: "harness.locale";
+  locale: "zh" | "en";
+}
+
+/**
  * Envelope time source freeze: `occurredAt` is the only event-emission
  * timestamp. Inner conversation events must not repeat `occurredAt`,
  * `runtimeEpoch`, `eventSeq`, or `stateVersion`.

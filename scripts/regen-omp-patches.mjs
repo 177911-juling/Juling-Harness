@@ -40,6 +40,20 @@ console.log(
     : `Captured ${capture.changed.length}/${capture.total} overlay file(s):\n  ${capture.changed.join("\n  ")}`,
 );
 
+// Seam patches may add files upstream does not have. `git diff` ignores
+// untracked files, so mark every new group path intent-to-add before capture.
+for (const path of new Set(SEAM_GROUPS.flatMap(group => group.paths))) {
+  let existsAtPin = true;
+  try {
+    run("git", ["-C", ompSourceDirectory, "cat-file", "-e", `${series.upstreamCommit}:${path}`]);
+  } catch {
+    existsAtPin = false;
+  }
+  if (existsAtPin) continue;
+  const untracked = run("git", ["-C", ompSourceDirectory, "ls-files", "--others", "--exclude-standard", "--", path], { capture: true });
+  if (untracked !== "") run("git", ["-C", ompSourceDirectory, "add", "-N", "--", path]);
+}
+
 const tracked = run("git", ["-C", ompSourceDirectory, "diff", "--name-only", series.upstreamCommit, "--"], { capture: true })
   .split(/\r?\n/u)
   .filter(Boolean);

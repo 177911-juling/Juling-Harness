@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **合入 OMP Studio 0.2.2 工作台能力**：在保留 Juling 品牌、Quiet Precision 主题和既有 Runtime 适配的前提下，接收上游 0.2.2 的 78 个提交 —— 文件浏览器（本机 / SSH 项目外文件）、SSH tmux 附加、Agent 指挥台（编队 / 时间线 / 星图）、选择性提交、输入历史、原生表单题组、浏览器原生页面与 Console/Network、GitHub Actions 展开、四档光效以及补全的英文界面。Runtime pin 同步升级到 **OMP 18.20.2**，Harness patchset 为 `18.20.2-harness.6`。
+- **合入 OMP Studio 0.2.2 工作台能力**：在保留 Juling 品牌、Quiet Precision 主题和既有 Runtime 适配的前提下，接收上游 0.2.2 的 78 个提交 —— 文件浏览器（本机 / SSH 项目外文件）、SSH tmux 附加、Agent 指挥台（编队 / 时间线 / 星图）、选择性提交、输入历史、原生表单题组、浏览器原生页面与 Console/Network、GitHub Actions 展开、四档光效以及补全的英文界面。Runtime pin 同步升级到 **OMP 18.20.2**，Harness patchset 为 `18.20.2-harness.7`。
 - **界面重设计「静默精确 / Quiet Precision」**：整套视觉系统从「蓝图 HUD」切换为单一表面系统 —— 浅色瓷白 / 深色石墨双主题，靛蓝作为唯一交互主色、青绿只表达数据，语义色只表达状态；圆角阶梯 6 / 8 / 10 / 14px，控件统一为 26 / 32 / 38px 三档，正文基准字号提升到 13px，层级改由字重、留白与细线承担；保留极轻投影给菜单、弹窗、卡片与 Composer，不再用网格、四角刻度、双线框或深色舱壁制造技术感。标题栏、原生窗口按钮、导航 rail、侧栏、顶栏、二级页头、状态条使用同一主题表面；工作台对话（消息、工具卡、Plan 入口、队列、空态）、首页 / 历史 / 能力中心 / Agent Hub / 模型配置 / 设置 / 诊断 / 媒体 / 评估 / 统计 / 教程全部跟版；`linework.css` 及其装饰语法退役，动效数值与既有门禁不变。
 - **Runtime 身份统一为 Juling**：`omp.exe` / `omp` 更名为 `juling.exe` / `juling`，Runtime 的 `APP_NAME`、用户代理、帮助与登录提示、进程标题都改为 `juling`；`omp --mode harness-host` 变为 `juling --mode harness-host`。用户配置目录从 `~/.omp` 迁移到 `~/.juling`（首次启动整目录改名，失败则改为复制并继续使用旧目录），项目级 `.juling/` 与 `~/.juling/` 取代 `.omp`；旧的 `~/.omp`、项目 `.omp/`、`OMP_*` / `PI_*` 环境变量与已安装的 `omp.exe`（`runtime-manifest.json.entrypoint` 为准）继续可读，不再写入。上述旧名兼容由 vendor 接缝补丁 `0005-juling-identity.patch` 与 Host 侧发现/迁移逻辑共同保证。安装包新增随包分发的 `third-party-notices.txt`（MIT 全文与版权声明），满足随 Runtime 二进制分发的许可要求。
 - **产品展示品牌统一为 Juling**：对话作者、顶栏状态、工作台文档面板（Juling Logs）、统计面板、审批卡片、各页说明、安装向导、更新发布标题与诊断报告中的产品名由 OMP 改为 Juling / Juling Runtime；上游项目名（oh-my-pi）、`omp` CLI、`~/.omp` 路径、`OMP_*` 环境变量与线协议标识保持不变（CLI、路径与环境变量已由上方 Runtime 身份统一改名取代）。同时补齐 Agent Hub 恢复命令、预览演示项目名与安装完成页中的旧品牌展示。
-- Runtime 升级至 **OMP 18.20.2**，上游固定为 `7c49c11aa5bbaf3f418406583096168ad5b8c6dc`，Harness patchset 为 `18.20.2-harness.6`；完整接收 18.19.0–18.20.2 修复链，详见 [18.20.2 迁移报告](docs/migrations/omp-18.20.2.md)。Skillshare 已验证来源展示统一为 `Reported Juling`。
+- Runtime 升级至 **OMP 18.20.2**，上游固定为 `7c49c11aa5bbaf3f418406583096168ad5b8c6dc`，Harness patchset 为 `18.20.2-harness.7`；完整接收 18.19.0–18.20.2 修复链，详见 [18.20.2 迁移报告](docs/migrations/omp-18.20.2.md)。Skillshare 已验证来源展示统一为 `Reported Juling`。
 - Agent Hub 跟随上游移除 `taskFile`，任务内容统一通过 inline `assignment` 提交；不再保留私有文件任务校验、审批或恢复 shim。
 - Browser 接入 18.19 的 `insecure`、`app` 字符串、`argv` 与顶层 `target` 参数；托管浏览器保留会话绑定、人工控制和下载生命周期，普通 relay 仍拒绝不安全连接。
 - Ask/Tree 重答改用原生 HTML form；Context 查看器新增 `instruction-files` 分类；Codex 与 Claude 重置券设置按 5h、weekly 及 Fable 窗口拆分，不再提供已删除的总开关。
