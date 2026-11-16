@@ -65,7 +65,9 @@ export const PREVIEW_FONT_FAMILIES = ["Cascadia Code", "Consolas", "JetBrains Mo
  */
 export const PREVIEW_RUNTIME_SETTINGS: Readonly<Record<string, string | boolean>> = {
   "modelRoles.judge": "typesafe/jev-latest",
-  "claudeResets.autoRedeem": "unset",
+  "claudeResets.autoRedeem5h": "unset",
+  "claudeResets.autoRedeemWeekly": "unset",
+  "claudeResets.autoRedeemFable": "unset",
   "claudeResets.minBlockedMinutes": "60",
   "claudeResets.keepCredits": "0",
   "claudeResets.salvageHorizonHours": "12",
@@ -79,7 +81,7 @@ export const PREVIEW_RUNTIME_SETTINGS: Readonly<Record<string, string | boolean>
   "compaction.methodOrder": "remote,snapcompact,handoff,shake,soft",
   "providers.openai-codex.codeMode": "off",
   "plan.autosave": true,
-  "plan.autosaveDir": ".omp/plans/",
+  "plan.autosaveDir": ".juling/plans/",
   "retry.waitForUsageReset": false,
   "compaction.experimentalContextManagement": false,
   "task.enableEffort": false,

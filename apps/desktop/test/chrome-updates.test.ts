@@ -46,7 +46,7 @@ async function createSignedArtifact(input: {
   await mkdir(directory, { recursive: true });
 
   const exeContent = "test-omp-binary";
-  await writeFile(join(directory, "omp.exe"), exeContent);
+  await writeFile(join(directory, "juling.exe"), exeContent);
 
   const manifest = `${JSON.stringify({
     runtimeVersion: version,
@@ -58,7 +58,7 @@ async function createSignedArtifact(input: {
     capabilityHash: "cap-hash",
     commandManifestHash: "cmd-hash",
     platform,
-    entrypoint: "omp.exe",
+    entrypoint: "juling.exe",
     channel,
   })}\n`;
   await writeFile(join(directory, "runtime-manifest.json"), manifest);
@@ -68,7 +68,7 @@ async function createSignedArtifact(input: {
   const checksums = `${JSON.stringify({
     algorithm: "sha256",
     files: {
-      "omp.exe": exeSha,
+      "juling.exe": exeSha,
       "runtime-manifest.json": input.tamper ? "0".repeat(64) : manifestSha,
     },
   })}\n`;
@@ -226,6 +226,7 @@ describe("registerChromeUpdatesIpc: untrusted sender rejection", () => {
     };
 
     assert.equal(await ipc.invoke(CHROME_UPDATES_CHANNELS.check, untrustedSender), null);
+    assert.equal(await ipc.invoke(CHROME_UPDATES_CHANNELS.snapshot, untrustedSender), null);
     assert.deepEqual(await ipc.invoke(CHROME_UPDATES_CHANNELS.startApp, untrustedSender), {
       ok: false,
       message: "Untrusted sender",
@@ -273,7 +274,7 @@ async function createAppUpdateHarness(extra: Partial<ChromeUpdatesIpcOptions> = 
       setup: { asset: "setup.exe", url: "https://example.com/setup.exe", size: setupBytes.length, sha256: createHash("sha256").update(setupBytes).digest("hex") },
       ...(!full ? { payload: { asset: "payload.tar.gz", url: "https://example.com/payload.tar.gz", size: asset.size, sha256: asset.sha256, payloadFormat: 1, minAppVersion: "0.1.3", platform: "win32-x64", abi: { electron: "43.4.0", modules: "143", nodePty: "1.1.0" }, clientContractVersion: CLIENT_CONTRACT_VERSION, harnessProtocol: { min: 1, max: 1 } } } : {}),
     },
-    runtime: { runtimeVersion: "2.0.0", channel: "stable", platform: "win32-x64", entrypoint: "omp.exe", minAppVersion: "0.1.3", harnessProtocol: { min: 1, max: 1 }, files: [{ name: "omp.exe", url: "https://example.com/omp.exe", size: 1, sha256: "a".repeat(64) }] },
+    runtime: { runtimeVersion: "2.0.0", channel: "stable", platform: "win32-x64", entrypoint: "juling.exe", minAppVersion: "0.1.3", harnessProtocol: { min: 1, max: 1 }, files: [{ name: "juling.exe", url: "https://example.com/juling.exe", size: 1, sha256: "a".repeat(64) }] },
   };
   const indexText = JSON.stringify(index);
   const payload = Buffer.from(indexText);
@@ -742,13 +743,13 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
         runtimeVersion: "2.0.0",
         channel: "stable",
         platform: "win32-x64",
-        entrypoint: "omp.exe",
+        entrypoint: "juling.exe",
         minAppVersion: "0.1.0",
         harnessProtocol: { min: 1, max: 1 },
         files: [
           {
-            name: "omp.exe",
-            url: "https://github.com/177911-juling/juling-harness/releases/download/v0.1.4/omp.exe",
+            name: "juling.exe",
+            url: "https://github.com/177911-juling/juling-harness/releases/download/v0.1.4/juling.exe",
             size: 1000,
             sha256: "c".repeat(64),
           },
@@ -821,7 +822,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
       capabilityHash: "cap-hash",
       commandManifestHash: "cmd-hash",
       platform: "win32-x64",
-      entrypoint: "omp.exe",
+      entrypoint: "juling.exe",
       channel: "stable",
     });
     const exeContent = "dummy-omp-exe-binary-content";
@@ -832,7 +833,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
       algorithm: "sha256",
       files: {
         "runtime-manifest.json": manifestSha,
-        "omp.exe": exeSha,
+        "juling.exe": exeSha,
       },
     });
 
@@ -849,7 +850,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
       "runtime-manifest.json": manifestContent,
       "checksums.json": checksumsContent,
       "runtime-signature.json": sigContent,
-      "omp.exe": exeContent,
+      "juling.exe": exeContent,
     };
 
     const fetchedUrls: string[] = [];
@@ -872,13 +873,13 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
         runtimeVersion: "2.0.0",
         channel: "stable",
         platform: "win32-x64",
-        entrypoint: "omp.exe",
+        entrypoint: "juling.exe",
         minAppVersion: "0.1.0",
         harnessProtocol: { min: 1, max: 1 },
         files: [
           {
-            name: "omp.exe",
-            url: "https://github.com/177911-juling/juling-harness/releases/download/v0.1.4/omp.exe",
+            name: "juling.exe",
+            url: "https://github.com/177911-juling/juling-harness/releases/download/v0.1.4/juling.exe",
             size: Buffer.byteLength(exeContent),
             sha256: exeSha,
           },
@@ -957,13 +958,13 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
     assert.equal(progress.find((p) => p.phase === "awaiting-apply")?.runtimeChannel, "stable");
     assert.ok(pending.peek() !== undefined, "pendingArtifact should be set");
 
-    const exeIndex = fetchedUrls.findIndex((u) => u.endsWith("omp.exe"));
+    const exeIndex = fetchedUrls.findIndex((u) => u.endsWith("juling.exe"));
     const manifestIndex = fetchedUrls.findIndex((u) => u.endsWith("runtime-manifest.json"));
     const checksumsIndex = fetchedUrls.findIndex((u) => u.endsWith("checksums.json"));
 
     assert.ok(manifestIndex !== -1 && exeIndex !== -1);
-    assert.ok(manifestIndex < exeIndex, "runtime-manifest.json must be fetched before omp.exe");
-    assert.ok(checksumsIndex < exeIndex, "checksums.json must be fetched before omp.exe");
+    assert.ok(manifestIndex < exeIndex, "runtime-manifest.json must be fetched before juling.exe");
+    assert.ok(checksumsIndex < exeIndex, "checksums.json must be fetched before juling.exe");
 
     handle.dispose();
     await rm(tempDir, { recursive: true, force: true });
@@ -1002,7 +1003,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
         runtimeVersion: "2.0.0",
         channel: "stable",
         platform: "win32-x64",
-        entrypoint: "omp.exe",
+        entrypoint: "juling.exe",
         minAppVersion: "0.1.0",
         harnessProtocol: { min: 1, max: 1 },
         files: [
@@ -1013,8 +1014,8 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
             sha256: createHash("sha256").update(manifestContent).digest("hex"),
           },
           {
-            name: "omp.exe",
-            url: "https://github.com/177911-juling/juling-harness/releases/download/v0.1.4/omp.exe",
+            name: "juling.exe",
+            url: "https://github.com/177911-juling/juling-harness/releases/download/v0.1.4/juling.exe",
             size: 100,
             sha256: "e".repeat(64),
           },
@@ -1066,7 +1067,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
     const failEvent = progress.find((p) => p.phase === "failed");
     assert.ok(failEvent !== undefined, "Should fail on manifest mismatch");
     assert.ok(failEvent.message?.includes("不一致"), failEvent.message);
-    assert.ok(!fetchedUrls.some((u) => u.endsWith("omp.exe")), "omp.exe must not be fetched");
+    assert.ok(!fetchedUrls.some((u) => u.endsWith("juling.exe")), "juling.exe must not be fetched");
 
     handle.dispose();
     await rm(tempDir, { recursive: true, force: true });
@@ -1155,13 +1156,13 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
         runtimeVersion: "2.0.0",
         channel: "stable",
         platform: "win32-x64",
-        entrypoint: "omp.exe",
+        entrypoint: "juling.exe",
         minAppVersion: "0.1.0",
         harnessProtocol: { min: 1, max: 1 },
         files: [
           {
-            name: "omp.exe",
-            url: "https://example.com/omp.exe",
+            name: "juling.exe",
+            url: "https://example.com/juling.exe",
             size: 1000,
             sha256: "c".repeat(64),
           },
@@ -1312,13 +1313,13 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
         runtimeVersion: "2.0.0",
         channel: "stable",
         platform: "win32-x64",
-        entrypoint: "omp.exe",
+        entrypoint: "juling.exe",
         minAppVersion: "0.1.0",
         harnessProtocol: { min: 1, max: 1 },
         files: [
           {
-            name: "omp.exe",
-            url: "https://example.com/omp.exe",
+            name: "juling.exe",
+            url: "https://example.com/juling.exe",
             size: 1000,
             sha256: "c".repeat(64),
           },

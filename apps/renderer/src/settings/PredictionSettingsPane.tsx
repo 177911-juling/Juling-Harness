@@ -105,7 +105,7 @@ export function PredictionSettingsPane({
       const previous = channel.current;
       channel.current = undefined;
       if (previous)
-        void globalThis.ompHarnessChrome
+        void globalThis.julingHarnessChrome
           ?.detachPrediction?.({ channelId: previous.channelId })
           .catch(() => {});
     };
@@ -122,7 +122,7 @@ export function PredictionSettingsPane({
     const previous = channel.current;
     channel.current = undefined;
     if (previous)
-      void globalThis.ompHarnessChrome
+      void globalThis.julingHarnessChrome
         ?.detachPrediction?.({ channelId: previous.channelId })
         .catch(() => {});
   }, [visible]);
@@ -279,7 +279,7 @@ export function PredictionSettingsPane({
         );
       return;
     }
-    const chrome = globalThis.ompHarnessChrome;
+    const chrome = globalThis.julingHarnessChrome;
     if (!chrome?.attachPrediction || !chrome.importPredictionHistory) return;
     lock.current = true;
     setBusy("import");
@@ -396,7 +396,7 @@ export function PredictionSettingsPane({
           >
             <option value="session">{zh ? "仅本会话" : "This session"}</option>
             <option value="global">
-              {zh ? "OMP 全局设置" : "Global OMP setting"}
+              {zh ? "Juling 全局设置" : "Global Juling setting"}
             </option>
           </AppSelect>
         </label> : null}
@@ -420,7 +420,7 @@ export function PredictionSettingsPane({
           {(
             {
               default: zh ? "默认值" : "Default",
-              global: zh ? "OMP 全局" : "Global OMP",
+              global: zh ? "Juling 全局" : "Global Juling",
               project: zh ? "项目" : "Project",
               runtime: zh ? "本会话" : "This session",
               env: zh ? "环境" : "Environment",
@@ -452,8 +452,8 @@ export function PredictionSettingsPane({
         label={zh ? "外部提示词历史" : "External prompt history"}
         desc={
           zh
-            ? "仅导入你手动选择的 Claude Code / Codex JSONL 文件，最多 8 MiB、2,000 条。只用于 Harness 本地预测，不写入 OMP 会话历史。"
-            : "Import only a Claude Code / Codex JSONL file you select, up to 8 MiB and 2,000 prompts. Used for local Harness prediction without changing OMP session history."
+            ? "仅导入你手动选择的 Claude Code / Codex JSONL 文件，最多 8 MiB、2,000 条。只用于 Harness 本地预测，不写入 Juling 会话历史。"
+            : "Import only a Claude Code / Codex JSONL file you select, up to 8 MiB and 2,000 prompts. Used for local Harness prediction without changing Juling session history."
         }
       >
         <button
@@ -461,7 +461,7 @@ export function PredictionSettingsPane({
           disabled={
             !has("prediction.prepare") ||
             !!busy ||
-            (!preview && !globalThis.ompHarnessChrome?.importPredictionHistory)
+            (!preview && !globalThis.julingHarnessChrome?.importPredictionHistory)
           }
           onClick={() => void importHistory()}
         >

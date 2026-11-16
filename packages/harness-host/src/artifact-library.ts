@@ -99,7 +99,7 @@ export class ArtifactLibrary {
       if (!isAbsolute(directory)) throw new Error("Artifact storage location must be absolute");
       await mkdir(directory, { recursive: true });
       const canonical = await realpath(directory);
-      const probe = join(canonical, `.omp-write-probe-${randomUUID()}`);
+      const probe = join(canonical, `.juling-write-probe-${randomUUID()}`);
       const handle = await open(probe, "wx", 0o600);
       await handle.close(); await unlink(probe);
       const catalog = await this.#load();
@@ -118,7 +118,7 @@ export class ArtifactLibrary {
     try {
       const root = catalog.roots[catalog.activeRoot]!;
       await mkdir(root, { recursive: true });
-      const probe = join(root, `.omp-write-probe-${randomUUID()}`);
+      const probe = join(root, `.juling-write-probe-${randomUUID()}`);
       const handle = await open(probe, "wx", 0o600); await handle.close(); await unlink(probe); writable = true;
     } catch { /* State reports unavailable storage without changing its location. */ }
     return this.#storageState(catalog, writable);

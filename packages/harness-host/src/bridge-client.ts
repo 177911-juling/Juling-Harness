@@ -5,6 +5,7 @@ import type { ContextViewOperation, ContextViewResultMap, ComputerWorkspaceQuery
 import { randomBytes, randomUUID } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import {
+  FrameCodecError,
   FrameDecoder,
   HARNESS_PROTOCOL_VERSION,
   encodeFrame,
@@ -75,8 +76,8 @@ export class HarnessBridgeHandshakeError extends Error {
 }
 
 export class HarnessBridgeRequestError extends Error {
-  constructor(readonly code: "CONNECTION_FAILED" | "OUTCOME_UNKNOWN") {
-    super(code === "OUTCOME_UNKNOWN" ? "Harness Bridge command outcome is unknown" : "Harness Bridge request failed");
+  constructor(readonly code: "CONNECTION_FAILED" | "OUTCOME_UNKNOWN" | "INVALID_ARGUMENT", message?: string) {
+    super(message ?? (code === "OUTCOME_UNKNOWN" ? "Harness Bridge command outcome is unknown" : "Harness Bridge request failed"));
     this.name = "HarnessBridgeRequestError";
   }
 }
@@ -339,10 +340,12 @@ export class HarnessBridgeClient {
       });
       try {
         socket.write(encodeFrame(`request:${request.requestId}`, request.runtimeEpoch, request));
-      } catch {
+      } catch (error) {
         if (timer !== undefined) clearTimeout(timer);
         this.#pendingRequests.delete(request.requestId);
-        reject(new HarnessBridgeRequestError("CONNECTION_FAILED"));
+        reject(error instanceof FrameCodecError
+          ? new HarnessBridgeRequestError("INVALID_ARGUMENT", error.message)
+          : new HarnessBridgeRequestError("CONNECTION_FAILED"));
       }
     });
   }

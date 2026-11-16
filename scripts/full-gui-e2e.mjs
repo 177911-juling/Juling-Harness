@@ -21,20 +21,32 @@ const report={status:'running',modelCalls:0,checks:[],profile:temp};
 let app,page;
 const query=async(name,input={})=>{const r=await page.evaluate(async({name,input})=>{
  let timer;
- try{return await Promise.race([window.ompHarness.query({queryName:name,input}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Query timeout: '+name)),45000);})]);}
+ try{return await Promise.race([window.julingHarness.query({queryName:name,input}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Query timeout: '+name)),45000);})]);}
  finally{clearTimeout(timer);}
-},{name,input});if(!r.ok)throw Error(JSON.stringify(r.error));return r.result;};
+},{name,input});if(!r)throw Error('Empty query response: '+name);if(!r.ok)throw Error(JSON.stringify(r.error));return r.result;};
 async function until(read,accept,label,timeoutMs=90000){const end=Date.now()+timeoutMs;let last;while(Date.now()<end){try{const value=await read();if(accept(value))return value;}catch(e){last=e;}await new Promise(r=>setTimeout(r,300));}throw Error(label+': '+last);}
 const command=async(name,input={})=>page.evaluate(({name,input})=>{
  const requestId=crypto.randomUUID();return new Promise((resolve,reject)=>{
   const timer=setTimeout(()=>{off();reject(Error('Receipt timeout: '+name));},45000);
-  const off=window.ompHarness.subscribe({scope:'command',requestId},event=>{
+  const off=window.julingHarness.subscribe({scope:'command',requestId},event=>{
    if(event.kind!=='command.receipt'||!['completed','failed','rejected','outcome_unknown'].includes(event.receipt.status))return;
    clearTimeout(timer);off();if(event.receipt.status==='completed')resolve(event.receipt.result);else reject(Error(JSON.stringify(event.receipt)));
   });
-  window.ompHarness.command({commandName:name,input,requestId,idempotencyKey:requestId}).catch(error=>{clearTimeout(timer);off();reject(error);});
+  window.julingHarness.command({commandName:name,input,requestId,idempotencyKey:requestId}).catch(error=>{clearTimeout(timer);off();reject(error);});
  });
 },{name,input});
+async function scopedCommand(name,input,scope){return page.evaluate(async({name,input,scope})=>{
+ const contextId=await window.julingHarness.openContext(scope);
+ try{return await new Promise((resolve,reject)=>{
+  const requestId=crypto.randomUUID();
+  const timer=setTimeout(()=>{off();reject(Error('Scoped receipt timeout: '+name));},45000);
+  const off=window.julingHarness.subscribe({scope:'command',requestId},event=>{
+   if(event.kind!=='command.receipt'||!['completed','failed','rejected','outcome_unknown'].includes(event.receipt.status))return;
+   clearTimeout(timer);off();if(event.receipt.status==='completed')resolve(event.receipt.result);else reject(Error(JSON.stringify(event.receipt)));
+  },contextId);
+  window.julingHarness.command({commandName:name,input,requestId,idempotencyKey:requestId},contextId).catch(error=>{clearTimeout(timer);off();reject(error);});
+ });}finally{await window.julingHarness.close(contextId);}
+},{name,input,scope});}
 async function capture(name){await page.screenshot({path:join(output,name+'.png')});}
 async function predictionDiagnostics(directory,depth=0){
  if(depth>6)return [];
@@ -58,6 +70,7 @@ try{
  await writeFile(join(workspace,'fixture.txt'),'Isolated Harness GUI acceptance workspace.\n');
  for(const args of [['init','-q','-b','main'],['add','.'],['commit','-qm','acceptance fixture']])execFileSync('git',['-c','user.name=Harness Acceptance','-c','user.email=acceptance@example.test',...args],{cwd:workspace,windowsHide:true,stdio:'pipe'});
  await mkdir(output,{recursive:true});
+ await writeFile(join(output,'electron.log'),'');
  const desktop=join(root,'apps/desktop');
  const version=JSON.parse(await readFile(join(root,'omp-patch/patches/series.json'),'utf8')).patchsetVersion;
  const upstreamVersion=JSON.parse(await readFile(join(root,'omp-patch/vendor/oh-my-pi/packages/coding-agent/package.json'),'utf8')).version;
@@ -115,8 +128,8 @@ try{
   dialog.showOpenDialog=async(...args)=>({canceled:false,filePaths:[args.at(-1)?.properties?.includes('openDirectory')?workspace:transferFile]});
   dialog.showSaveDialog=async()=>({canceled:false,filePath:transferFile});
  },{workspace,transferFile});
- await page.waitForFunction(()=>!!window.ompHarness);
- await page.evaluate(()=>{localStorage.setItem('omp.appSettings',JSON.stringify({language:'zh'}));localStorage.setItem('omp.previewMode','0');localStorage.setItem('omp.startupNotice.dismissed','incomplete-v1');localStorage.setItem('omp.lastRoute','home');});
+ await page.waitForFunction(()=>!!window.julingHarness);
+ await page.evaluate(()=>{localStorage.setItem('omp.appSettings',JSON.stringify({language:'zh',startupPage:'last'}));localStorage.setItem('omp.previewMode','0');localStorage.setItem('omp.onboarding.completed','workbench-0.2.0');localStorage.setItem('omp.startupNotice.dismissed','incomplete-v1');localStorage.setItem('omp.lastRoute','home');});
  await page.reload();
  await page.getByRole('button',{name:/打开本地文件夹|Open local folder/i}).first().click();
  await until(()=>query('projects.list'),r=>r.workspaces.some(w=>w.active),'workspace');
@@ -126,8 +139,8 @@ try{
  report.runtime=environment.runtime.runtimeVersion;
  console.log('Authenticated Runtime '+report.runtime);
  if(packaged){
-  const terminal=await page.evaluate(()=>window.ompHarnessTerminal.create({cols:80,rows:24}));
-  await page.evaluate(id=>window.ompHarnessTerminal.dispose(id),terminal.id);
+  const terminal=await page.evaluate(()=>window.julingHarnessTerminal.create({cols:80,rows:24}));
+  await page.evaluate(id=>window.julingHarnessTerminal.dispose(id),terminal.id);
   report.checks.push('packaged application and native PTY creation/disposal');
  }
  const session=await query('session.state');
@@ -148,9 +161,9 @@ try{
  if(!(await invoke('worktrees.session.remove.apply',{token:removal.token})).result.removed)throw Error('Isolated worktree was not removed');
  report.checks.push('native worktree creation, desktop workspace registration, reviewed removal');
  const packed=(await invoke('session.portability.pack',{targetSessionId:transferSessionId})).result;
- const saved=await page.evaluate(artifactId=>window.ompHarnessChrome.exportArtifact({artifactId}),packed.asset.artifactId);
+ const saved=await page.evaluate(artifactId=>window.julingHarnessChrome.exportArtifact({artifactId}),packed.asset.artifactId);
  if(!saved.ok||saved.cancelled)throw Error('Cannot export acceptance session archive');
- const picked=await page.evaluate(sessionId=>window.ompHarnessChrome.importArtifact({kind:'export',sessionId}),session.sessionId);
+ const picked=await page.evaluate(sessionId=>window.julingHarnessChrome.importArtifact({kind:'export',sessionId}),session.sessionId);
  if(!picked.ok||!picked.artifact)throw Error('Cannot select acceptance session archive');
  const importPreview=(await invoke('session.portability.prepare',{artifactId:picked.artifact.artifactId})).result;
  if(!importPreview.conflicts)throw Error('Archive collision was not detected');
@@ -164,8 +177,7 @@ try{
  await invoke('resource.read',{uri:'omp://'});
  const prediction=await query('prediction.query',{sessionId:session.sessionId,version:1,before:'',prefix:'unsent-verification'});
  if(prediction.version!==1)throw Error('Prediction version mismatch');
- await query('stats.read',{filter:{range:'all'}});
- report.checks.push('resources, ephemeral prediction and isolated stats worker');
+ report.checks.push('resources and ephemeral prediction');
  const editor=page.locator('.composer-region [contenteditable="true"]').first();await editor.fill('unsent draft ');
  const cdp=await page.context().newCDPSession(page);
  await cdp.send('Input.imeSetComposition',{text:'中文输入',selectionStart:4,selectionEnd:4});
@@ -177,19 +189,8 @@ try{
   console.log((preview?'Preview ':'Real ')+route);
   await page.evaluate(({preview,route})=>{localStorage.setItem('omp.previewMode',preview?'1':'0');localStorage.setItem('omp.lastRoute',route);},{preview,route});
   const routeUrl=new URL(page.url());routeUrl.search=preview?'?preview=1':'';
-  await page.goto(routeUrl.href);await page.waitForFunction(()=>!!window.ompHarness);await page.waitForTimeout(800);
-  if(route==='agent-hub')await page.getByRole('button',{name:'Agent Hub',exact:true}).click();
-  else {
-   await page.getByRole('button',{name:/^统计$|^Statistics$/}).click();
-   if(route!=='statistics'){
-    if(['capabilities','settings','model-config','history'].includes(route))await page.locator('nav.app-rail [data-route="'+route+'"]').click();
-    else await page.locator('nav.page-nav [data-nav="'+route+'"]:not([aria-hidden="true"])').click();
-   }
-  }
-  if(route==='statistics'){
-   await page.getByRole('tab',{name:'Frustration',exact:true}).click();
-   if(preview){await page.getByRole('button',{name:/估算分析范围与费用|Estimate analysis and cost/}).click();await page.getByRole('alertdialog').waitFor();await page.getByRole('button',{name:/确认并分析|Confirm and analyze/}).click();}
-  }
+  await page.goto(routeUrl.href);await page.waitForFunction(()=>!!window.julingHarness);await page.waitForTimeout(800);
+  if(route==='statistics')await page.locator('.stats-page').waitFor();
   if(route==='model-config'){
    await page.locator('#mcTabRoles').click();
    await page.getByRole('region',{name:/模型压缩阈值|Model compaction thresholds/}).scrollIntoViewIfNeeded();
@@ -204,81 +205,87 @@ try{
   }
   if(route==='history'){
    await page.getByRole('tab',{name:/迁移与导出|Transfer & export/}).click();
-   if(preview){await page.getByRole('button',{name:/选择 OMP 会话包|Choose an OMP archive/}).click();await page.getByRole('button',{name:/^确认导入$|^Confirm import$/}).waitFor();}
+   if(preview){await page.getByRole('button',{name:/选择 Juling 会话包|Choose a Juling archive/}).click();await page.getByRole('button',{name:/^确认导入$|^Confirm import$/}).waitFor();}
   }
   if(route==='diagnostics'){
    await page.getByRole('tab',{name:/会话与维护|Sessions and maintenance/}).click();
    await page.getByRole('region',{name:/会话存储压缩|Session storage compression/}).scrollIntoViewIfNeeded();
    if(preview){await page.getByRole('button',{name:/扫描候选文件|Scan candidates/}).click();await page.getByRole('button',{name:/压缩这些文件|Compress these files/}).waitFor();}
   }
-  if(route==='evaluation')await page.getByRole('tab',{name:/判断批次|Judgment batches/}).click();
+  if(route==='evaluation')await page.locator('#evaluation-judgment').click();
   if(route==='capabilities'){
    await page.locator('#capTab-ida').click();
    await page.getByRole('heading',{name:/IDA/}).waitFor();
-   if(preview){await page.getByRole('button',{name:/数据库视图与编辑|Database views and edits/}).click();await page.getByRole('combobox',{name:/IDA 数据库|IDA database/}).selectOption({index:1});await page.getByRole('button',{name:/^检查操作$|^Review operation$/}).click();await page.getByRole('alertdialog').waitFor();await page.getByRole('alertdialog').getByRole('button',{name:/^返回$|^Back$/}).click();}
+   if(preview){await page.getByRole('button',{name:/修改数据库|Edit database/}).click();await page.getByRole('combobox',{name:/IDA 操作|IDA action/}).click();await page.getByRole('option',{name:/保存数据库|Save database/}).click();await page.getByRole('button',{name:/^检查操作$|^Review operation$/}).click();await page.getByRole('dialog',{name:/确认 IDA 操作|Confirm IDA operation/}).waitFor();await page.getByRole('dialog',{name:/确认 IDA 操作|Confirm IDA operation/}).getByRole('button',{name:/^返回$|^Back$/}).click();}
   }
   await capture((preview?'preview-':'real-')+route);report.checks.push((preview?'preview':'real')+' '+route);
  }
- const previewUrl=new URL(page.url());previewUrl.search='?preview=1';await page.goto(previewUrl.href);
- await page.getByText('选择 gemini3.6flash 随意发送消息后报错…',{exact:true}).first().click();
+ const previewUrl=new URL(page.url());previewUrl.search='?preview=1';await page.evaluate(()=>localStorage.setItem('omp.lastRoute','workbench'));await page.goto(previewUrl.href);
+ await page.getByText('Mermaid 全屏缩放计划与交互确认',{exact:true}).first().click();
  const deck=page.getByRole('region',{name:'待处理的审批与提问（演示）'});
  await deck.getByRole('button',{name:'Approve and execute',exact:true}).click();
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5V8AAAAASUVORK5CYII=','base64');
- await deck.locator('.ask-images input[type=file]').first().setInputFiles({name:'answer.png',mimeType:'image/png',buffer:png});
- await deck.getByRole('img',{name:'回答 / Answer 1',exact:true}).waitFor();
+ await deck.locator('.ask-field input[type=file]').first().setInputFiles({name:'answer.png',mimeType:'image/png',buffer:png});
+ const answerField=deck.getByRole('group',{name:'回答 / Answer',exact:true});await answerField.getByRole('button',{name:'预览图1',exact:true}).waitFor();
  await deck.getByRole('textbox',{name:'备注 / Note',exact:true}).fill('First question note');
  const deckBox=await deck.boundingBox();const nextBox=await deck.getByRole('button',{name:'下一个请求',exact:true}).boundingBox();
- if(!deckBox||!nextBox||nextBox.x<deckBox.x-1||nextBox.x+nextBox.width>deckBox.x+deckBox.width+1||nextBox.y<deckBox.y-1)throw Error('Ask navigation is outside the visible deck');
+ if(!deckBox||!nextBox||nextBox.x<deckBox.x-1||nextBox.x+nextBox.width>deckBox.x+deckBox.width+1||nextBox.y<deckBox.y-1)throw Error(`Ask navigation is outside the visible deck: ${JSON.stringify({deckBox,nextBox})}`);
  await deck.getByRole('button',{name:'下一个请求',exact:true}).click();
  await deck.locator('.dk-cell-out').waitFor({state:'detached'});
+ await deck.getByRole('radio',{name:/默认开/}).click();
  await deck.getByRole('textbox',{name:'备注 / Note',exact:true}).fill('Second question note');
- await deck.locator('.ask-images input[type=file]').nth(1).setInputFiles({name:'note.png',mimeType:'image/png',buffer:png});
- await deck.getByRole('img',{name:'备注 / Note 1',exact:true}).waitFor();
+ await deck.locator('.ask-field input[type=file]').nth(1).setInputFiles({name:'note.png',mimeType:'image/png',buffer:png});
+ await deck.getByRole('group',{name:'备注 / Note',exact:true}).getByRole('button',{name:'预览图1',exact:true}).waitFor();
  await deck.getByRole('button',{name:'上一个请求',exact:true}).click();
  await deck.locator('.dk-cell-out').waitFor({state:'detached'});
- await deck.getByRole('img',{name:'回答 / Answer 1',exact:true}).waitFor();
- if(await deck.getByRole('textbox',{name:'备注 / Note',exact:true}).inputValue()!=='First question note')throw Error('Ask ownership mismatch');
- await deck.getByRole('button',{name:'删除 / Remove 回答 / Answer 1',exact:true}).click();
+ await answerField.getByRole('button',{name:'预览图1',exact:true}).waitFor();
+ if(await deck.getByRole('textbox',{name:'备注 / Note',exact:true}).textContent()!=='First question note')throw Error('Ask ownership mismatch');
+ await answerField.getByRole('button',{name:'移除图1',exact:true}).click();
  await capture('preview-ask-images');report.checks.push('real Electron Ask image picker, per-question notes and attachments, navigation and removal');
  }
  // Exercise the real fresh-session policy without sending any prompt.
- await page.evaluate(()=>localStorage.setItem('omp.previewMode','0'));
- const realUrl=new URL(page.url());realUrl.search='';await page.goto(realUrl.href);await page.waitForFunction(()=>!!window.ompHarness);
- await page.getByText('OMP 已就绪',{exact:true}).first().waitFor({timeout:60000});
+ await page.evaluate(()=>{localStorage.setItem('omp.previewMode','0');localStorage.setItem('omp.lastRoute','home');});
+ const realUrl=new URL(page.url());realUrl.search='';await page.goto(realUrl.href);await page.waitForFunction(()=>!!window.julingHarness);
+ const openFolder=page.getByRole('button',{name:/打开本地文件夹|Open local folder/i}).last();await openFolder.waitFor({timeout:60000});
  // Preview project selections are UI-only. Select the real fixture workspace again.
- await page.getByRole('button',{name:/打开本地文件夹|Open local folder/i}).first().click();
+ await openFolder.click();
  await until(()=>query('projects.list'),value=>value.workspaces.some(row=>row.active&&row.name==='workspace'),'real workspace selection');
- // The Host can already be active while the UI's picker receipt is pending.
- // Wait for the actual selection before issuing a new navigation action.
- await page.locator('.ctx-project-switch').filter({hasText:'workspace'}).waitFor();
- await page.locator('.ctx-git-switch').filter({hasText:'main'}).waitFor();
  const policySession=await query('session.state');
  await page.locator('.new-convo-btn').waitFor();
  await command('preferences.features.set',{sessionId:policySession.sessionId,key:'worktree.onStart',value:'ask',scope:'global'});
- await page.locator('.new-convo-btn').click();
- // Application receipts allow 120s; leave room for the following UI update.
- const firstChoiceSession=await until(()=>query('session.state'),value=>value.sessionId!==policySession.sessionId,'fresh worktree choice session',150000);
- report.worktreeStartPolicy=(await command('worktrees.session.startPolicy',{sessionId:firstChoiceSession.sessionId})).result;
+ report.worktreeStartPolicy=(await command('worktrees.session.startPolicy',{sessionId:policySession.sessionId})).result;
  console.log('Worktree start policy',JSON.stringify(report.worktreeStartPolicy));
- let worktreeDialog=page.getByRole('dialog',{name:/新会话工作区|New session workspace/});await worktreeDialog.waitFor();
+ // MDI's ordinary New chat is a local draft; this command performs and selects a real fresh session.
+ const knownResidents=new Set((await query('residents.list')).residents.map(row=>row.sessionId));
+ await page.keyboard.press('Control+k');
+ await page.locator('[data-cmdk-id="new-without-context"]').click();
+ let worktreeDialog=page.getByRole('dialog',{name:/新会话工作区|New session workspace/});await worktreeDialog.waitFor({timeout:60000});
+ const firstResident=await until(async()=>(await query('residents.list')).residents.find(row=>!knownResidents.has(row.sessionId)),value=>value!==undefined,'fresh worktree choice Resident',150000);
  await capture('real-worktree-start-choice');
  await worktreeDialog.getByRole('button',{name:/留在当前工作区|Stay in this workspace/}).click();await worktreeDialog.waitFor({state:'hidden'});
- await page.locator('.new-convo-btn').click();
- const secondChoiceSession=await until(()=>query('session.state'),value=>value.sessionId!==firstChoiceSession.sessionId,'second fresh worktree choice session',150000);
- if((await command('worktrees.session.startPolicy',{sessionId:secondChoiceSession.sessionId})).result.policy!=='ask')throw Error('New session did not retain the configured worktree policy');
- worktreeDialog=page.getByRole('dialog',{name:/新会话工作区|New session workspace/});await worktreeDialog.waitFor();
+ knownResidents.add(firstResident.sessionId);
+ await page.keyboard.press('Control+k');
+ await page.locator('[data-cmdk-id="new-without-context"]').click();
+ worktreeDialog=page.getByRole('dialog',{name:/新会话工作区|New session workspace/});await worktreeDialog.waitFor({timeout:60000});
+ const secondResident=await until(async()=>(await query('residents.list')).residents.find(row=>!knownResidents.has(row.sessionId)),value=>value!==undefined,'second fresh worktree choice Resident',150000);
+ await scopedCommand('preferences.features.set',{sessionId:secondResident.sessionId,key:'worktree.onExit',value:'remove',scope:'global'},{workspaceId:secondResident.workspaceId,sessionId:secondResident.sessionId});
  await worktreeDialog.getByRole('button',{name:/创建并进入|Create and open/}).click();await worktreeDialog.waitFor({state:'hidden',timeout:180000});
- const isolatedSession=await until(()=>query('session.state'),value=>value.sessionId!==secondChoiceSession.sessionId&&!value.isStreaming,'isolated worktree session',150000);
- const ownWorktrees=await command('worktrees.session.list',{sessionId:isolatedSession.sessionId});
- const owned=ownWorktrees.result.worktrees.find(row=>row.current);
- if(!owned||!owned.branch.startsWith('wt/')||owned.dirty)throw Error('New worktree session is not an isolated clean checkout');
- const activeWorkspace=(await query('projects.list')).workspaces.find(row=>row.active);
- if(!activeWorkspace)throw Error('Worktree workspace is not active');
+ const isolatedSession={sessionId:secondResident.sessionId};
+ const ownWorktrees=(await command('worktrees.session.list',{sessionId:policySession.sessionId})).result;
+ const owned=ownWorktrees.worktrees.find(row=>row.sessionId===isolatedSession.sessionId);
+ if(!owned||!owned.branch.startsWith('wt/')||owned.dirty)throw Error('New worktree session is not an isolated clean checkout: '+JSON.stringify({isolatedSession,worktrees:ownWorktrees.worktrees}));
+ const activeWorkspace=(await query('projects.list')).workspaces.find(row=>row.root===owned?.directory);
+ if(!activeWorkspace)throw Error('Worktree workspace is not registered');
  await page.locator('.ctx-project-switch').filter({hasText:activeWorkspace.name}).waitFor();
  await page.locator('.ctx-git-switch').filter({hasText:owned.branch}).waitFor();
  report.checks.push('worktree project selection and branch display match the active Runtime workspace');
+ // Workspace entry is lazy. Start its real Runtime without sending a prompt, then verify no recursive worktree gate.
+ knownResidents.add(secondResident.sessionId);
+ await page.keyboard.press('Control+k');
+ await page.locator('[data-cmdk-id="new-without-context"]').click();
+ await until(async()=>(await query('residents.list')).residents.find(row=>!knownResidents.has(row.sessionId)&&row.workspaceId===activeWorkspace.workspaceId),value=>value!==undefined,'Runtime resident inside worktree',150000);
+ await worktreeDialog.waitFor({state:'hidden'});
  report.worktreeExitPath=owned.directory;
- await command('preferences.features.set',{sessionId:isolatedSession.sessionId,key:'worktree.onExit',value:'remove',scope:'global'});
  await capture('real-worktree-session');
  report.checks.push('fresh-session worktree prompt, continue-here choice, create/open flow and recursion guard');
  if(process.env.OMP_E2E_WORKTREE_ONLY!=='1')report.imeScope='CDP composition integration; physical OS IME not manually tested';

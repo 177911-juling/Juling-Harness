@@ -661,6 +661,54 @@ test("active lease loss clears the facade Session when Worker relaunch fails", a
   await port.stop();
 });
 
+test("a heartbeat rejected after stop cannot relaunch the active Worker", async () => {
+  let rejectHeartbeat!: (error: Error) => void;
+  let markHeartbeatStarted!: () => void;
+  const heartbeatStarted = new Promise<void>(resolve => { markHeartbeatStarted = resolve; });
+  const heartbeatFailure = new Promise<void>((_resolve, reject) => { rejectHeartbeat = reject; });
+  let heartbeatCalls = 0;
+  const leaseStore: SessionLeaseStore = {
+    acquire({ sessionId, ownerId }) {
+      return {
+        sessionId,
+        ownerId,
+        leaseEpoch: 1,
+        heartbeat: () => {
+          if (++heartbeatCalls === 1) markHeartbeatStarted();
+          return heartbeatFailure;
+        },
+        release: () => undefined,
+      };
+    },
+  };
+  const state = {
+    created: [] as Array<{ sessionId: string; epoch: number }>,
+    stopped: [] as string[],
+    streaming: new Set<string>(),
+    failInvoke: new Set<string>(),
+    dead: new Set<string>(),
+    failStartEpoch: new Set<number>(),
+    failStop: new Set<string>(),
+    invokes: [] as Array<{ sessionId: string; operation: HarnessOperation }>,
+    launchedIn: [] as Array<{ sessionId: string; workspaceId: string; cwd: string }>,
+  };
+  const port = createDesktopRuntimeSessionPort({
+    ownerId: "broker-stop-heartbeat-test",
+    sessionLeaseStore: leaseStore,
+    leaseHeartbeatIntervalMs: 5,
+    workerPortFactory: fakeWorkerFactory(state),
+  });
+  await port.start(context);
+  await heartbeatStarted;
+  await port.stop();
+  rejectHeartbeat(new Error("lease heartbeat failed after stop"));
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(state.created, [{ sessionId: "fresh-1", epoch: 1 }]);
+  assert.deepEqual(state.stopped, ["fresh-1"]);
+  assert.equal(port.listResidents?.().residents.length, 0);
+});
+
 test("rebind replaces a dead Worker of the target workspace only", async () => {
   const { port, state } = createHarness();
   await port.start(context);

@@ -17,7 +17,7 @@ import { cfgTierAnthropic } from "../../session/settings";
 import { cfgTierGoogle } from "../../session/settings";
 import { cfgTierSubagent } from "../../session/settings";
 import { cfgTierAdvisor } from "../../session/settings";
-import { cfgCodexResetsAutoRedeem } from "../../session/settings";
+import { cfgCodexResetsAutoRedeem5h, cfgCodexResetsAutoRedeemWeekly } from "../../session/settings";
 import { cfgCodexResetsMinBlockedMinutes } from "../../session/settings";
 import { cfgCodexResetsKeepCredits } from "../../session/settings";
 import { cfgCodexResetsSalvageHorizonHours } from "../../session/settings";
@@ -34,7 +34,9 @@ import {
 	cfgExtendedContext,
 } from "../../session/context-settings";
 import {
-	cfgClaudeResetsAutoRedeem,
+	cfgClaudeResetsAutoRedeem5h,
+	cfgClaudeResetsAutoRedeemFable,
+	cfgClaudeResetsAutoRedeemWeekly,
 	cfgClaudeResetsKeepCredits,
 	cfgClaudeResetsMinBlockedMinutes,
 	cfgClaudeResetsSalvageHorizonHours,
@@ -200,7 +202,8 @@ const GUI_SETTING_HANDLES = {
 	"tier.google": cfgTierGoogle,
 	"tier.subagent": cfgTierSubagent,
 	"tier.advisor": cfgTierAdvisor,
-	"codexResets.autoRedeem": cfgCodexResetsAutoRedeem,
+	"codexResets.autoRedeem5h": cfgCodexResetsAutoRedeem5h,
+	"codexResets.autoRedeemWeekly": cfgCodexResetsAutoRedeemWeekly,
 	"codexResets.minBlockedMinutes": cfgCodexResetsMinBlockedMinutes,
 	"codexResets.keepCredits": cfgCodexResetsKeepCredits,
 	"codexResets.salvageHorizonHours": cfgCodexResetsSalvageHorizonHours,
@@ -211,7 +214,9 @@ const GUI_SETTING_HANDLES = {
 	"ida.idleCloseSec": cfgIdaIdleCloseSec,
 	"spelling.autocomplete": cfgSpellingAutocomplete,
 
-	"claudeResets.autoRedeem": cfgClaudeResetsAutoRedeem,
+	"claudeResets.autoRedeem5h": cfgClaudeResetsAutoRedeem5h,
+	"claudeResets.autoRedeemWeekly": cfgClaudeResetsAutoRedeemWeekly,
+	"claudeResets.autoRedeemFable": cfgClaudeResetsAutoRedeemFable,
 	"claudeResets.minBlockedMinutes": cfgClaudeResetsMinBlockedMinutes,
 	"claudeResets.keepCredits": cfgClaudeResetsKeepCredits,
 	"claudeResets.salvageHorizonHours": cfgClaudeResetsSalvageHorizonHours,
@@ -237,7 +242,9 @@ const GUI_SETTING_HANDLES = {
 
 const RUNTIME_SETTING_HANDLES = {
 	...GUI_SETTING_HANDLES,
-	"claudeResets.autoRedeem": cfgClaudeResetsAutoRedeem,
+	"claudeResets.autoRedeem5h": cfgClaudeResetsAutoRedeem5h,
+	"claudeResets.autoRedeemWeekly": cfgClaudeResetsAutoRedeemWeekly,
+	"claudeResets.autoRedeemFable": cfgClaudeResetsAutoRedeemFable,
 	"claudeResets.minBlockedMinutes": cfgClaudeResetsMinBlockedMinutes,
 	"claudeResets.keepCredits": cfgClaudeResetsKeepCredits,
 	"claudeResets.salvageHorizonHours": cfgClaudeResetsSalvageHorizonHours,
@@ -268,7 +275,9 @@ type SettingValue<K extends keyof typeof RUNTIME_SETTING_HANDLES> = DefinitionVa
 export const HARNESS_RUNTIME_SETTING_KEYS = [
 	...GUI_SETTING_KEYS,
 	"modelRoles.judge",
-	"claudeResets.autoRedeem",
+	"claudeResets.autoRedeem5h",
+	"claudeResets.autoRedeemWeekly",
+	"claudeResets.autoRedeemFable",
 	"claudeResets.minBlockedMinutes",
 	"claudeResets.keepCredits",
 	"claudeResets.salvageHorizonHours",
@@ -297,7 +306,9 @@ export type HarnessRuntimeSettingKey = (typeof HARNESS_RUNTIME_SETTING_KEYS)[num
 
 export interface HarnessRuntimeSettingsSnapshot extends Required<GuiSettingsSnapshot> {
 	"modelRoles.judge": string;
-	"claudeResets.autoRedeem": SettingValue<"claudeResets.autoRedeem">;
+	"claudeResets.autoRedeem5h": SettingValue<"claudeResets.autoRedeem5h">;
+	"claudeResets.autoRedeemWeekly": SettingValue<"claudeResets.autoRedeemWeekly">;
+	"claudeResets.autoRedeemFable": SettingValue<"claudeResets.autoRedeemFable">;
 	"claudeResets.minBlockedMinutes": SettingValue<"claudeResets.minBlockedMinutes">;
 	"claudeResets.keepCredits": SettingValue<"claudeResets.keepCredits">;
 	"claudeResets.salvageHorizonHours": SettingValue<"claudeResets.salvageHorizonHours">;
@@ -323,7 +334,9 @@ export interface HarnessRuntimeSettingsSnapshot extends Required<GuiSettingsSnap
 }
 
 export interface HarnessRuntimeSettingsActivation {
-	sources?: Partial<Record<HarnessRuntimeSettingKey, "env" | "runtime" | "overlay" | "project" | "global" | "default">>;
+	sources?: Partial<
+		Record<HarnessRuntimeSettingKey, "env" | "runtime" | "overlay" | "project" | "global" | "default">
+	>;
 	configured: Partial<HarnessRuntimeSettingsSnapshot>;
 	restartRequired: HarnessRuntimeSettingKey[];
 	hindsightCredential?: {
@@ -397,7 +410,9 @@ export function isHarnessRuntimeSettingValue(
 			);
 		case "plan.autosaveDir":
 			return typeof value === "string" && value.length <= 4096 && !value.includes("\0");
-		case "claudeResets.autoRedeem":
+		case "claudeResets.autoRedeem5h":
+		case "claudeResets.autoRedeemWeekly":
+		case "claudeResets.autoRedeemFable":
 		case "ttsr.judge":
 		case "task.maxEffort":
 		case "providers.autoThinkingMaxEffort":
@@ -500,7 +515,9 @@ export class HarnessRuntimeSettingsService {
 			) as Required<GuiSettingsSnapshot>),
 			"modelRoles.judge": this.session.settings.getModelRoles().judge ?? "",
 			"providers.openai-codex.codeMode": "off",
-			"claudeResets.autoRedeem": cfgClaudeResetsAutoRedeem.get(this.session.settings),
+			"claudeResets.autoRedeem5h": cfgClaudeResetsAutoRedeem5h.get(this.session.settings),
+			"claudeResets.autoRedeemWeekly": cfgClaudeResetsAutoRedeemWeekly.get(this.session.settings),
+			"claudeResets.autoRedeemFable": cfgClaudeResetsAutoRedeemFable.get(this.session.settings),
 			"claudeResets.minBlockedMinutes": cfgClaudeResetsMinBlockedMinutes.get(this.session.settings),
 			"claudeResets.keepCredits": cfgClaudeResetsKeepCredits.get(this.session.settings),
 			"claudeResets.salvageHorizonHours": cfgClaudeResetsSalvageHorizonHours.get(this.session.settings),

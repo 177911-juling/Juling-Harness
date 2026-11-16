@@ -45,7 +45,7 @@ afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals(); });
 
 function mount(browser: ReturnType<typeof fakeBrowser>) {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
-  vi.stubGlobal("ompHarnessChrome", { managedBrowser: browser.api });
+  vi.stubGlobal("julingHarnessChrome", { managedBrowser: browser.api });
   const store = new DockStore(null);
   store.switchScope({ target: "local", project: "project", session: "chat" }, false);
   store.dispatch({ type: "region", region: "right", visible: true });

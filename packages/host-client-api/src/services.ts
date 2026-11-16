@@ -621,7 +621,7 @@ export interface HostGitHubService {
 }
 
 /**
- * Host-owned token-usage adapter. Syncs via `omp stats --summary` and reads
+ * Host-owned token-usage adapter. Syncs via `juling stats --summary` and reads
  * aggregates from stats.db. Paths never appear on the public read model.
  */
 export interface HostUsageService {
@@ -698,7 +698,7 @@ export interface HostSemanticCommandService {
     | Promise<HostInvokeOutcome>;
   /**
    * Archive a thread: the Host moves the session JSONL (gzip) and artifacts
-   * into the OMP cold-archive tree, mirroring `omp gc`. A live resident
+   * into the Juling cold-archive tree, mirroring `juling gc`. A live resident
    * session is aborted (if streaming) and switched off the file first.
    */
   archive?(input: { readonly threadId: ThreadId }): ConfigWriteResult | Promise<ConfigWriteResult>;

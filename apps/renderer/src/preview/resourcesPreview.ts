@@ -29,7 +29,7 @@ export const PREVIEW_RESOURCE_EXAMPLES = {
   conflict: "conflict://1/ours",
 } as const;
 
-const DOCS = "# OMP documentation\n\nBuilt-in documentation available to the runtime.\n\n## Getting started\n\n- Sessions and conversation history\n- Tools and command reference\n- Configuration and model roles\n\n## Working with resources\n\nlocal:// - files owned by the active session\nomp://docs - built-in documentation index\nattachment://1 - an image attached to this session\nconflict://1/ours - one side of a registered conflict\n\n## Editing local files\n\nOpen an existing UTF-8 text file, edit its contents, and save\nagainst the version returned when the file was opened.\n\nExternal changes require reopening the original file.\n";
+const DOCS = "# Juling documentation\n\nBuilt-in documentation available to the runtime.\n\n## Getting started\n\n- Sessions and conversation history\n- Tools and command reference\n- Configuration and model roles\n\n## Working with resources\n\nlocal:// - files owned by the active session\nomp://docs - built-in documentation index\nattachment://1 - an image attached to this session\nconflict://1/ours - one side of a registered conflict\n\n## Editing local files\n\nOpen an existing UTF-8 text file, edit its contents, and save\nagainst the version returned when the file was opened.\n\nExternal changes require reopening the original file.\n";
 const CONFLICT = {
   "conflict://1": "<<<<<<< ours\nconst resourceScope = 'session';\n||||||| base\nconst resourceScope = 'default';\n=======\nconst resourceScope = 'workspace';\n>>>>>>> theirs",
   "conflict://1/ours": "const resourceScope = 'session';",

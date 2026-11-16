@@ -20,7 +20,7 @@ function setup(path = "report.pdf") {
   const query = vi.fn(async (_name?: string, _input?: unknown): Promise<unknown> => file), client = { query } as unknown as HarnessClient;
   const session = new FileDocument(file, async () => client), setVisible = vi.spyOn(session, "setVisible");
   const open = vi.fn(async () => ({ id: "lease", url: "omp-file://viewer/lease", file })), release = vi.fn(async () => {});
-  vi.stubGlobal("ompHarnessChrome", { files: { open, release } });
+  vi.stubGlobal("julingHarnessChrome", { files: { open, release } });
   const descriptor: FilePanelDescriptor = { targetId: null, workspaceId: "workspace", path: file.path, fileId: file.id, title: file.name, scope: "conversation" };
   const onViewState = vi.fn();
   const pane = (visible: boolean) => <I18nProvider forcedLanguage="zh"><FilePane id="file-view:pdf" descriptor={descriptor} session={session} visible={visible} onSettings={() => {}} onOpen={() => {}} onViewState={onViewState} /></I18nProvider>;

@@ -149,7 +149,7 @@ export function PromptTemplatesPane({ client, sessionId, available, visible = tr
               {description(row) ? <span className="runtime-template-description">{description(row)}</span> : null}
               <span className="runtime-template-source-label"><Icon name={templateSource(row).scope === "project" ? "folder" : "user"} extra="xs" />{sourceLabel(row, zh)}</span>
             </button>)}
-            {!filtered.length ? <CatalogEmpty icon={busy === "list" ? "refresh" : "file"} title={busy === "list" ? (zh ? "读取模板…" : "Loading templates…") : rows.length ? (zh ? "没有匹配的模板" : "No matching templates") : (zh ? "当前会话没有已加载模板" : "No templates loaded")}>{busy === "list" ? undefined : rows.length ? (zh ? "调整搜索关键词或来源筛选。" : "Try another search term or source.") : (zh ? "将 Markdown 模板放入 .omp/prompts，再重建运行会话。" : "Add Markdown templates to .omp/prompts, then recreate the Runtime session.")}</CatalogEmpty> : null}
+            {!filtered.length ? <CatalogEmpty icon={busy === "list" ? "refresh" : "file"} title={busy === "list" ? (zh ? "读取模板…" : "Loading templates…") : rows.length ? (zh ? "没有匹配的模板" : "No matching templates") : (zh ? "当前会话没有已加载模板" : "No templates loaded")}>{busy === "list" ? undefined : rows.length ? (zh ? "调整搜索关键词或来源筛选。" : "Try another search term or source.") : (zh ? "将 Markdown 模板放入 .juling/prompts，再重建运行会话。" : "Add Markdown templates to .juling/prompts, then recreate the Runtime session.")}</CatalogEmpty> : null}
           </div>
           {cursor ? <button type="button" className="btn small outline runtime-template-more" disabled={!!busy} onClick={() => void run("list", (epoch) => load(epoch, cursor))}>{zh ? "更多模板" : "More templates"}<Icon name="chevron-d" extra="xs" /></button> : null}
         </aside>
@@ -170,7 +170,7 @@ export function PromptTemplatesPane({ client, sessionId, available, visible = tr
           </div> : <CatalogEmpty icon="file-code" title={rows.length ? (zh ? "选择一个提示词模板" : "Choose a prompt template") : (zh ? "模板工作区" : "Template workspace")}>{zh ? "在左侧查看模板来源，右侧填写参数并预览结果。" : "Browse templates on the left, then add arguments and preview on the right."}</CatalogEmpty>}
         </div>
       </div>}
-      {canRead ? <footer className="runtime-catalog-footnote"><Icon name="folder" extra="xs" /><span>{zh ? "默认用户模板位于 ~/.omp/agent/prompts，项目模板位于 .omp/prompts。磁盘修改后需重建运行会话。" : "Default user templates live in ~/.omp/agent/prompts; project templates in .omp/prompts. Recreate the Runtime session after file changes."}</span></footer> : null}
+      {canRead ? <footer className="runtime-catalog-footnote"><Icon name="folder" extra="xs" /><span>{zh ? "默认用户模板位于 ~/.juling/agent/prompts，项目模板位于 .juling/prompts。磁盘修改后需重建运行会话。" : "Default user templates live in ~/.juling/agent/prompts; project templates in .juling/prompts. Recreate the Runtime session after file changes."}</span></footer> : null}
     </section>
   );
 }

@@ -17,7 +17,7 @@ export function LiveAudioPane({ client, sessionId, available, visible = true, re
   const [state, setState] = useState<LiveAudioState>(); const [voice, setVoice] = useState("sol"); const [device, setDevice] = useState(""); const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [review, setReview] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [micDenied, setMicDenied] = useState(false);
   const generation = useRef(0); const lock = useRef(false); const capture = useRef<{ stop(): void; setMuted?(muted: boolean): void } | undefined>(undefined); const abort = useRef<AbortController | undefined>(undefined); const audioId = useRef<string | undefined>(undefined); const confirm = useRef<HTMLButtonElement>(null);
-  const desktop = !remote && !!globalThis.ompHarnessChrome?.attachLiveAudio && !!navigator.mediaDevices?.getUserMedia;
+  const desktop = !remote && !!globalThis.julingHarnessChrome?.attachLiveAudio && !!navigator.mediaDevices?.getUserMedia;
   const useWebRtc = !desktop;
   const enabled = visible && (preview || ((desktop || webrtcAvailable && typeof RTCPeerConnection === "function" && !!navigator.mediaDevices?.getUserMedia) && available && !!sessionId));
   const active = !!state && !["off", "error"].includes(state.phase);
@@ -79,7 +79,7 @@ export function LiveAudioPane({ client, sessionId, available, visible = true, re
           if (!next.audioId) throw new Error("Runtime did not prepare an audio input");
           if (controller.signal.aborted || epoch !== generation.current) { void invoke("live.audio.release", { sessionId: sessionId!, audioId: next.audioId }).catch(() => {}); controller.signal.throwIfAborted(); throw new Error("Live session changed"); }
           audioId.current = next.audioId;
-          const result = await globalThis.ompHarnessChrome!.attachLiveAudio!({ audioId: next.audioId, sessionId: sessionId! });
+          const result = await globalThis.julingHarnessChrome!.attachLiveAudio!({ audioId: next.audioId, sessionId: sessionId! });
           if (!result.ok) throw new Error(result.message ?? "Microphone could not attach"); return next.audioId;
         },
       });

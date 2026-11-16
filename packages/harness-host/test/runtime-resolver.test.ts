@@ -382,7 +382,7 @@ test("symlinked executables are rejected", async () => {
 });
 
 test("path validation rejects relative, missing, and non-file targets", async () => {
-  const relative = await validateExecutablePath("relative\\omp.exe");
+  const relative = await validateExecutablePath("relative\\juling.exe");
   assert.equal(relative.ok, false);
   assert.match(relative.reason ?? "", /absolute path/u);
   const missing = await validateExecutablePath(join(tmpdir(), "juling-harness-missing-xyz"));
@@ -608,7 +608,7 @@ test("process probe reports PROBE_UNAVAILABLE when the bridge bootstrap fails", 
     },
   });
   const outcome = await probe.probe({
-    executablePath: "C:\\runtimes\\omp.exe",
+    executablePath: "C:\\runtimes\\juling.exe",
     platform: "win32",
     arch: "x64",
     workspaceDirectory: tmpdir(),
@@ -665,4 +665,23 @@ test("a probe verdict is never retried and probeAttempts caps transient retries"
     environment({ probe: probeWith({ failure: "PROBE_TIMEOUT" }, singleCall), probeAttempts: 1 }),
   );
   assert.equal(singleCall.length, 1);
+});
+
+test("a managed Runtime built before the Harness rename is rejected with rebuild guidance", async () => {
+  const { path } = await executableFile();
+  const resolution = await resolveRuntime(
+    { kind: "managed" },
+    environment({
+      managedLookup: {
+        current: async () => ({
+          manifest: managedManifest({ runtimeVersion: "18.18.0-studio.1", patchsetVersion: "studio.1" }),
+          entrypointPath: path,
+          entrypointSha256: FIXTURE_SHA256,
+        }),
+      },
+    }),
+  );
+  assert.equal(resolution.classification, "rejected");
+  assert.match(resolution.rejectionReason ?? "", /predates the Harness rename/u);
+  assert.match(resolution.rejectionReason ?? "", /omp:build:host/u);
 });

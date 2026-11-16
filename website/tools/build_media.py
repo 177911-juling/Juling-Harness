@@ -1,11 +1,11 @@
 """Web media from the promo's frame-exact UI captures (read-only input) and the live stills.
-Usage: python tools/build_media.py <omp-studio-promo dir>
+Usage: python tools/build_media.py <juling-harness-promo dir>
 Output: public/media/{clip,seq,still,poster}. Rerun is idempotent; finished files are skipped.
 """
 import os, subprocess, sys, tempfile
 from PIL import Image
 
-PROMO = sys.argv[1] if len(sys.argv) > 1 else r"D:\Project\omp-studio-promo"
+PROMO = sys.argv[1] if len(sys.argv) > 1 else r"D:\Project\juling-harness-promo"
 SITE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MEDIA = os.path.join(SITE, "public", "media")
 SHOTS = os.path.join(PROMO, "assets", "shots")

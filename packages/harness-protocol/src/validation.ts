@@ -192,7 +192,9 @@ export function validateRuntimeSettingValue(
     case "providers.autoThinkingMaxEffort":
       oneOf(value, ["xhigh", "max"], path);
       return;
-    case "claudeResets.autoRedeem":
+    case "claudeResets.autoRedeem5h":
+    case "claudeResets.autoRedeemWeekly":
+    case "claudeResets.autoRedeemFable":
       oneOf(value, ["unset", "yes", "no"], path);
       return;
     case "ttsr.judge":
@@ -250,7 +252,9 @@ export function validateRuntimeSettingValue(
 const OPTIONAL_RUNTIME_SETTING_KEYS: ReadonlySet<string> = new Set([
   ...GUI_SETTING_KEYS,
   "modelRoles.judge",
-  "claudeResets.autoRedeem",
+  "claudeResets.autoRedeem5h",
+  "claudeResets.autoRedeemWeekly",
+  "claudeResets.autoRedeemFable",
   "claudeResets.minBlockedMinutes",
   "claudeResets.keepCredits",
   "claudeResets.salvageHorizonHours",
@@ -1382,7 +1386,7 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "agent.spawn": {
-    keys: ["kind", "definition", "assignment", "taskFile", "context", "async", "isolation", "effort", "model", "solutionSpace"],
+    keys: ["kind", "definition", "assignment", "context", "async", "isolation", "effort", "model", "solutionSpace"],
     validate: (operation) => {
       if (operation.model !== undefined && (!Array.isArray(operation.model) || operation.model.length === 0 || operation.model.length > 8 || operation.model.some(value => typeof value !== "string" || !value.trim() || value.length > 1024 || /[\u0000-\u001f]/u.test(value)))) throw new ContractValidationError("invalid per-spawn model chain", "$request.operation.model");
       const definition = nonEmptyString(operation.definition, "$request.operation.definition");

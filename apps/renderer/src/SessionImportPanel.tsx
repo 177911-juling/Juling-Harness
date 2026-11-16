@@ -124,7 +124,7 @@ export function SessionImportPanel({ client, onOpen, onImported, onPreviewOpen }
       data-tip={!available ? t("runtimeUpgrade.unavailable") : undefined} onClick={() => setOpened(true)}><Icon name="export" extra="sm" />{zh ? "导入会话" : "Import sessions"}</button>
     {opened ? <WorkspaceDialog title={t("runtimeUpgrade.importTitle")} onClose={() => setOpened(false)}>
       <div className="session-picker">
-        <div className="session-picker-intro"><p>{zh ? "从 Claude 或 Codex 的已保存对话创建 OMP 会话。" : "Create an OMP session from a saved Claude or Codex conversation."}</p>{preview && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}</div>
+        <div className="session-picker-intro"><p>{zh ? "从 Claude 或 Codex 的已保存对话创建 Juling 会话。" : "Create a Juling session from a saved Claude or Codex conversation."}</p>{preview && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}</div>
         <div className="session-picker-toolbar">
           <fieldset className="session-picker-source" disabled={importing}><SlidingTabs<ForeignSource> id={`${id}-sources`} ariaLabel={zh ? "导入来源" : "Import source"} value={source} orientation="horizontal"
             onChange={value => { setSource(value); setQuery(""); }} items={[
@@ -163,7 +163,7 @@ export function SessionImportPanel({ client, onOpen, onImported, onPreviewOpen }
         {listError ? <div className="session-picker-error" role="alert"><Icon name="alert-c" extra="sm" /><p>{listError}</p><button type="button" className="btn small outline" disabled={loading} onClick={() => setRefresh(value => value + 1)}>{zh ? "重新读取" : "Retry"}</button></div> : null}
         {importError ? <div className="session-picker-error" role="alert"><Icon name="alert-c" extra="sm" /><p>{importError}</p></div> : null}
         <footer className="session-picker-foot">
-          <div className="session-picker-foot-note"><p>{imported ? zh ? "会话已就绪，可以在 OMP 中继续。" : "The session is ready to continue in OMP." : zh ? "导入为独立的 OMP 会话，保留原始消息。" : "Import as a separate OMP session with the original messages."}</p><SessionPickerKeys /></div>
+          <div className="session-picker-foot-note"><p>{imported ? zh ? "会话已就绪，可以在 Juling 中继续。" : "The session is ready to continue in Juling." : zh ? "导入为独立的 Juling 会话，保留原始消息。" : "Import as a separate Juling session with the original messages."}</p><SessionPickerKeys /></div>
           <button type="button" className="btn outline" onClick={() => setOpened(false)}>{t("common.close")}</button>
           {imported ? <button type="button" className="btn primary" onClick={openImported}><Icon name="arrow-r" extra="sm" />{t("common.open")}</button>
             : <button type="button" className="btn primary" disabled={loading || previewLoading || importing || !activeDetail?.preview || (!activeDetail.session.cwdExists && !fallback)} onClick={() => void run()}><Icon name="arrow-r" extra="sm" />{importing ? zh ? "正在导入…" : "Importing…" : t("runtimeUpgrade.importAction")}</button>}

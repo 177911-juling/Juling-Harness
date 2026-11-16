@@ -2,7 +2,7 @@
 
 ## 项目目标
 
-Juling Harness 是 OMP Runtime / AgentSession 的桌面控制台（Windows 与 macOS Apple Silicon）与配套 Web UI。它通过类型化的 Harness Bridge 暴露运行时能力；不要以 slash 文本、ANSI 输出解析或按键宏模拟控制。
+Juling Harness 是 Juling Runtime（上游 `oh-my-pi`，二进制 `juling.exe` / `juling`）/ AgentSession 的桌面控制台（Windows 与 macOS Apple Silicon）与配套 Web UI。它通过类型化的 Harness Bridge 暴露运行时能力；不要以 slash 文本、ANSI 输出解析或按键宏模拟控制。
 
 主要结构：
 
@@ -136,6 +136,7 @@ node scripts/check.mjs --list          # 看有哪些组和包
 - `apps/renderer` 源码不能直接 import Node 内置模块或 `electron`，必须走 preload
 - `packages/*/src` 不能 import `@juling-harness/testkit`（演示数据留在渲染层 preview）
 - `PREVIEW_MODE_SWITCH_ENABLED` 只有 `preview/mode.ts` 一处定义，只有 `preview/` 读它
+- Runtime overlay 与 `packages/harness-protocol` 的线协议标识（`juling-harness`、`harness.*` 帧、`harness-host` 模式、`harnessOrigin`、`PATCHSET_VERSION`）必须一致，见同名测试
 
 改分层是决策不是失误：同一次提交里改表和代码，diff 就是记录。
 

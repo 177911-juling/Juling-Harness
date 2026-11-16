@@ -29,7 +29,7 @@ import type {
 } from "@juling-harness/client-contract";
 
 /** Desktop shell surface consumed by the renderer-side transport adapter. */
-export interface OmpHarnessDesktopApi {
+export interface JulingHarnessDesktopApi {
   openContext?(scope: ClientContextScope): Promise<string>;
   bootstrap(contextId?: string): Promise<ClientBootstrap>;
   query<TName extends QueryName>(

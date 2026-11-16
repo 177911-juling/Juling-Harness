@@ -182,7 +182,7 @@ describe("URI resources", () => {
     await reader(); fireEvent.click(button("读取"));
     await screen.findByDisplayValue(/This is a local preview resource/);
     fireEvent.click(button("omp://")); fireEvent.click(button("读取"));
-    await screen.findByDisplayValue(/OMP documentation/);
+    await screen.findByDisplayValue(/Juling documentation/);
     fireEvent.click(button("下一页")); await screen.findByDisplayValue(/Working with resources/);
     fireEvent.click(button("attachment://")); fireEvent.click(button("读取"));
     const image = await screen.findByRole("img", { name: "attachment://1" }); expect(image.getAttribute("src")).toMatch(/^data:image\/png;base64,/);

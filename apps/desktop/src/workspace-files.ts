@@ -108,7 +108,7 @@ export function createWorkspaceFileService({ registry }: { readonly registry: Wo
       if (input.encoding === "utf16be") bytes.swap16();
       if (input.bom) bytes = Buffer.concat([Buffer.from(input.encoding === "utf8" ? [239, 187, 191] : input.encoding === "utf16le" ? [255, 254] : [254, 255]), bytes]);
       if (bytes.length > EDITABLE_FILE_BYTES) throw new Error("保存内容超过 8 MiB，请使用外部编辑器");
-      const temporary = resolve(dirname(target), `.omp-save-${randomUUID()}`);
+      const temporary = resolve(dirname(target), `.juling-save-${randomUUID()}`);
       try {
         const mode = (await lstat(target)).mode;
         await writeFile(temporary, bytes, { flag: "wx", mode });

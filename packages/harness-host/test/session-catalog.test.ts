@@ -226,3 +226,18 @@ test("session catalog scans the cold-archive tree and marks gz members archived"
   assert.equal(byId.get("archived-id")?.title, "Archived chat");
   assert.ok(!JSON.stringify(result).includes("C:\secret"));
 });
+
+test("session catalog still lists conversations written before the Harness rename", async () => {
+  const root = await mkdtemp(join(tmpdir(), "juling-harness-catalog-legacy-"));
+  const project = join(root, "--project--");
+  await mkdir(project);
+  await sessionFile(project, "legacy", {
+    type: "session",
+    id: "legacy-id",
+    timestamp: "2026-08-09T00:00:00.000Z",
+    title: "Legacy chat",
+    studioOrigin: "studio-host",
+  });
+  const result = await scanSessionCatalog({ sessionsRoot: root });
+  assert.deepEqual(result.sessions.map((entry) => [entry.sessionId, entry.origin]), [["legacy-id", "harness"]]);
+});

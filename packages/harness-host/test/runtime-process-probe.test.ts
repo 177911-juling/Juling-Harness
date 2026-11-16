@@ -104,7 +104,7 @@ test("an asynchronously missing probe executable reports SPAWN_FAILED", async ()
 test("probe startup stays in its workspace and does not execute extensions from external configuration", async () => {
   const directory = await mkdtemp(join(tmpdir(), "omp-probe-isolation-"));
   const sharedTemp = join(directory, "shared-temp");
-  const extensions = join(sharedTemp, ".omp", "extensions");
+  const extensions = join(sharedTemp, ".juling", "extensions");
   const marker = join(directory, "external-extension-ran");
   const extension = join(extensions, "marker.mjs");
   const config = join(directory, "external-config.json");
@@ -112,7 +112,7 @@ test("probe startup stays in its workspace and does not execute extensions from 
   await mkdir(extensions, { recursive: true });
   await writeFile(extension, `import {writeFileSync} from 'node:fs';writeFileSync(${JSON.stringify(marker)},'executed');`);
   await writeFile(config, JSON.stringify({ extensions: [extension] }));
-  // Model OMP's actual startup rule: cwd === HOME moves to the shared temp
+  // Model the Runtime's actual startup rule: cwd === HOME moves to the shared temp
   // root unless --cwd/--allow-home is supplied, then extensions are discovered.
   await writeFile(script, `import {readFileSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
@@ -123,7 +123,7 @@ const cwdIndex=args.lastIndexOf('--cwd');
 if(cwdIndex>=0)process.chdir(args[cwdIndex+1]);
 else if(!args.includes('--allow-home')&&process.cwd()===process.env.HOME)process.chdir(tmpdir());
 if(process.env.PI_CONFIG_FILES){for(const file of JSON.parse(readFileSync(process.env.PI_CONFIG_FILES,'utf8')).extensions)await import(pathToFileURL(file).href);}
-const ambient=join(process.cwd(),'.omp','extensions','marker.mjs');
+const ambient=join(process.cwd(),'.juling','extensions','marker.mjs');
 if(process.cwd()!==process.env.HOME&&existsSync(ambient))await import(pathToFileURL(ambient).href);
 console.log(JSON.stringify({cwd:process.cwd(),home:process.env.HOME,configDir:process.env.PI_CONFIG_DIR}));
 `);
@@ -149,7 +149,7 @@ console.log(JSON.stringify({cwd:process.cwd(),home:process.env.HOME,configDir:pr
       assert.ok(workspace);
       assert.equal(await realpath(state.cwd), await realpath(workspace));
       assert.equal(state.home, workspace);
-      assert.equal(state.configDir, ".omp");
+      assert.equal(state.configDir, ".juling");
       await assert.rejects(readFile(marker), { code: "ENOENT" });
     }
   } finally {

@@ -117,7 +117,7 @@ function fakePlatform(profileDirectory: string): PlatformPort {
   return {
     platform: "win32",
     appDataDirectory: async () => profileDirectory,
-    runtimeExecutableName: () => "omp.exe",
+    runtimeExecutableName: () => "juling.exe",
     createPrivateEndpoint: async () => {
       throw new Error("unused");
     },

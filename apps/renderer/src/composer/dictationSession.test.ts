@@ -15,7 +15,7 @@ const sessions: DictationSession[] = [];
 afterEach(() => { sessions.splice(0).forEach(session => session.disconnect()); vi.restoreAllMocks(); });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 async function until(check: () => boolean) { for (let i = 0; i < 50; i++) { if (check()) return; await Promise.resolve(); } throw new Error("State did not settle"); }
-function setup(options: { ready?: boolean; blocked?: boolean; permission?: Promise<void>; final?: DictationCaptureState } = {}) {
+function setup(options: { ready?: boolean; blocked?: boolean; permission?: Promise<void>; final?: DictationCaptureState; runtimeReady?: boolean } = {}) {
   const events = new Set<(event: DictationDesktopEvent) => void>();
   const order: string[] = [];
   const owner: DictationOwner = { sessionId: "one", draftId: "composer", label: "Composer" };
@@ -27,6 +27,7 @@ function setup(options: { ready?: boolean; blocked?: boolean; permission?: Promi
   const submitted = vi.fn();
   const commands: string[] = [];
   const receipts: Record<string, unknown> = {};
+  let runtimeReady = options.runtimeReady;
   const client = {
     command: vi.fn(async (kind: string) => {
       commands.push(kind); const requestId = `r${commands.length}`;
@@ -35,7 +36,13 @@ function setup(options: { ready?: boolean; blocked?: boolean; permission?: Promi
       receipts[requestId] = { requestId, status: "completed", result: { result } };
       return { requestId };
     }),
-    getState: () => ({ commands: receipts }),
+    getState: () => ({
+      commands: receipts,
+      ...(runtimeReady === undefined ? {} : {
+        connection: { runtime: { status: runtimeReady ? "connected" : "disconnected" }, resyncRequired: false },
+        entities: { snapshot: runtimeReady ? { sessionId: "one" } : null },
+      }),
+    }),
     subscribe: () => () => {},
   } as unknown as HarnessClient;
   const api: DictationAudioApi = {
@@ -67,10 +74,19 @@ function setup(options: { ready?: boolean; blocked?: boolean; permission?: Promi
   });
   const session = new DictationSession({ client, sessionId: "one", draftId: "composer", label: "Composer", available: true, visible: true, remote: false, zh: true, deviceId: "", editor: () => editor, onSubmit: submitted }, { api: () => api, openCapture, permission: () => options.permission });
   sessions.push(session); session.connect();
-  return { session, api, editor, submitted, commands, order, emit, openCapture, inputStop, capture: () => captureOptions!, retain: () => { for (const listener of events) if (recovery) listener({ kind: "retained", recovery }); } };
+  return { session, api, editor, submitted, commands, order, emit, openCapture, inputStop, capture: () => captureOptions!, setRuntimeReady: (ready: boolean) => { runtimeReady = ready; }, retain: () => { for (const listener of events) if (recovery) listener({ kind: "retained", recovery }); } };
 }
 
 describe("dictation input lifecycle", () => {
+  it("does not inspect a stale available session until its Runtime snapshot is ready again", async () => {
+    const s = setup({ runtimeReady: false });
+    await s.session.inspect();
+    expect(s.commands).toEqual([]);
+
+    s.setRuntimeReady(true);
+    await s.session.inspect();
+    expect(s.commands).toEqual(["dictation.inspect"]);
+  });
   it("does not request a device before native readiness, and cancelled readiness cannot reopen it", async () => {
     const s = setup({ ready: false });
     const starting = s.session.start("hold");

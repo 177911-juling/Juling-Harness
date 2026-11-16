@@ -197,7 +197,7 @@ const DEFAULT_REGISTRY_CAPACITY = 512;
  */
 const DEDUPE_KEY_CAPACITY = 512;
 
-/** FIFO trim for insertion-ordered dedupe sets; mirrors `CommandRegistry#evictOldest`. */
+/** FIFO trim for insertion-ordered dedupe sets. */
 function evictOldestKeys<T>(keys: Set<T>, capacity: number): void {
   while (keys.size > capacity) {
     const oldest = keys.keys().next().value as T | undefined;
@@ -294,7 +294,7 @@ export interface HarnessHostClientFacadeOptions {
   /** Optional Host-owned GitHub CLI adapter. Independent of Runtime availability. */
   readonly github?: HostGitHubService;
   readonly usage?: HostUsageService;
-  /** Bounded idempotency registry capacity (default 512). */
+  /** Maximum pending commands and retained terminal receipts (default 512 each). */
   readonly registryCapacity?: number;
 }
 
@@ -319,13 +319,16 @@ function inputFingerprint(input: unknown): string {
 }
 
 /**
- * Bounded requestId+idempotencyKey registry enforcing semantic equality:
+ * RequestId+idempotencyKey registry enforcing semantic equality:
  * same key + same command + same canonical input replays; key reuse with
- * different input (or requestId reuse under a different key) fails.
+ * different input (or requestId reuse under a different key) fails. Pending
+ * entries are never evicted; terminal history is bounded independently.
  */
 class CommandRegistry {
   readonly #byKey = new Map<IdempotencyKey, RegistryEntry>();
   readonly #byRequestId = new Map<CommandRequestId, RegistryEntry>();
+  readonly #pending = new Set<RegistryEntry>();
+  readonly #terminal = new Map<IdempotencyKey, RegistryEntry>();
 
   constructor(private readonly capacity: number) {
     if (!Number.isSafeInteger(capacity) || capacity < 1) {
@@ -360,6 +363,9 @@ class CommandRegistry {
     if (tracked !== undefined) {
       throw clientError("INVALID_ARGUMENT", "request id reused with a different idempotency key");
     }
+    if (this.#pending.size >= this.capacity) {
+      throw unavailableError("Command registry is full; retry after a pending command finishes");
+    }
     const entry: RegistryEntry = {
       key: request.idempotencyKey,
       requestId: request.requestId,
@@ -370,7 +376,7 @@ class CommandRegistry {
     };
     this.#byKey.set(entry.key, entry);
     this.#byRequestId.set(entry.requestId, entry);
-    this.#evictOldest();
+    this.#pending.add(entry);
     return undefined;
   }
 
@@ -379,25 +385,22 @@ class CommandRegistry {
   }
 
   hasPending(): boolean {
-    return [...this.#byKey.values()].some((entry) => entry.terminal === undefined);
+    return this.#pending.size > 0;
   }
 
   recordTerminal(requestId: CommandRequestId, receipt: CommandReceipt): void {
     const entry = this.#byRequestId.get(requestId);
-    if (entry !== undefined) {
-      entry.terminal = receipt;
-    }
-  }
-
-  #evictOldest(): void {
-    while (this.#byKey.size > this.capacity) {
-      const oldestKey = this.#byKey.keys().next().value as IdempotencyKey | undefined;
+    if (entry === undefined) return;
+    entry.terminal = receipt;
+    this.#pending.delete(entry);
+    this.#terminal.set(entry.key, entry);
+    while (this.#terminal.size > this.capacity) {
+      const oldestKey = this.#terminal.keys().next().value as IdempotencyKey | undefined;
       if (oldestKey === undefined) break;
-      const entry = this.#byKey.get(oldestKey);
+      const oldest = this.#terminal.get(oldestKey);
+      this.#terminal.delete(oldestKey);
       this.#byKey.delete(oldestKey);
-      if (entry !== undefined) {
-        this.#byRequestId.delete(entry.requestId);
-      }
+      if (oldest !== undefined) this.#byRequestId.delete(oldest.requestId);
     }
   }
 }

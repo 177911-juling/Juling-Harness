@@ -187,10 +187,10 @@ async function darwinRuntime(parent: string, version: string, protocol: { min: n
   const directory = join(parent, version);
   await mkdir(directory, { recursive: true });
   const executable = Buffer.from(`fixture-${version}`);
-  const manifest = Buffer.from(JSON.stringify({ runtimeVersion: version, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "harness.1", harnessProtocol: protocol, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: PLATFORM, entrypoint: "omp", channel: "stable" }));
-  const checksums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { "runtime-manifest.json": hash(manifest), omp: hash(executable) } }));
+  const manifest = Buffer.from(JSON.stringify({ runtimeVersion: version, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "harness.1", harnessProtocol: protocol, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: PLATFORM, entrypoint: "juling", channel: "stable" }));
+  const checksums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { "runtime-manifest.json": hash(manifest), juling: hash(executable) } }));
   const payload = Buffer.concat([manifest, Buffer.from("\0"), checksums]);
-  await writeFile(join(directory, "omp"), executable, { mode: 0o755 });
+  await writeFile(join(directory, "juling"), executable, { mode: 0o755 });
   await writeFile(join(directory, "runtime-manifest.json"), manifest);
   await writeFile(join(directory, "checksums.json"), checksums);
   await writeFile(join(directory, "runtime-signature.json"), JSON.stringify({ algorithm: "ed25519", keyId: "test", payloadSha256: hash(payload), signature: sign(null, payload, pair.privateKey).toString("base64url") }));

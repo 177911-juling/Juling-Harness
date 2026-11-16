@@ -20,6 +20,10 @@ export async function applyRemoteProvisioning(state: string, brokerUrl: string, 
     if (Object.hasOwn(input.settings, key)) config[key] = input.settings[key]; else delete config[key];
   }
   // Native discovery delegates refresh to the local vault. Refresh tokens never enter this file.
+  // The legacy pair stays alongside the canonical name for a Runtime built
+  // from a vendor tree that only knows the pre-rename spelling.
+  process.env.JULING_AUTH_BROKER_URL = brokerUrl;
+  process.env.JULING_AUTH_BROKER_TOKEN = input.brokerToken;
   process.env.OMP_AUTH_BROKER_URL = brokerUrl;
   process.env.OMP_AUTH_BROKER_TOKEN = input.brokerToken;
   const broker = { url: brokerUrl, token: input.brokerToken };

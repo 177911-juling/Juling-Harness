@@ -2,9 +2,10 @@
  * File-backed OMP task-agent definition inventory.
  *
  * Discovery order matches coding-agent `discoverAgents`: project
- * `.omp/agents/*.md`, user `~/.omp/agent/agents/*.md`, extension/plugin
- * `agents/*.md`, then the bundled roster. First name wins. Paths never
- * appear in the public read model.
+ * `.juling/agents/*.md` (then legacy `.omp/agents/*.md`), user
+ * `~/.juling/agent/agents/*.md` (then legacy `~/.omp/agent/agents/*.md`),
+ * extension/plugin `agents/*.md`, then the bundled roster. First name wins.
+ * Paths never appear in the public read model.
  */
 
 import { createHash } from "node:crypto";
@@ -26,7 +27,12 @@ import type {
 
 import { parseFrontmatter } from "./omp-discovery/frontmatter.js";
 import { listClaudePluginRoots } from "./omp-discovery/helpers.js";
-import { getAgentDir, getProjectConfigDir } from "./omp-discovery/paths.js";
+import {
+  getAgentDir,
+  getAgentDirsForRead,
+  getProjectConfigDir,
+  getProjectConfigDirsForRead,
+} from "./omp-discovery/paths.js";
 import { listOmpPluginRoots, listSettingsExtensionRoots } from "./omp-discovery/plugin-roots.js";
 import { redactText, sanitizeDisplayText } from "./read-models.js";
 import type { HostAgentDefinitionsService } from "./services.js";
@@ -472,6 +478,31 @@ async function loadConfigOverlays(configPath: string): Promise<Overlays> {
   return { disabled, overrideModel, prewalkOverride, advisorOverride };
 }
 
+/**
+ * Read `config.yml` task overlays from every candidate agent dir, highest
+ * priority first. Canonical `.juling` entries win; pre-rebrand `.omp` entries
+ * only fill agent names/keys the canonical config does not mention.
+ */
+async function loadMergedConfigOverlays(agentDirs: readonly string[]): Promise<Overlays> {
+  const disabled = new Set<string>();
+  const overrideModel: Record<string, string> = {};
+  const prewalkOverride: Record<string, string> = {};
+  const advisorOverride: Record<string, string> = {};
+  const fillMissing = (target: Record<string, string>, source: Readonly<Record<string, string>>) => {
+    for (const [key, value] of Object.entries(source)) {
+      if (!(key in target)) target[key] = value;
+    }
+  };
+  for (const dir of agentDirs) {
+    const overlays = await loadConfigOverlays(path.join(dir, "config.yml"));
+    for (const name of overlays.disabled) disabled.add(name);
+    fillMissing(overrideModel, overlays.overrideModel);
+    fillMissing(prewalkOverride, overlays.prewalkOverride);
+    fillMissing(advisorOverride, overlays.advisorOverride);
+  }
+  return { disabled, overrideModel, prewalkOverride, advisorOverride };
+}
+
 function yamlStringifyScalar(value: string): string {
   if (
     value.length === 0 ||
@@ -658,8 +689,8 @@ export function createOmpAgentDefinitionsService(
     const warnings: string[] = [];
     const seen = new Set<string>();
     const agents: AgentDefinitionRecord[] = [];
-    const agentDir = getAgentDir(home);
-    const overlays = await loadConfigOverlays(path.join(agentDir, "config.yml"));
+    const agentDirs = getAgentDirsForRead(home);
+    const overlays = await loadMergedConfigOverlays(agentDirs);
 
     const pushFiles = async (dir: string, source: AgentDefinitionSource) => {
       const files = await readDirMarkdown(dir);
@@ -678,8 +709,14 @@ export function createOmpAgentDefinitionsService(
       }
     };
 
-    if (cwd) await pushFiles(path.join(getProjectConfigDir(cwd), "agents"), "project");
-    await pushFiles(path.join(agentDir, "agents"), "user");
+    if (cwd) {
+      for (const configDir of getProjectConfigDirsForRead(cwd)) {
+        await pushFiles(path.join(configDir, "agents"), "project");
+      }
+    }
+    for (const agentDir of agentDirs) {
+      await pushFiles(path.join(agentDir, "agents"), "user");
+    }
 
     const pluginDirs: string[] = [];
     try {

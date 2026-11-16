@@ -1,5 +1,19 @@
 /* Project identity, quiet runtime metadata, and two Git shortcuts. */
-.env-card { position: relative; display: flex; flex-direction: column; box-sizing: border-box; min-width: 0; padding: 4px 14px 5px; color: var(--text); font-family: var(--font-ui); }
+.env-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 6px 14px 8px;
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+.env-card .env-name {
+  font-family: var(--font-ui);
+  letter-spacing: 0;
+}
+.env-address { font-family: var(--font-mono); font-size: calc(10px * var(--text-font-scale)); }
 .env-hero { display: flex; align-items: center; gap: 10px; min-width: 0; margin: 0 -6px; padding: 3px 6px; border: 0; border-radius: var(--r-6); background: none; color: inherit; font: inherit; text-align: left; }
 .env-project-icon { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: var(--r-4); background: var(--surface-hover); color: var(--text-2); }
 .env-project-icon .icon { width: 16px; height: 16px; }

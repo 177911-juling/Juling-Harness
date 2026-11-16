@@ -29,7 +29,7 @@ export const CONTENT_GALLERY_MARKDOWN = [
   "下面的分类数值表会生成图表，可检查表格与图形之间的间距。\n\n| Model | Latency |\n| --- | ---: |\n| Primary | 10 ms |\n| Fallback | 20 ms |\n| Scout | 40 ms |\n| Reviewer | 60 ms |",
   "---\n\n***\n\n___",
   '链接：[GFM](https://github.github.com/gfm/ "格式说明")、<https://example.com>、www.example.com、<harness@example.com> 与 [引用式链接][gfm]。\n\n[gfm]: https://github.github.com/gfm/ "GitHub Flavored Markdown"',
-  "文件链接：[相对文件](components/MermaidBlock.tsx:147)、[行与列](components/MermaidBlock.tsx#L147C7)、[file URI](file:///D:/Project/omp-web/README.md)、[带空格文件](<docs/上游同步检查记录 v0.8.1.md>)、[绝对路径](<" + demoPath("omp-web", "README.md") + ">) 与 `components/MermaidBlock.tsx:147`。",
+  "文件链接：[相对文件](components/MermaidBlock.tsx:147)、[行与列](components/MermaidBlock.tsx#L147C7)、[file URI](file:///D:/Project/juling-web/README.md)、[带空格文件](<docs/上游同步检查记录 v0.8.1.md>)、[绝对路径](<" + demoPath("juling-web", "README.md") + ">) 与 `components/MermaidBlock.tsx:147`。",
   "扩展链接：[查看检查记录](harness-demo://checks/renderer)。",
   '![本地图片：正文宽度与比例](docs/mermaid-zoom.png)\n\n![引用式图片][shot]\n\n[shot]: docs/mermaid-zoom.png "预览截图"',
   "转义：\\*字面星号\\*、\\[字面方括号\\]、a &lt; b &amp;&amp; c &gt; d、&copy;。",

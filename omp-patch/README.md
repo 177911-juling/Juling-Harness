@@ -1,13 +1,15 @@
 # Managed OMP patch boundary
 
-The Runtime pin is `can1357/oh-my-pi` `v18.18.0` at commit `b5a6b2f7e5b6606b6562e678ead83f21738f34a0`. Harness 0.2.0 starts this upstream release line at `18.18.0-harness.1`; the current Harness revision is recorded in `patches/series.json`. The upgrade began at `18.13.2-harness.44` / Harness 0.1.17; see the [18.18.0 migration report](../docs/migrations/omp-18.18.0.md) for changes, GUI coverage and validation. Earlier reports retain the development revisions used in their original checks, not later release revisions.
+The Runtime pin is `can1357/oh-my-pi` `v18.19.0` at commit `04cd1a7549a02d62ad1d24826198d52507595683`. The current Harness revision is recorded in `patches/series.json`; this release line continues at `18.19.0-harness.18`. See the [18.19.0 migration report](../docs/migrations/omp-18.19.0.md) for interface changes and validation; the previous [18.18.0 migration report](../docs/migrations/omp-18.18.0.md) retains the earlier development revisions.
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Harness repository.
 
 Executable names have separate responsibilities:
 
-- `omp.exe` is the patched OMP CLI/runtime and is launched as `omp --mode harness-host`;
+- `juling.exe` (`juling` on macOS/Linux) is the patched CLI/runtime and is launched as `juling --mode harness-host`;
 - `Juling Harness.exe` is the Electron desktop application; it launches the versioned, signed Runtime artifact rather than replacing the upstream CLI.
+
+The Runtime's product identity is owned by seam patch `0005-juling-identity.patch`: the app name, config directory (`.juling`), user agent, and CLI copy. Pre-rename installs stay readable — `~/.omp`, project `.omp/` directories, `OMP_*`/`PI_*` environment variables and already-installed `omp.exe` artifacts (the manifest `entrypoint` is authoritative) keep working; nothing writes to them.
 
 ## Two layers: overlay and seam
 
@@ -26,6 +28,7 @@ The overlay is ordinary tracked source in this repository. Editing it is an ordi
 | `0002-harness-session-runtime.patch` | Session/queue persistence and control, registry, tasks/worktrees, archive, prediction |
 | `0003-harness-modes-and-pause.patch` | Interactive/RPC modes, slash controls, pause, jobs, shared chart types |
 | `0004-harness-extensibility.patch` | Extension/SDK hooks, tools/browser, service broker, IDA, media, stats and evaluation |
+| `0005-juling-identity.patch` | Product identity: app name, config dir, user agent, CLI copy, native discovery roots |
 
 `scripts/omp-seam.mjs` holds the authoritative path list for each group. Adding a seam file means adding it to a group there and rerunning the regen script — an upstream file that no group claims makes regeneration fail rather than silently dropping the edit.
 

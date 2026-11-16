@@ -10,7 +10,7 @@ import { createPasswordAuthentication, sshAuthenticationRequest, type SshAuthent
 
 /** Helper produced by `npm run build` (`scripts/build-ssh-askpass.mjs`). */
 const helperDirectory = fileURLToPath(new URL("../ssh-askpass/", import.meta.url));
-const helper = join(helperDirectory, process.platform === "win32" ? "omp-ssh-askpass.exe" : "askpass.sh");
+const helper = join(helperDirectory, process.platform === "win32" ? "juling-ssh-askpass.exe" : "askpass.sh");
 const skip = existsSync(helper) ? false : "run npm run build first (no ssh-askpass helper)";
 const controller = new AbortController();
 const passwordProfile = { host: "example.invalid", user: "omp-test", authMode: "password" as const, platform: "linux" as const };

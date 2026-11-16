@@ -7,13 +7,13 @@ import { GitStatusPanel } from "./GitStatusPanel";
 import { GitHubPanel } from "./GitHubPanel";
 import { WorkspaceTabs } from "../workspaces/Workspace";
 import { useWideLayout } from "../layout/useWideLayout";
+import { readGitView, writeGitPreference, type GitView } from "./viewMemory";
 import "./github.css";
 
 /** From this width the view switcher joins the title row and changes sit beside their diff. */
 const GIT_WIDE_MIN = 880;
 
-type View = "changes" | "history" | "issue" | "pr";
-export type GitOpenIntent = { key: number; view: View; path?: string; target?: GitDiffTarget; remote?: string; number?: number; search?: string };
+export type GitOpenIntent = { key: number; view: GitView; path?: string; target?: GitDiffTarget; remote?: string; number?: number; search?: string };
 export function GitWorkbench(props: { client: HarnessClient; workspaceId?: WorkspaceId; workspaceName?: string; visible: boolean; worktrees: ReactNode; intent?: GitOpenIntent | undefined; onReference: (reference: GitHubReference) => void }) {
   const { preview } = usePreviewMode();
   return <GitWorkbenchBody key={`${preview ? "preview" : "real"}:${props.workspaceId ?? "none"}`} {...props} />;
@@ -24,26 +24,23 @@ function GitWorkbenchBody({ client, workspaceId, workspaceName, visible, worktre
   const tabsId = useId();
   const [rootRef, wide] = useWideLayout<HTMLDivElement>(GIT_WIDE_MIN);
   const storage = `omp.git.view:${preview ? "preview" : workspaceId ?? "none"}`;
-  const [view, setView] = useState<View>(() => {
-    const saved = localStorage.getItem(storage);
-    return saved === "history" || saved === "issue" || saved === "pr" ? saved : "changes";
-  });
+  const [view, setView] = useState<GitView>(() => readGitView(storage));
   const local = view === "changes" || view === "history";
   const [localMounted, setLocalMounted] = useState(local);
   const [activeIntent, setActiveIntent] = useState(intent);
-  const chooseView = (next: View) => {
+  const chooseView = (next: GitView) => {
     if (next === "changes" || next === "history") setLocalMounted(true);
     setActiveIntent(undefined);
-    setView(next); localStorage.setItem(storage, next);
+    setView(next); writeGitPreference(storage, next);
   };
   useEffect(() => {
     if (!intent) return;
     setActiveIntent(intent);
     if (intent.view === "changes" || intent.view === "history") setLocalMounted(true);
     setView(intent.view);
-    localStorage.setItem(storage, intent.view);
+    writeGitPreference(storage, intent.view);
   }, [intent, storage]);
-  const tabs = <WorkspaceTabs<View> id={tabsId} label={t("github.views")} value={view} onChange={chooseView} items={[
+  const tabs = <WorkspaceTabs<GitView> id={tabsId} label={t("github.views")} value={view} onChange={chooseView} items={[
     { id: "changes", icon: "changes", label: t("github.changes") },
     { id: "history", icon: "history", label: t("github.history") },
     { id: "issue", icon: "alert-c", label: "Issues" },

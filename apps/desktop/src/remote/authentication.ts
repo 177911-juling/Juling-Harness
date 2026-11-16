@@ -32,7 +32,7 @@ export async function createPasswordAuthentication(connection: SshConnection, pa
   let server: Server | undefined;
   try {
     signal.throwIfAborted();
-    const helper = join(helperDirectory, process.platform === "win32" ? "omp-ssh-askpass.exe" : "askpass.sh");
+    const helper = join(helperDirectory, process.platform === "win32" ? "juling-ssh-askpass.exe" : "askpass.sh");
     await access(helper);
     const { stdout } = await promisify(execFile)(systemSshExecutable(), ["-G", ...sshArguments(connection)], { encoding: "utf8", timeout: 15_000, maxBuffer: 1024 * 1024, windowsHide: true, signal });
     const config = new Map(stdout.split(/\r?\n/u).map(line => { const at = line.indexOf(" "); return [line.slice(0, at), line.slice(at + 1)] as const; }));
@@ -43,7 +43,7 @@ export async function createPasswordAuthentication(connection: SshConnection, pa
     if (!user || !hostname) throw new RemoteConnectionError("configuration", "系统 SSH 未能解析目标用户名和主机");
     const prompt = `${user}@${hostname}'s password:`;
     const endpoint = process.platform === "win32"
-      ? `\\\\.\\pipe\\omp-ssh-askpass-${randomUUID()}`
+      ? `\\\\.\\pipe\\juling-ssh-askpass-${randomUUID()}`
       : privateSocketPath(directory = await ensurePrivateSocketDirectory(`ssh-askpass:${randomUUID()}`), "auth.sock");
     const tickets = new Map<string, Ticket>();
     const sockets = new Set<Socket>();
@@ -104,6 +104,12 @@ export async function createPasswordAuthentication(connection: SshConnection, pa
             SSH_ASKPASS: helper,
             SSH_ASKPASS_REQUIRE: "force",
             DISPLAY: process.env.DISPLAY || "juling-harness:0",
+            JULING_SSH_ASKPASS_ENDPOINT: endpoint,
+            JULING_SSH_ASKPASS_TICKET: token,
+            JULING_SSH_ASKPASS_NODE: process.execPath,
+            JULING_SSH_ASKPASS_SCRIPT: join(helperDirectory, "askpass.cjs"),
+            // The bundled helper still reads the pre-rename names; both are set
+            // until it prefers `JULING_*`.
             OMP_SSH_ASKPASS_ENDPOINT: endpoint,
             OMP_SSH_ASKPASS_TICKET: token,
             OMP_SSH_ASKPASS_NODE: process.execPath,

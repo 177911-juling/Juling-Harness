@@ -10,15 +10,15 @@ test("staging a downloaded macOS Runtime restores 0755 without modifying signed 
   try {
     const source = join(root, "source"), destination = join(root, "payload");
     await mkdir(source);
-    await writeFile(join(source, "omp"), "signed-runtime-bytes");
-    await chmod(join(source, "omp"), 0o644);
+    await writeFile(join(source, "juling"), "signed-runtime-bytes");
+    await chmod(join(source, "juling"), 0o644);
     await writeFile(join(source, "runtime-signature.json"), "signature");
     await stageRuntimePayload(source, destination, "darwin-arm64");
-    assert.equal(await readFile(join(destination, "omp"), "utf8"), "signed-runtime-bytes");
+    assert.equal(await readFile(join(destination, "juling"), "utf8"), "signed-runtime-bytes");
     assert.equal(await readFile(join(destination, "runtime-signature.json"), "utf8"), "signature");
     if (process.platform !== "win32") {
-      assert.equal((await stat(join(destination, "omp"))).mode & 0o777, 0o755);
-      assert.equal((await stat(join(source, "omp"))).mode & 0o777, 0o644);
+      assert.equal((await stat(join(destination, "juling"))).mode & 0o777, 0o755);
+      assert.equal((await stat(join(source, "juling"))).mode & 0o777, 0o644);
     }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -195,7 +195,7 @@ export interface DesktopRuntimeSessionContext {
   readonly endpoint: PrivateEndpoint;
   readonly profileDirectory: string;
   /**
-   * Managed Runtime tree used to spawn `omp.exe`. Packaged: `$INSTDIR\runtime`.
+   * Managed Runtime tree used to spawn `juling.exe`. Packaged: `$INSTDIR\runtime`.
    * Unpackaged / tests: `%APPDATA%\juling-harness\runtimes` (or the temp profile).
    */
   readonly runtimeInstallDirectory: string;

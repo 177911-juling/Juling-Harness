@@ -4,9 +4,17 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { readGunzipPrefix } from "./gzip-file.js";
+import { AGENT_HOME_DIR_NAME, resolveAgentDirOverride } from "./agent-home.js";
 import { sameWorkspacePath } from "./workspace-path.js";
 
 const HARNESS_SESSION_ORIGIN = "harness-host";
+/**
+ * Sessions written before the Harness rename carry `studioOrigin: "studio-host"`.
+ * They are still this product's own conversations, so history discovery treats
+ * them as Harness sessions instead of hiding every pre-upgrade conversation.
+ */
+const LEGACY_SESSION_ORIGIN = "studio-host";
+const LEGACY_SESSION_ORIGIN_FIELD = "studioOrigin";
 const SESSION_PINS_FILENAME = "session-pins.json";
 const DEFAULT_PREFIX_BYTES = 64 * 1024;
 const DEFAULT_MAX_SESSION_BYTES = 512 * 1024 * 1024;
@@ -80,13 +88,17 @@ export function defaultOmpSessionsRoot(environment: NodeJS.ProcessEnv = process.
   return resolve(defaultOmpAgentDir(environment), "sessions");
 }
 
-/** OMP's agent root, shared by sessions and the global session pin file. */
+/**
+ * The Runtime's agent root, shared by sessions and the global session pin file.
+ * Defaults to `~/.juling/agent`; `JULING_AGENT_DIR` wins over the legacy
+ * `OMP_AGENT_DIR`, which wins over `PI_CODING_AGENT_DIR`.
+ */
 export function defaultOmpAgentDir(environment: NodeJS.ProcessEnv = process.env): string {
-  const agentDirectory = environment.OMP_AGENT_DIR;
-  return resolve(agentDirectory === undefined || agentDirectory.length === 0 ? join(homedir(), ".omp", "agent") : agentDirectory);
+  const agentDirectory = resolveAgentDirOverride(environment);
+  return resolve(agentDirectory ?? join(homedir(), AGENT_HOME_DIR_NAME, "agent"));
 }
 
-/** Mirrors `omp gc`: the cold archive is a sibling of the sessions root. */
+/** Mirrors `juling gc`: the cold archive is a sibling of the sessions root. */
 export function defaultOmpArchiveRoot(sessionsRoot: string): string {
   return join(dirname(sessionsRoot), "archive", "sessions");
 }
@@ -287,7 +299,7 @@ function sameWorkspaceCwd(left: string, right: string): boolean {
 }
 
 function classifyOrigin(value: string | undefined): CatalogSessionOrigin {
-  if (value === HARNESS_SESSION_ORIGIN) return "harness";
+  if (value === HARNESS_SESSION_ORIGIN || value === LEGACY_SESSION_ORIGIN) return "harness";
   if (value === undefined) return "cli";
   return "unknown";
 }
@@ -416,11 +428,16 @@ async function readSessionHeader(
       continue;
     }
     if (!isRecord(value) || value.type !== "session" || typeof value.id !== "string" || value.id.length === 0) continue;
+    const origin = typeof value.harnessOrigin === "string"
+      ? value.harnessOrigin
+      : typeof value[LEGACY_SESSION_ORIGIN_FIELD] === "string"
+        ? (value[LEGACY_SESSION_ORIGIN_FIELD] as string)
+        : undefined;
     header = {
       id: value.id,
       ...(typeof value.timestamp === "string" ? { timestamp: value.timestamp } : {}),
       ...(typeof value.title === "string" ? { title: value.title } : titleSlot === undefined ? {} : { title: titleSlot }),
-      ...(typeof value.harnessOrigin === "string" ? { harnessOrigin: value.harnessOrigin } : {}),
+      ...(origin === undefined ? {} : { harnessOrigin: origin }),
       ...(typeof value.cwd === "string" && value.cwd.length > 0 ? { cwd: value.cwd } : {}),
     };
     if (hasConversationMessage) return { ...header, hasConversationMessage };

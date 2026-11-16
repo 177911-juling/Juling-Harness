@@ -48,4 +48,40 @@ describe("ensureSelectedSessionActive", () => {
 
     expect(command).not.toHaveBeenCalled();
   });
+
+  it("waits for the current session snapshot when the active id is unchanged but the Runtime disconnected", async () => {
+    const selectedSessionId = "active-session" as SessionId;
+    let state: object = {
+      connection: { runtime: { status: "disconnected" }, resyncRequired: false },
+      entities: { snapshot: null },
+      commands: {},
+    };
+    let listener: (() => void) | undefined;
+    const command = vi.fn();
+    const client = {
+      command,
+      subscribe: () => () => {},
+      getState: () => state,
+      onState: (next: () => void) => { listener = next; return () => { listener = undefined; }; },
+    } as unknown as HarnessClient;
+
+    let settled = false;
+    const pending = ensureSelectedSessionActive(client, {
+      activeSessionId: selectedSessionId,
+      selectedSessionId,
+      selectedThreadId: "active-thread" as ThreadId,
+    }).then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(command).not.toHaveBeenCalled();
+
+    state = {
+      connection: { runtime: { status: "connected" }, resyncRequired: false },
+      entities: { snapshot: { sessionId: selectedSessionId } },
+      commands: {},
+    };
+    listener?.();
+    await pending;
+    expect(command).not.toHaveBeenCalled();
+  });
 });

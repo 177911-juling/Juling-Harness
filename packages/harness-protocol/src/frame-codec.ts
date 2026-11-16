@@ -5,6 +5,14 @@ import { parseFrameHeader } from "./validation.js";
 export const DEFAULT_MAX_CONTROL_FRAME_BYTES = 1024 * 1024;
 const LENGTH_PREFIX_BYTES = 4;
 
+/** Reserve envelope, request id/text and the exact JSON frame header before Base64 expansion. */
+export const IMAGE_ATTACHMENT_FRAME_RESERVE_BYTES = 64 * 1024;
+export const IMAGE_ATTACHMENT_JSON_OVERHEAD_BYTES = 128;
+export const MAX_IMAGE_ATTACHMENT_BYTES = Math.floor(
+  (DEFAULT_MAX_CONTROL_FRAME_BYTES - IMAGE_ATTACHMENT_FRAME_RESERVE_BYTES - IMAGE_ATTACHMENT_JSON_OVERHEAD_BYTES) * 3 / 4,
+);
+export const MAX_IMAGE_ATTACHMENT_BASE64_CHARS = 4 * Math.ceil(MAX_IMAGE_ATTACHMENT_BYTES / 3);
+
 export interface DecodedFrame<T = unknown> {
   header: FrameHeader;
   body: T;
@@ -35,7 +43,7 @@ export function encodeFrame(
   const payloadLength = LENGTH_PREFIX_BYTES + headerBytes.byteLength + bodyBytes.byteLength;
 
   if (payloadLength > maxBytes) {
-    throw new FrameCodecError(`Frame exceeds ${maxBytes} bytes`);
+    throw new FrameCodecError(`Frame exceeds ${maxBytes} bytes; reduce the prompt or image attachments`);
   }
 
   const frame = Buffer.allocUnsafe(LENGTH_PREFIX_BYTES + payloadLength);

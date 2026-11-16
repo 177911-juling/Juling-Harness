@@ -743,7 +743,9 @@ export class HarnessComputerWorkspaceService {
 		if (this.#disposed || !this.#owns(event.identity.sessionId)) return;
 		const { identity } = event;
 		const agent =
-			identity.sessionId === this.#sessionId ? undefined : ownedHarnessSessionAgent(this.session, identity.sessionId);
+			identity.sessionId === this.#sessionId
+				? undefined
+				: ownedHarnessSessionAgent(this.session, identity.sessionId);
 		if (event.kind === "control") {
 			this.#foreground.set(identity.sessionId, event.foreground);
 			const values = [...this.#foreground.values()];

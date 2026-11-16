@@ -260,6 +260,8 @@ export function createDesktopRuntimeSessionPort(
   let activeSessionId: string | undefined;
   let leaseStore: SessionLeaseStore | undefined = options.sessionLeaseStore;
   let runtimeEpoch = 0;
+  let stopped = false;
+  let generation = 0;
   let selection = 0;
   let queue: Promise<unknown> = Promise.resolve();
   let lastUnavailable: HostRuntimeUnavailable | undefined;
@@ -544,6 +546,9 @@ export function createDesktopRuntimeSessionPort(
     evaluation = false,
     background = false,
   ): Promise<DesktopRuntimeSession | undefined> => {
+    // An intentional launch reopens the coordinator after a completed stop.
+    // Heartbeat recovery reaches this only after its own stopped fence.
+    stopped = false;
     const launchContext = context;
     const selected = launchWorkspace ?? workspace;
     if (launchContext === undefined || selected === undefined) {
@@ -609,10 +614,12 @@ export function createDesktopRuntimeSessionPort(
       emitResidents();
       if (lease.heartbeat !== undefined) {
         resident.heartbeatTimer = setInterval(() => {
+          const heartbeatGeneration = generation;
           void Promise.resolve(lease!.heartbeat!()).catch((error) => {
             options.log?.write("error", "runtime.worker.lease-lost", errorDetail(error));
             void serialized(async () => {
               const sessionId = resident.sessionId;
+              if (stopped || heartbeatGeneration !== generation || residents.get(sessionId) !== resident || resident.stopping) return;
               const wasActive = activeSessionId === sessionId;
               // Fence the dead writer before process shutdown/relaunch. Otherwise
               // the facade retains a stale Session whose hello/snapshot already
@@ -625,7 +632,7 @@ export function createDesktopRuntimeSessionPort(
                 emitResidents();
               }
               await stopResident(resident);
-              if (!wasActive) return;
+              if (stopped || heartbeatGeneration !== generation || !wasActive) return;
               const next = await launchWorker(sessionId, resident.workspace);
               sessionSink?.(next);
             }).catch((error) => {
@@ -882,6 +889,10 @@ export function createDesktopRuntimeSessionPort(
       });
     },
     stop(): Promise<void> {
+      // Set synchronously: a heartbeat rejected while stopAll is queued must not
+      // enqueue a recovery launch after the final Worker has stopped.
+      stopped = true;
+      generation += 1;
       return serialized(stopAll, true);
     },
     updateRestartBlocker,
@@ -1538,7 +1549,7 @@ function createSingleDesktopRuntimeSessionPort(
       const port = new NodeRuntimeProcessPort({
         env: {
           ...process.env,
-          ...(socketDirectory === undefined || process.env.OMP_AUTH_BROKER_URL ? {} : { JULING_HARNESS_AUTH_BROKER_FILE: join(socketDirectory, "auth-broker.json") }),
+          ...(socketDirectory === undefined || process.env.JULING_AUTH_BROKER_URL || process.env.OMP_AUTH_BROKER_URL ? {} : { JULING_HARNESS_AUTH_BROKER_FILE: join(socketDirectory, "auth-broker.json") }),
           JULING_HARNESS_MEDIA_ROOT: mediaDirectory,
           ...(options.managedBrowser ? { JULING_HARNESS_MANAGED_BROWSER: "1" } : {}),
           ...(socketDirectory === undefined ? {} : { JULING_HARNESS_SOCKET_DIR: socketDirectory }),
@@ -1597,8 +1608,10 @@ function createSingleDesktopRuntimeSessionPort(
       stage("handshake");
 
       controller = new HarnessRuntimeSessionController(client, new CommandLedger(), undefined, {
-        incrementalToolReplay: process.env.OMP_INCREMENTAL_REPLAY !== "0",
-        backgroundCoalescing: process.env.OMP_BACKGROUND_COALESCING !== "0",
+        // Canonical names, with the pre-rename spellings still honored so an
+        // operator's existing shell exports keep disabling the same features.
+        incrementalToolReplay: (process.env.JULING_INCREMENTAL_REPLAY ?? process.env.OMP_INCREMENTAL_REPLAY) !== "0",
+        backgroundCoalescing: (process.env.JULING_BACKGROUND_COALESCING ?? process.env.OMP_BACKGROUND_COALESCING) !== "0",
       });
       unregisterPerformance = registerPerformanceController(controller);
       sessionController = controller;

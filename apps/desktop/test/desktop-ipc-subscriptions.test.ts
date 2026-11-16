@@ -68,7 +68,7 @@ import type {
 import {
   DESKTOP_IPC_CHANNELS,
   DESKTOP_IPC_LIMITS,
-  type OmpHarnessDesktopApi,
+  type JulingHarnessDesktopApi,
 } from "@juling-harness/transport-desktop";
 
 import type { DesktopIpcHandle, DesktopIpcOptions, DesktopSender } from "../src/ipc.js";
@@ -286,7 +286,7 @@ function harness(trusted: (sender: DesktopSender) => boolean = () => true): Harn
  * renderer takes: Main slices -> IPC message -> preload envelope guard ->
  * per-subscription listener, so a limit mismatch cannot hide.
  */
-function attachPreload(rig: Harness, sender: FakeSender): OmpHarnessDesktopApi {
+function attachPreload(rig: Harness, sender: FakeSender): JulingHarnessDesktopApi {
   type Listener = (event: unknown, ...args: readonly unknown[]) => void;
   const listeners = new Map<string, Set<Listener>>();
   const bridge: DesktopIpcBridge = {
@@ -600,7 +600,7 @@ describe("desktop ipc subscriptions: envelope validation", () => {
 const FAN_OUT_COUNTS = [1, 32, 33, 64, 65, 128] as const;
 
 /** N listeners over one scope; returns one hit counter per listener. */
-function subscribeMany(api: OmpHarnessDesktopApi, count: number): number[] {
+function subscribeMany(api: JulingHarnessDesktopApi, count: number): number[] {
   const calls = new Array<number>(count).fill(0);
   for (let index = 0; index < count; index += 1) {
     const slot = index;

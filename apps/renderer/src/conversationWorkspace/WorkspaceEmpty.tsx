@@ -28,7 +28,7 @@ export function WorkspaceEmpty({ store }: { store: ConversationWorkspaceStore })
         <div className="cw-idle-art-corner" />
       </div>
       <div className="cw-idle-heading">
-        <span className="cw-idle-eyebrow">OMP HARNESS{preview && marks ? <span>{text("演示", "Preview")}</span> : null}</span>
+        <span className="cw-idle-eyebrow">JULING HARNESS{preview && marks ? <span>{text("演示", "Preview")}</span> : null}</span>
         <h1 id={titleId}>{text("对话工作区", "Conversation workspace")}</h1>
         <p>{text("从左侧选择对话，在独立窗口中继续。", "Choose a conversation in the sidebar to open its own window.")}</p>
       </div>

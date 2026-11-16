@@ -52,7 +52,7 @@ async function writeArtifact(
   const directory = join(parent, version);
   await mkdir(directory, { recursive: true });
   const content = `omp-${version}`;
-  await writeFile(join(directory, "omp.exe"), content);
+  await writeFile(join(directory, "juling.exe"), content);
   const manifest = `${JSON.stringify({
     runtimeVersion: version,
     upstreamVersion: "0.0.0",
@@ -63,14 +63,14 @@ async function writeArtifact(
     capabilityHash: "capability-fixture",
     commandManifestHash: "command-fixture",
     platform: "win32-x64",
-    entrypoint: "omp.exe",
+    entrypoint: "juling.exe",
     channel,
   })}\n`;
   await writeFile(join(directory, "runtime-manifest.json"), manifest);
   const checksums = `${JSON.stringify({
     algorithm: "sha256",
     files: {
-      "omp.exe": createHash("sha256").update(content).digest("hex"),
+      "juling.exe": createHash("sha256").update(content).digest("hex"),
       "runtime-manifest.json": createHash("sha256").update(manifest).digest("hex"),
     },
   })}\n`;
@@ -253,11 +253,11 @@ test("loadInstallerTrustedKeys honors environment override over directory files"
   await writeFile(join(directory, "key-id.txt"), "dir-key\n");
   await writeFile(join(directory, "trusted-public.pem"), "dir-content");
 
-  const originalPath = process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY;
-  const originalId = process.env.OMP_RUNTIME_SIGNING_KEY_ID;
+  const originalPath = process.env.JULING_RUNTIME_TRUSTED_PUBLIC_KEY;
+  const originalId = process.env.JULING_RUNTIME_SIGNING_KEY_ID;
   try {
-    process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY = envKeyFile;
-    process.env.OMP_RUNTIME_SIGNING_KEY_ID = "env-id";
+    process.env.JULING_RUNTIME_TRUSTED_PUBLIC_KEY = envKeyFile;
+    process.env.JULING_RUNTIME_SIGNING_KEY_ID = "env-id";
 
     const loaded = await loadInstallerTrustedKeys(directory);
     assert.ok(loaded);
@@ -268,10 +268,10 @@ test("loadInstallerTrustedKeys honors environment override over directory files"
     assert.ok(packaged);
     assert.deepEqual(Object.keys(packaged.trustedKeys), ["dir-key"]);
   } finally {
-    if (originalPath === undefined) delete process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY;
-    else process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY = originalPath;
-    if (originalId === undefined) delete process.env.OMP_RUNTIME_SIGNING_KEY_ID;
-    else process.env.OMP_RUNTIME_SIGNING_KEY_ID = originalId;
+    if (originalPath === undefined) delete process.env.JULING_RUNTIME_TRUSTED_PUBLIC_KEY;
+    else process.env.JULING_RUNTIME_TRUSTED_PUBLIC_KEY = originalPath;
+    if (originalId === undefined) delete process.env.JULING_RUNTIME_SIGNING_KEY_ID;
+    else process.env.JULING_RUNTIME_SIGNING_KEY_ID = originalId;
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -290,7 +290,7 @@ test("install service fail-closes without a trusted key or artifact", async () =
     hasTrustedKey: false,
     locateArtifact: async () => undefined,
   });
-  await assert.rejects(() => Promise.resolve(noKey()), /OMP_RUNTIME_TRUSTED_PUBLIC_KEY/u);
+  await assert.rejects(() => Promise.resolve(noKey()), /JULING_RUNTIME_TRUSTED_PUBLIC_KEY/u);
 
   const noArtifact = createDesktopRuntimeInstallService({
     backend: {
@@ -336,7 +336,7 @@ test("install service copies a signed artifact and activates it", async () => {
     assert.deepEqual(activated, ["1.2.3-harness.4"]);
     const current = await installer.currentManifest();
     assert.equal(current?.manifest.runtimeVersion, "1.2.3-harness.4");
-    assert.equal(current?.manifest.entrypoint, "omp.exe");
+    assert.equal(current?.manifest.entrypoint, "juling.exe");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -525,7 +525,7 @@ test("install service repairs a corrupt referenced version inside maintenance an
     await installer.activate("1.0.0-harness.1", { selfCheck: passingSelfCheck });
     await installer.install(artifact);
     await installer.activate("2.0.0-harness.1", { selfCheck: passingSelfCheck });
-    const entrypoint = join(installerRoot, "versions", "2.0.0-harness.1", "omp.exe");
+    const entrypoint = join(installerRoot, "versions", "2.0.0-harness.1", "juling.exe");
     await writeFile(entrypoint, "broken-installed-runtime");
     const service = createDesktopRuntimeInstallService({
       backend: {
@@ -539,7 +539,7 @@ test("install service repairs a corrupt referenced version inside maintenance an
       installOptions: { allowReferencedRepair: true },
     });
     assert.equal((await service()).status, "installed");
-    assert.equal(await readFile(entrypoint, "utf8"), await readFile(join(artifact, "omp.exe"), "utf8"));
+    assert.equal(await readFile(entrypoint, "utf8"), await readFile(join(artifact, "juling.exe"), "utf8"));
     assert.equal((await installer.current())?.previousRuntimeVersion, "1.0.0-harness.1");
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -695,7 +695,7 @@ test("startup upgrades an older Runtime but preserves equal/newer versions and r
       if (scenario === "rollback") {
         const next = await installer.install(bundled);
         await installer.activate(next.runtimeVersion, { selfCheck: passingSelfCheck });
-        await installer.rollback();
+        await installer.rollback({ selfCheck: passingSelfCheck });
       }
       const before = await installer.current();
       const seed = () => seedManagedRuntimeFromArtifact({
@@ -772,7 +772,7 @@ test("seedManagedRuntimeFromArtifact activates a versions tree already in the in
     assert.equal(result, "seeded");
     const current = await installer.currentManifest();
     assert.equal(current?.manifest.runtimeVersion, "6.0.0-harness.1");
-    assert.equal(current?.entrypointPath, join(installerRoot, "versions", "6.0.0-harness.1", "omp.exe"));
+    assert.equal(current?.entrypointPath, join(installerRoot, "versions", "6.0.0-harness.1", "juling.exe"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

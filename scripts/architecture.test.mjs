@@ -183,3 +183,54 @@ test("the preview switch is defined once", () => {
   const strayReaders = readers.filter(file => !file.startsWith("apps/renderer/src/preview/"));
   assert.deepEqual(strayReaders, [], "preview switch is only read by the preview layer");
 });
+
+// The Runtime overlay is copied into the vendor fork and cannot import the root
+// private packages, so protocol identity is duplicated by hand on both sides.
+// A one-sided rename here still type-checks; the only symptom is a Runtime the
+// desktop cannot handshake with. Keep the wire identifiers in lockstep.
+test("the Runtime overlay and the desktop contract agree on wire identifiers", () => {
+  const overlayProtocol = readFileSync(
+    join(root, "omp-patch", "overlay", "packages", "coding-agent", "src", "harness", "bridge-protocol.ts"),
+    "utf8",
+  );
+  const rootProtocol = readFileSync(join(root, "packages", "harness-protocol", "src", "contracts", "protocol.ts"), "utf8");
+  const overlaySessionOrigin = readFileSync(
+    join(root, "omp-patch", "overlay", "packages", "coding-agent", "src", "harness", "session-origin.ts"),
+    "utf8",
+  );
+  const hostSessionCatalog = readFileSync(join(root, "packages", "harness-host", "src", "session-catalog.ts"), "utf8");
+  const cliPatch = readFileSync(join(root, "omp-patch", "patches", "0001-harness-cli-entry.patch"), "utf8");
+  const sessionPatch = readFileSync(join(root, "omp-patch", "patches", "0002-harness-session-runtime.patch"), "utf8");
+  const runtimeArgs = readFileSync(join(root, "packages", "harness-host", "src", "runtime-resolver.ts"), "utf8");
+  const series = JSON.parse(readFileSync(join(root, "omp-patch", "patches", "series.json"), "utf8"));
+  const overlayBridgeServer = readFileSync(
+    join(root, "omp-patch", "overlay", "packages", "coding-agent", "src", "harness", "bridge-server.ts"),
+    "utf8",
+  );
+
+  const constValue = (source, name) => {
+    const match = new RegExp(`export const ${name} = ("[^"]+"|\\d+)(?: as const)?;`, "u").exec(source);
+    assert.ok(match !== null, `${name} is not declared`);
+    return JSON.parse(match[1]);
+  };
+  const protocolName = "juling-harness";
+  assert.equal(constValue(overlayProtocol, "HARNESS_PROTOCOL_NAME"), protocolName, "overlay protocol name drifted");
+  assert.equal(constValue(rootProtocol, "HARNESS_PROTOCOL_NAME"), protocolName, "desktop protocol name drifted");
+  assert.equal(constValue(overlayProtocol, "HARNESS_PROTOCOL_VERSION"), 1);
+  assert.equal(constValue(rootProtocol, "HARNESS_PROTOCOL_VERSION"), 1);
+
+  const frameTypes = source =>
+    [...source.matchAll(/"(harness\.[a-z.]+)"/gu)].map(match => match[1]).filter(value => value.split(".").length === 2);
+  assert.deepEqual([...new Set(frameTypes(overlayProtocol))].sort(), [...new Set(frameTypes(rootProtocol))].sort(), "frame types drifted");
+
+  const origin = /HARNESS_HOST_SESSION_ORIGIN = "([^"]+)"/u.exec(sessionPatch)?.[1];
+  assert.equal(origin, /HARNESS_SESSION_ORIGIN = "([^"]+)"/u.exec(hostSessionCatalog)?.[1], "session origin value drifted");
+  assert.match(hostSessionCatalog, /header\.harnessOrigin/u);
+  assert.match(overlaySessionOrigin, /header\.harnessOrigin/u);
+
+  assert.match(cliPatch, /"harness-host"/u, "Runtime CLI mode drifted");
+  assert.match(runtimeArgs, /"harness-host"/u, "desktop spawn mode drifted");
+
+  const overlayVersion = /PATCHSET_VERSION = "([^"]+)"/u.exec(overlayBridgeServer)?.[1];
+  assert.equal(overlayVersion, series.patchsetVersion, "Runtime patchset version drifted from series.json");
+});

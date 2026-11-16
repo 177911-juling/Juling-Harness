@@ -57,12 +57,7 @@ export class HarnessSearchCredentialsService {
 		} else {
 			if (!Number.isSafeInteger(operation.credentialId))
 				throw new SessionControlError("INVALID_ARGUMENT", "Select a stored credential to remove");
-			const result = await logoutCredential(
-				this.session.modelRegistry,
-				operation.provider,
-				operation.credentialId,
-				this.session.sessionId,
-			);
+			const result = await logoutCredential(this.session, operation.provider, operation.credentialId);
 			if (!result.removed)
 				throw new SessionControlError(
 					"COMMAND_BLOCKED",

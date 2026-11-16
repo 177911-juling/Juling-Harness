@@ -162,13 +162,19 @@ function parsePayloadAsset(value: unknown): PayloadAsset {
     throw new TypeError("clientContractVersion must be an integer");
   }
 
-  if (!isRecord(value.harnessProtocol)) throw new TypeError("harnessProtocol must be an object");
+  // Catalogs published before the Harness rename wrote `studioProtocol`.
+  const protocol = isRecord(value.harnessProtocol)
+    ? value.harnessProtocol
+    : isRecord(value.studioProtocol)
+      ? value.studioProtocol
+      : undefined;
+  if (protocol === undefined) throw new TypeError("harnessProtocol must be an object");
   if (
-    typeof value.harnessProtocol.min !== "number" ||
-    typeof value.harnessProtocol.max !== "number" ||
-    !Number.isSafeInteger(value.harnessProtocol.min) || value.harnessProtocol.min < 0 ||
-    !Number.isSafeInteger(value.harnessProtocol.max) ||
-    value.harnessProtocol.min > value.harnessProtocol.max
+    typeof protocol.min !== "number" ||
+    typeof protocol.max !== "number" ||
+    !Number.isSafeInteger(protocol.min) || protocol.min < 0 ||
+    !Number.isSafeInteger(protocol.max) ||
+    protocol.min > protocol.max
   ) {
     throw new TypeError("harnessProtocol range is invalid");
   }
@@ -188,8 +194,8 @@ function parsePayloadAsset(value: unknown): PayloadAsset {
     },
     clientContractVersion: value.clientContractVersion,
     harnessProtocol: {
-      min: value.harnessProtocol.min,
-      max: value.harnessProtocol.max,
+      min: protocol.min,
+      max: protocol.max,
     },
   };
 }
@@ -262,15 +268,20 @@ export function parseUpdateIndex(value: unknown): UpdateIndex {
     throw new TypeError("runtime.minAppVersion must be a string");
   }
   assertAppVersion(value.runtime.minAppVersion);
-  if (!isRecord(value.runtime.harnessProtocol)) {
+  const runtimeProtocol = isRecord(value.runtime.harnessProtocol)
+    ? value.runtime.harnessProtocol
+    : isRecord(value.runtime.studioProtocol)
+      ? value.runtime.studioProtocol
+      : undefined;
+  if (runtimeProtocol === undefined) {
     throw new TypeError("runtime.harnessProtocol must be an object");
   }
   if (
-    typeof value.runtime.harnessProtocol.min !== "number" ||
-    typeof value.runtime.harnessProtocol.max !== "number" ||
-    !Number.isSafeInteger(value.runtime.harnessProtocol.min) || value.runtime.harnessProtocol.min < 0 ||
-    !Number.isSafeInteger(value.runtime.harnessProtocol.max) ||
-    value.runtime.harnessProtocol.min > value.runtime.harnessProtocol.max
+    typeof runtimeProtocol.min !== "number" ||
+    typeof runtimeProtocol.max !== "number" ||
+    !Number.isSafeInteger(runtimeProtocol.min) || runtimeProtocol.min < 0 ||
+    !Number.isSafeInteger(runtimeProtocol.max) ||
+    runtimeProtocol.min > runtimeProtocol.max
   ) {
     throw new TypeError("runtime.harnessProtocol range is invalid");
   }
@@ -301,8 +312,8 @@ export function parseUpdateIndex(value: unknown): UpdateIndex {
       entrypoint: value.runtime.entrypoint,
       minAppVersion: value.runtime.minAppVersion,
       harnessProtocol: {
-        min: value.runtime.harnessProtocol.min,
-        max: value.runtime.harnessProtocol.max,
+        min: runtimeProtocol.min,
+        max: runtimeProtocol.max,
       },
       files,
     },
@@ -406,7 +417,11 @@ export async function fetchUpdateIndex(input: {
     fetchFn(applyMirror(input.mirrorPrefix, `${baseUrl}.json`), { signal }),
     fetchFn(applyMirror(input.mirrorPrefix, `${baseUrl}.sig.json`), { signal }),
   ]);
-  if (!indexRes.ok) throw new Error(`Failed to fetch update index: HTTP ${indexRes.status}`);
+  if (!indexRes.ok) {
+    throw new Error(indexRes.status === 404
+      ? `${input.repo} 尚未发布任何 Release，无法检查更新（HTTP 404）`
+      : `Failed to fetch update index from ${input.repo}: HTTP ${indexRes.status}`);
+  }
   if (!sigRes.ok) throw new Error(`Failed to fetch update index signature: HTTP ${sigRes.status}`);
   const [signedPayload, signatureBytes] = await Promise.all([readBounded(indexRes, 1024 * 1024), readBounded(sigRes, 16 * 1024)]);
   const indexText = signedPayload.toString("utf8");
@@ -503,7 +518,7 @@ export function planAppUpdate(input: {
 export type RuntimeUpdatePlan =
   | { readonly kind: "none" }
   | { readonly kind: "available"; readonly runtimeVersion: string; readonly totalBytes: number }
-  | { readonly kind: "blocked"; readonly reason: "protocol" | "min-app-version" | "platform" | "channel" };
+  | { readonly kind: "blocked"; readonly reason: "protocol" | "min-app-version" | "platform" | "channel" | "legacy-runtime" };
 
 export function planRuntimeUpdate(input: {
   readonly index: UpdateIndex;
@@ -514,6 +529,13 @@ export function planRuntimeUpdate(input: {
   readonly harnessProtocol: number;
 }): RuntimeUpdatePlan {
   const runtime = input.index.runtime;
+  // Runtimes published before the Harness rename speak the old wire protocol
+  // (`omp-studio`, `studio.*`, `--mode studio-host`) and the current desktop
+  // rejects them after download. Refuse them up front instead of downloading
+  // 250 MB that can never be activated.
+  if (/-studio\.\d+$/u.test(runtime.runtimeVersion)) {
+    return { kind: "blocked", reason: "legacy-runtime" };
+  }
   if (runtime.channel !== input.channel) return { kind: "blocked", reason: "channel" };
   if (runtime.platform !== input.platform) {
     return { kind: "blocked", reason: "platform" };

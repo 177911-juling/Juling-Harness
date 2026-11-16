@@ -284,7 +284,7 @@ it("ignores late suggestions during composition and after dismissal", async () =
   let receive!: (event: { kind: "next"; channelId: string; revision: number; suffix: string | null; choices?: string[]; rank?: number }) => void;
   const input = vi.fn(async (_request: { input: { kind: string; revision?: number } }) => ({ ok: true }));
   const detach = vi.fn(async () => {});
-  vi.stubGlobal("ompHarnessChrome", {
+  vi.stubGlobal("julingHarnessChrome", {
     attachPrediction: vi.fn(async () => ({ ok: true })),
     detachPrediction: detach,
     predictionInput: input,

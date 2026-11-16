@@ -8,7 +8,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localS
 function page(sessionId: string) { return <I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled={false}><AudioCapturePane sessionId={sessionId} onSaved={() => {}} /></PreviewModeProvider></I18nProvider>; }
 function devices(getUserMedia: () => Promise<unknown>) {
   Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
-  vi.stubGlobal("ompHarnessChrome", { beginMediaUpload: vi.fn() });
+  vi.stubGlobal("julingHarnessChrome", { beginMediaUpload: vi.fn() });
   class Recorder { static isTypeSupported() { return true; } state = "inactive"; mimeType = "audio/webm"; onstop?: () => void; start() { this.state = "recording"; } stop() { this.state = "inactive"; this.onstop?.(); } }
   vi.stubGlobal("MediaRecorder", Recorder);
 }

@@ -31,8 +31,15 @@ export function canonicalUpdateJson(value: unknown): string {
   if (value !== null && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => `${JSON.stringify(k)}:${canonicalUpdateJson(v)}`).join(",")}}`;
   return JSON.stringify(value);
 }
-export function updateSigningBytes(manifest: UpdateManifest): Buffer {
-  return Buffer.from(`juling-harness-update-v2\n${canonicalUpdateJson(manifest)}`, "utf8");
+/**
+ * Domain separation for the v2 catalog signature. Catalogs published before
+ * the Harness rename were signed under the old `omp-studio-update-v2` prefix;
+ * verification accepts both so already-published releases stay installable,
+ * while new catalogs are always produced with the current prefix.
+ */
+const UPDATE_SIGNING_DOMAINS = ["juling-harness-update-v2", "omp-studio-update-v2"] as const;
+export function updateSigningBytes(manifest: UpdateManifest, domain: typeof UPDATE_SIGNING_DOMAINS[number] = UPDATE_SIGNING_DOMAINS[0]): Buffer {
+  return Buffer.from(`${domain}\n${canonicalUpdateJson(manifest)}`, "utf8");
 }
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid update object");
@@ -61,7 +68,9 @@ function file(value: unknown, repo: string): UpdateFile {
   return { asset: x.asset, url, size: integer(x.size), sha256: x.sha256, sha512: x.sha512 };
 }
 function component(value: unknown, repo: string, kind: UpdateComponent, platform: UpdatePlatform): ComponentRelease {
-  const x = object(value), protocol = object(x.harnessProtocol);
+  const x = object(value);
+  // Catalogs signed before the Harness rename carry `studioProtocol`.
+  const protocol = object(x.harnessProtocol ?? x.studioProtocol);
   if (x.channel !== "stable" && x.channel !== "canary") throw new Error("Invalid update channel");
   const result: ComponentRelease = {
     version: version(x.version), sequence: integer(x.sequence), channel: x.channel,
@@ -76,7 +85,10 @@ export function verifyUpdateManifest(value: unknown, keys: Readonly<Record<strin
   const envelope = object(value), raw = object(envelope.manifest), sig = object(envelope.signature);
   if (sig.algorithm !== "ed25519" || typeof sig.keyId !== "string" || typeof sig.value !== "string" || !Object.hasOwn(keys, sig.keyId)) throw new Error("Untrusted update signing key");
   const key = createPublicKey(keys[sig.keyId]!);
-  if (key.asymmetricKeyType !== "ed25519" || !verify(null, updateSigningBytes(raw as unknown as UpdateManifest), key, Buffer.from(sig.value, "base64url"))) throw new Error("Update signature verification failed");
+  const signature = Buffer.from(sig.value, "base64url");
+  const signatureOk = key.asymmetricKeyType === "ed25519" && UPDATE_SIGNING_DOMAINS.some((domain) =>
+    verify(null, updateSigningBytes(raw as unknown as UpdateManifest, domain), key, signature));
+  if (!signatureOk) throw new Error("Update signature verification failed");
   if (raw.schema !== 2 || raw.repo !== repo || raw.platform !== platform || !isUpdatePlatform(platform)) throw new Error("Update manifest identity mismatch");
   if (typeof raw.generatedAt !== "string" || !Number.isFinite(Date.parse(raw.generatedAt))) throw new Error("Invalid update timestamp");
   const manifest: UpdateManifest = { schema: 2, repo, platform, generatedAt: raw.generatedAt, releaseNotesUrl: https(raw.releaseNotesUrl) };
@@ -91,8 +103,15 @@ export function verifyUpdateManifest(value: unknown, keys: Readonly<Record<strin
   }
   // The coordinator journals this manifest and verifies it again on every
   // start, so it must be byte-identical to what was signed: a dropped field
-  // would break that later, far from its cause.
-  if (canonicalUpdateJson(manifest) !== canonicalUpdateJson(raw)) throw new Error("Update manifest has unrecognized fields");
+  // would break that later, far from its cause. Catalogs signed before the
+  // Harness rename carry `studioProtocol`, which parses into `harnessProtocol`
+  // above, so normalize the raw side before comparing.
+  const normalizedRaw = {
+    ...raw,
+    ...(raw.app === undefined ? {} : { app: normalizeLegacyProtocolField(raw.app) }),
+    ...(raw.runtime === undefined ? {} : { runtime: normalizeLegacyProtocolField(raw.runtime) }),
+  };
+  if (canonicalUpdateJson(manifest) !== canonicalUpdateJson(normalizedRaw)) throw new Error("Update manifest has unrecognized fields");
   return { manifest, signature: { algorithm: "ed25519", keyId: sig.keyId, value: sig.value } };
 }
 
@@ -111,4 +130,13 @@ export interface UnifiedUpdateSnapshot {
   rollbackAppPending?: boolean | undefined;
   error?: string | undefined; releaseNotesUrl?: string | undefined;
   errorStage?: UpdateErrorStage | undefined;
+}
+
+/** Rewrites the pre-rename `studioProtocol` key so the round-trip check sees the parsed shape. */
+function normalizeLegacyProtocolField(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if (record.harnessProtocol !== undefined || record.studioProtocol === undefined) return value;
+  const { studioProtocol, ...rest } = record;
+  return { ...rest, harnessProtocol: studioProtocol };
 }

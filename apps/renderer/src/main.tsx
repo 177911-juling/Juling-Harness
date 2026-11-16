@@ -8,8 +8,8 @@
  * When this module is loaded directly by Vite (the auto-bootstrap entry),
  * the hosting page injects that client on `globalThis.JULING_HARNESS_CLIENT`
  * before the bundle runs. If it is absent but the desktop preload bridge
- * (`globalThis.ompHarness`) is present, the entry constructs the client
- * itself: `createDesktopTransport(ompHarness)` → `HarnessClientImpl`. If
+ * (`globalThis.julingHarness`) is present, the entry constructs the client
+ * itself: `createDesktopTransport(julingHarness)` → `HarnessClientImpl`. If
  * neither exists we render an explicit unavailable state instead of
  * failing.
  */
@@ -28,7 +28,7 @@ import { createRendererPerformanceReporter } from "./rendererPerformance";
 import { PLATFORM } from "./platform";
 import { startTierControl } from "./perf/tierControl";
 
-const stopPerformanceReporter = createRendererPerformanceReporter(globalThis.ompHarnessChrome);
+const stopPerformanceReporter = createRendererPerformanceReporter(globalThis.julingHarnessChrome);
 window.addEventListener("pagehide", stopPerformanceReporter, { once: true });
 import.meta.hot?.dispose(() => { window.removeEventListener("pagehide", stopPerformanceReporter); stopPerformanceReporter(); });
 
@@ -46,7 +46,7 @@ document.documentElement.setAttribute("lang", resolveLanguage(initialSettings.la
  * P0-6：首帧前把 GPU / 低配 / 动效分级写到 `<html>`。
  *
  * Main 用 `app.getGPUFeatureStatus()`（不是 `getGPUInfo("basic")`：实测两者在
- * 软合成下字段完全相同）判定机器等级 L0–L3；`ompHarnessPerf.cached` 是 preload
+ * 软合成下字段完全相同）判定机器等级 L0–L3；`julingHarnessPerf.cached` 是 preload
  * 同步读到的上一次快照，所以首帧不需要 IPC 往返。等级规则只在 Main 一处，渲染层
  * 只负责「保存最新机器等级 + 叠加用户的减少动效偏好」（见 `perf/tierControl.ts`），
  * 不再自己从 GPU/CPU/内存事实推导等级。
@@ -57,7 +57,7 @@ document.documentElement.setAttribute("lang", resolveLanguage(initialSettings.la
 const reducedMotionQuery = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : undefined;
 const stopTierControl = startTierControl({
   root: document.documentElement,
-  source: globalThis.ompHarnessPerf,
+  source: globalThis.julingHarnessPerf,
   motionOff: () => {
     try {
       if (window.localStorage.getItem("omp.perf.motion") === "off") return true;
@@ -109,7 +109,7 @@ const host = document.getElementById("root");
 if (host !== null && !new URL(window.location.href).searchParams.has("dockHost")) {
   let client: HarnessClient | undefined = globalThis.JULING_HARNESS_CLIENT;
   if (client === undefined) {
-    const bridge = globalThis.ompHarness;
+    const bridge = globalThis.julingHarness;
     if (bridge !== undefined) {
       client = new HarnessClientImpl(createDesktopTransport(bridge));
     }

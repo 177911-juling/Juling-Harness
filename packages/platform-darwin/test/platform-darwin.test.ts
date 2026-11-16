@@ -31,6 +31,6 @@ describe("DarwinPlatformPort", () => {
       releaseProcess: () => {},
     };
     const port = new DarwinPlatformPort(services);
-    assert.equal(port.runtimeExecutableName(), "omp");
+    assert.equal(port.runtimeExecutableName(), "juling");
   });
 });

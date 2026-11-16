@@ -1,5 +1,5 @@
 diff --git a/crates/pi-natives/src/desktop/ax.rs b/crates/pi-natives/src/desktop/ax.rs
-index f0d6850df1..77fcc1a40b 100644
+index 993cfc6511..ed2281f044 100644
 --- a/crates/pi-natives/src/desktop/ax.rs
 +++ b/crates/pi-natives/src/desktop/ax.rs
 @@ -8,7 +8,10 @@ use super::{
@@ -14,7 +14,7 @@ index f0d6850df1..77fcc1a40b 100644
  };
  
  #[derive(Clone)]
-@@ -648,17 +651,63 @@ pub fn snapshot(
+@@ -897,18 +900,64 @@ pub fn snapshot(
  	window: &DesktopWindow,
  	options: &AxSnapshotOptions,
  ) -> CoreResult<AxSnapshot> {
@@ -40,8 +40,9 @@ index f0d6850df1..77fcc1a40b 100644
 +		} else {
 +			WalkBounds::Skip
 +		},
- 	);
- 	let tree = walk_raw(backend, root.clone(), 0, &mut state)?;
+ 	)
+ 	.line_states();
+ 	let tree = walk_raw(backend, root.clone(), 0, false, &mut state)?;
  	let identities = ReadIdentities::new(&root, tree.as_ref(), &state);
  	let root = tree.and_then(|node| filter_node(node, options.all.unwrap_or(false)));
 +	let nodes = collect_nodes.then(|| {
@@ -79,7 +80,7 @@ index f0d6850df1..77fcc1a40b 100644
  	let mut text = String::new();
  	let mut node_count = 0;
  	if let Some(root) = root {
-@@ -688,7 +737,7 @@ pub fn snapshot(
+@@ -939,7 +988,7 @@ pub fn snapshot(
  		}
  		let _ = write!(text, "… skipped {} unreadable nodes", state.skipped);
  	}
@@ -165,7 +166,7 @@ index 7c2b566bff..7afbff63af 100644
  	fn moved_window_is_reanchored() {
  		let f = FrameGeometry::for_window(&window(10, 20), 800, 600);
 diff --git a/crates/pi-natives/src/desktop/mod.rs b/crates/pi-natives/src/desktop/mod.rs
-index 9d80a43b6e..8baff03173 100644
+index 01d6c43cf8..13dd2b6f5e 100644
 --- a/crates/pi-natives/src/desktop/mod.rs
 +++ b/crates/pi-natives/src/desktop/mod.rs
 @@ -727,24 +727,25 @@ fn hold_duration(seconds: f64) -> CoreResult<Duration> {
@@ -308,7 +309,7 @@ index 9d80a43b6e..8baff03173 100644
  			},
  			Request::ListApplications { options, .. } => {
  				Ok(Response::Applications(applications::list(options.clone())?))
-@@ -1706,6 +1758,7 @@ struct Lifecycle {
+@@ -1752,6 +1804,7 @@ struct Lifecycle {
  	closed: bool,
  }
  struct SessionCore {
@@ -316,7 +317,7 @@ index 9d80a43b6e..8baff03173 100644
  	selector:          DisplaySelector,
  	lifecycle:         Mutex<Lifecycle>,
  	capabilities:      Arc<Mutex<Option<DesktopCapabilities>>>,
-@@ -1727,6 +1780,7 @@ impl SessionCore {
+@@ -1773,6 +1826,7 @@ impl SessionCore {
  		operation_timeout: Duration,
  	) -> Arc<Self> {
  		Arc::new(Self {
@@ -324,7 +325,7 @@ index 9d80a43b6e..8baff03173 100644
  			selector,
  			lifecycle: Mutex::new(Lifecycle {
  				tx:     None,
-@@ -1755,10 +1809,12 @@ impl SessionCore {
+@@ -1801,10 +1855,12 @@ impl SessionCore {
  		let selector = self.selector.clone();
  		let caps = Arc::clone(&self.capabilities);
  		let display_awake = Arc::clone(&self.display_awake);
@@ -338,7 +339,7 @@ index 9d80a43b6e..8baff03173 100644
  				let _ = done_tx.send(());
  			})
  			.map_err(|e| {
-@@ -1893,7 +1949,30 @@ impl DesktopSession {
+@@ -1939,7 +1995,30 @@ impl DesktopSession {
  	pub fn new(options: Option<DesktopSessionOptions>) -> Result<Self> {
  		let options = options.unwrap_or_default();
  		let escape_stops = control::escape_stop_counter(options.escape_stop_key.as_deref());
@@ -370,7 +371,7 @@ index 9d80a43b6e..8baff03173 100644
  	}
  
  	/// Asks the worker when it is idle, so permissions are read live. While
-@@ -1934,7 +2013,9 @@ impl DesktopSession {
+@@ -1980,7 +2059,9 @@ impl DesktopSession {
  	/// this when it acts inside a turn.
  	#[napi]
  	pub fn hold_display_until_released(&self) {
@@ -381,7 +382,7 @@ index 9d80a43b6e..8baff03173 100644
  	}
  
  	/// Lets the display sleep now if a turn holds it, without waiting behind
-@@ -2132,6 +2213,12 @@ impl DesktopSession {
+@@ -2178,6 +2259,12 @@ impl DesktopSession {
  	/// calling this method.
  	#[napi]
  	pub fn acquire_control(&self) -> Result<task::Promise<DesktopControlState>> {
@@ -394,7 +395,7 @@ index 9d80a43b6e..8baff03173 100644
  		let c = Arc::clone(&self.core);
  		let token = c.cancellation.token();
  		Ok(task::blocking("desktop.acquireControl", (), move |_| {
-@@ -3261,6 +3348,7 @@ mod capture_tests {
+@@ -3342,6 +3429,7 @@ mod capture_tests {
  	/// so they must not wait for the ownership tests.
  	fn unlocked_worker(backend: impl Backend + 'static) -> Worker {
  		Worker {
@@ -402,7 +403,7 @@ index 9d80a43b6e..8baff03173 100644
  			backend: Ok(Box::new(backend)),
  			registry: AxRegistry::default(),
  			frames: HashMap::new(),
-@@ -3323,6 +3411,41 @@ mod capture_tests {
+@@ -3405,6 +3493,41 @@ mod capture_tests {
  		}
  	}
  
@@ -445,7 +446,7 @@ index 9d80a43b6e..8baff03173 100644
  	fn display_stays_awake_only_until_the_grace_after_the_last_activity() {
  		let backend = FakeWaylandBackend::new();
 diff --git a/crates/pi-natives/src/desktop/types.rs b/crates/pi-natives/src/desktop/types.rs
-index 64e1ac9443..9151b1d946 100644
+index beb545fcde..1c0ad1570b 100644
 --- a/crates/pi-natives/src/desktop/types.rs
 +++ b/crates/pi-natives/src/desktop/types.rs
 @@ -153,10 +153,12 @@ impl ScreenState {
@@ -463,7 +464,7 @@ index 64e1ac9443..9151b1d946 100644
  }
  
  #[napi(object)]
-@@ -241,8 +243,24 @@ pub struct DesktopControlState {
+@@ -254,8 +256,24 @@ pub struct DesktopControlState {
  
  #[napi(object)]
  pub struct DesktopObservation {
@@ -491,10 +492,18 @@ index 64e1ac9443..9151b1d946 100644
  
  #[napi(object)]
 diff --git a/packages/coding-agent/src/cli/bench-cli.ts b/packages/coding-agent/src/cli/bench-cli.ts
-index 1c10fc60b3..39841fcc39 100644
+index 1c10fc60b3..358448661f 100644
 --- a/packages/coding-agent/src/cli/bench-cli.ts
 +++ b/packages/coding-agent/src/cli/bench-cli.ts
-@@ -86,7 +86,7 @@ export type BenchProfile = "mix" | BenchChallengeKind;
+@@ -21,6 +21,7 @@ import {
+ 	visibleWidth,
+ } from "@oh-my-pi/pi-tui";
+ import { formatDuration, formatNumber, prompt } from "@oh-my-pi/pi-utils";
++import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import chalk from "@oh-my-pi/pi-utils/chalk";
+ import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
+ import { formatModelStringWithRouting } from "../config/model-resolver";
+@@ -86,7 +87,7 @@ export type BenchProfile = "mix" | BenchChallengeKind;
  const CHALLENGE_KINDS = ["chat", "prefill", "generation"] as const;
  
  /** Default max output tokens per challenge kind (`--max-tokens` overrides all). */
@@ -503,7 +512,7 @@ index 1c10fc60b3..39841fcc39 100644
  
  /**
   * One `--detailed` phase, run in order against each model:
-@@ -310,6 +310,9 @@ export interface BenchSummary {
+@@ -310,6 +311,9 @@ export interface BenchSummary {
  }
  
  export interface BenchDependencies {
@@ -513,7 +522,7 @@ index 1c10fc60b3..39841fcc39 100644
  	createRuntime?: () => Promise<BenchRuntime>;
  	randomSessionId?: () => string;
  	writeStdout?: (text: string) => void;
-@@ -401,7 +404,7 @@ function asNonNegativeNumber(value: unknown): number {
+@@ -401,7 +405,7 @@ function asNonNegativeNumber(value: unknown): number {
  	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
  }
  /** Nearest-rank distribution summary; `values` MUST be non-empty. */
@@ -522,7 +531,7 @@ index 1c10fc60b3..39841fcc39 100644
  	const sorted = [...values].sort((a, b) => a - b);
  	const at = (q: number): number =>
  		sorted[Math.max(0, Math.min(sorted.length - 1, Math.ceil(q * sorted.length) - 1))]!;
-@@ -473,7 +476,7 @@ function truncateUtf8ByteLength(bytes: Uint8Array, maxBytes: number): number {
+@@ -473,7 +477,7 @@ function truncateUtf8ByteLength(bytes: Uint8Array, maxBytes: number): number {
  	return sequenceLength > end - sequenceStart ? sequenceStart : end;
  }
  
@@ -531,7 +540,7 @@ index 1c10fc60b3..39841fcc39 100644
  	const file = Bun.file(path);
  	const bytes = new Uint8Array(await file.slice(0, maxBytes).arrayBuffer());
  	const end = truncateUtf8ByteLength(bytes, maxBytes);
-@@ -623,12 +626,13 @@ async function runWithConcurrency<T>(
+@@ -623,12 +627,13 @@ async function runWithConcurrency<T>(
  	count: number,
  	concurrency: number,
  	run: (index: number) => Promise<T>,
@@ -546,7 +555,7 @@ index 1c10fc60b3..39841fcc39 100644
  			const index = next++;
  			results[index] = await run(index);
  		}
-@@ -649,6 +653,7 @@ function formatCachePairLine(pair: BenchCachePairReport, index: number, total: n
+@@ -649,6 +654,7 @@ function formatCachePairLine(pair: BenchCachePairReport, index: number, total: n
  }
  
  interface BenchRequestOptions {
@@ -554,7 +563,7 @@ index 1c10fc60b3..39841fcc39 100644
  	apiKey: ApiKeyResolver;
  	sessionId: string;
  	/** Native OMP messages; cache mode splits the stable prefix from the suffix. */
-@@ -671,6 +676,7 @@ async function runBenchRequest(
+@@ -671,6 +677,7 @@ async function runBenchRequest(
  	streamFn: StreamSimpleFn,
  	now: () => number,
  ): Promise<BenchRunResult> {
@@ -562,7 +571,7 @@ index 1c10fc60b3..39841fcc39 100644
  	const startedAt = now();
  	let firstTokenAt: number | undefined;
  	let transport: "http" | "websocket" | undefined;
-@@ -683,6 +689,7 @@ async function runBenchRequest(
+@@ -683,6 +690,7 @@ async function runBenchRequest(
  			messages: options.messages,
  		};
  		const stream = streamFn(model, context, {
@@ -570,7 +579,7 @@ index 1c10fc60b3..39841fcc39 100644
  			apiKey: options.apiKey,
  			sessionId: options.sessionId,
  			maxTokens:
-@@ -854,7 +861,7 @@ const PHASE_LABELS: Record<BenchPhase, string> = { single: "single-user", parall
+@@ -854,7 +862,7 @@ const PHASE_LABELS: Record<BenchPhase, string> = { single: "single-user", parall
  const PENDING_CELL = "…";
  
  /** Run (cache mode: pair) counters for one model. */
@@ -579,7 +588,7 @@ index 1c10fc60b3..39841fcc39 100644
  	total: number;
  	completed: number;
  	failed: number;
-@@ -862,7 +869,7 @@ interface BenchProgress {
+@@ -862,7 +870,7 @@ interface BenchProgress {
  }
  
  /** One model's comparison-table row; the live footer repaints it as runs finish. */
@@ -588,7 +597,7 @@ index 1c10fc60b3..39841fcc39 100644
  	/** Aggregates over the runs finished so far. */
  	report: BenchModelReport;
  	state: "queued" | "running" | "done";
-@@ -1034,7 +1041,8 @@ function assertCacheModeSupported(targets: BenchTarget[]): void {
+@@ -1034,7 +1042,8 @@ function assertCacheModeSupported(targets: BenchTarget[]): void {
  	}
  }
  
@@ -598,7 +607,7 @@ index 1c10fc60b3..39841fcc39 100644
  	const cacheMode = command.flags.cache === true;
  	const cacheFlagsUsed =
  		command.flags.cachePrefixFile !== undefined ||
-@@ -1106,6 +1114,41 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1106,6 +1115,41 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  		? detailedSteps(runsPerStep, par)
  		: [{ kinds, runs: runsPerStep, concurrency: par }];
  	const runs = cacheMode ? cachePairs! * 2 : steps.reduce((sum, step) => sum + step.runs, 0);
@@ -640,7 +649,16 @@ index 1c10fc60b3..39841fcc39 100644
  	const tableSpec = detailed ? detailedTableSpec(par) : profileTableSpec(kinds);
  	// Detailed phases each run a single kind under a phase header; only a mixed profile needs per-run kind tags.
  	const tagKind = kinds.length > 1;
-@@ -1154,6 +1197,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1125,7 +1169,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 	const now = deps.now ?? (() => performance.now());
+ 	const interactive = deps.stdoutIsTTY ?? process.stdout.isTTY === true;
+ 	if (command.models.length === 0) {
+-		throw new Error("Pass at least one model selector, e.g. `omp bench opus gpt-5.2`");
++		throw new Error(`Pass at least one model selector, e.g. \`${APP_NAME} bench opus gpt-5.2\``);
+ 	}
+ 	// One row per model, filled as runs finish. Outside cache mode the comparison
+ 	// table doubles as the live footer; cache mode shows a one-line status.
+@@ -1154,6 +1198,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  					return true;
  				},
  			} satisfies LiveBoardOutput);
@@ -651,7 +669,7 @@ index 1c10fc60b3..39841fcc39 100644
  	const print = (text: string): void => {
  		if (board) board.log(text);
  		else writeStdout(`${text}\n`);
-@@ -1187,7 +1234,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1187,7 +1235,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  			state: "queued",
  			progress: { total, completed: 0, failed: 0, inFlight: 0 },
  		}));
@@ -661,7 +679,7 @@ index 1c10fc60b3..39841fcc39 100644
  			const row = rows[targetIndex]!;
  			const { progress } = row;
  			if (!json) {
-@@ -1195,7 +1244,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1195,7 +1245,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				print(`${chalk.bold(label)}${selector === label ? "" : chalk.dim(` (${selector})`)}`);
  			}
  			row.state = "running";
@@ -670,7 +688,7 @@ index 1c10fc60b3..39841fcc39 100644
  			const results: BenchRunResult[] = [];
  
  			// Preflight check: let's verify credentials before starting any runs.
-@@ -1213,6 +1262,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1213,6 +1263,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				row.report = buildModelReport(selector, model, thinking, results);
  				if (cacheMode) row.report.cachePairs = [];
  				row.state = "done";
@@ -678,7 +696,7 @@ index 1c10fc60b3..39841fcc39 100644
  				continue;
  			}
  
-@@ -1224,7 +1274,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1224,7 +1275,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  					async (pairIndex): Promise<BenchCachePairReport> => {
  						const cacheNamespace = randomSessionId();
  						progress.inFlight++;
@@ -687,7 +705,7 @@ index 1c10fc60b3..39841fcc39 100644
  						const promptCacheKey = `bench-cache:${cacheNamespace}`;
  						const stablePrefix = renderCacheBenchmarkPrefix(cachePrefix!, cacheNamespace);
  						const coldSuffix = prompt.render(cacheSuffixTemplate, { variant: "A" }).trim();
-@@ -1241,6 +1291,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1241,6 +1292,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						const coldResult = await runBenchRequest(
  							model,
  							{
@@ -695,7 +713,7 @@ index 1c10fc60b3..39841fcc39 100644
  								apiKey: credentialResolver,
  								sessionId: credentialAffinitySessionId,
  								messages: cacheBenchmarkMessages(stablePrefix, coldSuffix),
-@@ -1262,6 +1313,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1262,6 +1314,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						const warmResult = await runBenchRequest(
  							model,
  							{
@@ -703,7 +721,7 @@ index 1c10fc60b3..39841fcc39 100644
  								apiKey: credentialResolver,
  								sessionId: credentialAffinitySessionId,
  								messages: cacheBenchmarkMessages(stablePrefix, warmSuffix),
-@@ -1280,7 +1332,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1280,7 +1333,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						progress.completed++;
  						if (!coldResult.ok) progress.failed++;
  						if (!warmResult.ok) progress.failed++;
@@ -712,7 +730,7 @@ index 1c10fc60b3..39841fcc39 100644
  						return {
  							cold: cacheRunReport("cold", coldResult, coldCapture),
  							warm: cacheRunReport("warm", warmResult, warmCapture),
-@@ -1301,6 +1353,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1301,6 +1354,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				row.report = buildModelReport(selector, model, thinking, results);
  				row.report.cachePairs = pairs;
  				row.state = "done";
@@ -720,7 +738,7 @@ index 1c10fc60b3..39841fcc39 100644
  				if (!json) {
  					for (const [index, pair] of pairs.entries()) {
  						print(formatCachePairLine(pair, index, pairs.length));
-@@ -1314,6 +1367,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1314,6 +1368,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  			let offset = 0;
  			// Steps run back to back so one phase's load never skews the next.
  			for (const step of steps) {
@@ -728,7 +746,7 @@ index 1c10fc60b3..39841fcc39 100644
  				const { phase } = step;
  				if (!json && phase) {
  					print(
-@@ -1324,51 +1378,57 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1324,51 +1379,57 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				const startedAt = now();
  				// Runs finish out of order under concurrency; lines print in index order.
  				let nextToPrint = 0;
@@ -830,7 +848,7 @@ index 1c10fc60b3..39841fcc39 100644
  				// Chat phases close with the combined output rate across every in-flight request.
  				const phaseReport = phase && phase !== "prefill" ? phases[phase] : undefined;
  				if (!json && phaseReport) {
-@@ -1379,6 +1439,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1379,6 +1440,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				offset += step.runs;
  			}
  			row.state = "done";
@@ -852,7 +870,7 @@ index cc75700f28..588063d122 100644
  	sessionId: string;
  	sessionFile: string | undefined;
 diff --git a/packages/coding-agent/src/eval/executor-base.ts b/packages/coding-agent/src/eval/executor-base.ts
-index 2ac3018f28..a17081f068 100644
+index 0ae5359367..4538659e0e 100644
 --- a/packages/coding-agent/src/eval/executor-base.ts
 +++ b/packages/coding-agent/src/eval/executor-base.ts
 @@ -71,6 +71,7 @@ export type KernelEnvPatch = Record<string, string | null | undefined>;
@@ -863,7 +881,7 @@ index 2ac3018f28..a17081f068 100644
  	cwd?: string;
  	filename?: string;
  	timeoutMs?: number;
-@@ -515,6 +516,7 @@ export async function executeWithKernelBase<
+@@ -535,6 +536,7 @@ export async function executeWithKernelBase<
  	const unregisterBridge =
  		options?.toolSession && options?.bridgeSessionId
  			? registerPyToolBridge(options.bridgeSessionId, runId, {
@@ -871,7 +889,7 @@ index 2ac3018f28..a17081f068 100644
  					toolSession: options.toolSession,
  					signal: options.signal,
  					shieldedSignal: abortShield.signal,
-@@ -531,7 +533,10 @@ export async function executeWithKernelBase<
+@@ -551,7 +553,10 @@ export async function executeWithKernelBase<
  		? formatKernelRestartNotice(`${errorLogLabel} kernel`)
  		: undefined;
  	try {
@@ -884,10 +902,10 @@ index 2ac3018f28..a17081f068 100644
  			throw new cancelledErrorClass(true);
  		}
 diff --git a/packages/coding-agent/src/eval/js/context-manager.ts b/packages/coding-agent/src/eval/js/context-manager.ts
-index 10fd19621c..b1be8f3259 100644
+index 1e814cedd4..4e5873ce26 100644
 --- a/packages/coding-agent/src/eval/js/context-manager.ts
 +++ b/packages/coding-agent/src/eval/js/context-manager.ts
-@@ -42,6 +42,7 @@ import type {
+@@ -44,6 +44,7 @@ import type {
  export { rewriteImports, wrapCode } from "./shared/rewrite-imports";
  
  export interface VmRunState {
@@ -895,7 +913,7 @@ index 10fd19621c..b1be8f3259 100644
  	signal?: AbortSignal;
  	onText?: (chunk: string) => void;
  	onDisplay?: (output: EvalDisplayOutput) => void;
-@@ -210,6 +211,7 @@ export async function executeInVmContext(options: {
+@@ -218,6 +219,7 @@ export async function executeInVmContext(options: {
  	);
  	if (!options.reset && lostSessions.delete(sessionKey)) {
  		options.runState.onText?.(`${formatKernelRestartNotice("JS worker")}\n`);
@@ -903,7 +921,7 @@ index 10fd19621c..b1be8f3259 100644
  	}
  	const result = await runOnce(session, options);
  	if (session.state === "alive" && path.isAbsolute(options.filename)) {
-@@ -825,6 +827,7 @@ async function handleToolCall(session: JsSession, msg: Extract<WorkerOutbound, {
+@@ -835,6 +837,7 @@ async function handleToolCall(session: JsSession, msg: Extract<WorkerOutbound, {
  	pending.toolCalls.set(msg.id, ctrl);
  	try {
  		const value = await callSessionTool(msg.name, msg.args, {
@@ -912,7 +930,7 @@ index 10fd19621c..b1be8f3259 100644
  			signal: ctrl.signal,
  			identity: msg.identity,
 diff --git a/packages/coding-agent/src/eval/js/executor.ts b/packages/coding-agent/src/eval/js/executor.ts
-index 2e26e56844..0966d937c5 100644
+index e567fc8081..e2601e8a0a 100644
 --- a/packages/coding-agent/src/eval/js/executor.ts
 +++ b/packages/coding-agent/src/eval/js/executor.ts
 @@ -16,6 +16,7 @@ import type { JsStatusEvent } from "./shared/types";
@@ -923,7 +941,7 @@ index 2e26e56844..0966d937c5 100644
  	cwd?: string;
  	timeoutMs?: number;
  	deadlineMs?: number;
-@@ -177,6 +178,7 @@ export async function executeJs(code: string, options: JsExecutorOptions): Promi
+@@ -170,6 +171,7 @@ export async function executeJs(code: string, options: JsExecutorOptions): Promi
  			filename: options.filename ?? `js-cell-${crypto.randomUUID()}.js`,
  			timeoutMs: runtimeTimeoutMs ?? options.idleTimeoutMs,
  			runState: {
@@ -944,10 +962,10 @@ index b49b46e91a..61f85fe1c4 100644
  			idleTimeoutMs: opts.idleTimeoutMs,
  			signal: opts.signal,
 diff --git a/packages/coding-agent/src/eval/js/tool-bridge.ts b/packages/coding-agent/src/eval/js/tool-bridge.ts
-index 69cfc4be10..0fd36d5dcf 100644
+index 5207a0a305..9352094fa2 100644
 --- a/packages/coding-agent/src/eval/js/tool-bridge.ts
 +++ b/packages/coding-agent/src/eval/js/tool-bridge.ts
-@@ -49,6 +49,7 @@ const NO_REPLY_SINK =
+@@ -50,6 +50,7 @@ const NO_REPLY_SINK =
  export type { JsStatusEvent } from "./shared/types";
  
  export interface ToolBridgeOptions {
@@ -955,7 +973,7 @@ index 69cfc4be10..0fd36d5dcf 100644
  	session: ToolSession;
  	signal?: AbortSignal;
  	emitStatus?: (event: JsStatusEvent) => void;
-@@ -233,6 +234,7 @@ export async function callSessionTool(name: string, args: unknown, options: Tool
+@@ -235,6 +236,7 @@ export async function callSessionTool(name: string, args: unknown, options: Tool
  				invokeEvalPrelude(request.name, request.parameters, {
  					session: options.session,
  					toolCallId,
@@ -964,7 +982,7 @@ index 69cfc4be10..0fd36d5dcf 100644
  					context: options.session.getToolContext?.(),
  				}),
 diff --git a/packages/coding-agent/src/eval/judgment-batch-bridge.ts b/packages/coding-agent/src/eval/judgment-batch-bridge.ts
-index a186773bd7..ed98f32cc4 100644
+index a186773bd7..4b78246ad3 100644
 --- a/packages/coding-agent/src/eval/judgment-batch-bridge.ts
 +++ b/packages/coding-agent/src/eval/judgment-batch-bridge.ts
 @@ -172,6 +172,8 @@ function ownerOf(session: ToolSession): string {
@@ -1066,7 +1084,7 @@ index 83ecad1a2b..0c9f0c27a6 100644
  	signal?: AbortSignal;
  	/** Ordinary agent tool context used for settings, UI, and provider metadata. */
 diff --git a/packages/coding-agent/src/eval/py/executor.ts b/packages/coding-agent/src/eval/py/executor.ts
-index 72725d25c4..f06218e4a1 100644
+index 09401f2be4..2384adcd45 100644
 --- a/packages/coding-agent/src/eval/py/executor.ts
 +++ b/packages/coding-agent/src/eval/py/executor.ts
 @@ -116,6 +116,7 @@ export interface PythonExecutorOptions {
@@ -1110,10 +1128,10 @@ index 581e500e1a..70b223ce3c 100644
  		signal: entry.signal,
  		emitStatus: entry.emitStatus,
 diff --git a/packages/coding-agent/src/extensibility/extensions/runner.ts b/packages/coding-agent/src/extensibility/extensions/runner.ts
-index c1deeb7458..35f0c275a7 100644
+index 67c21bb687..1ff218c0d3 100644
 --- a/packages/coding-agent/src/extensibility/extensions/runner.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/runner.ts
-@@ -831,6 +831,35 @@ export class ExtensionRunner {
+@@ -905,6 +905,35 @@ export class ExtensionRunner {
  		return this.settings;
  	}
  
@@ -1149,7 +1167,7 @@ index c1deeb7458..35f0c275a7 100644
  	initialize(
  		actions: ExtensionActions,
  		contextActions: ExtensionContextActions,
-@@ -1588,8 +1617,8 @@ export class ExtensionRunner {
+@@ -1654,8 +1683,8 @@ export class ExtensionRunner {
  	}
  
  	/** Link schemes claimed with `registerLinkScheme`; none while `extensionRenderers.assistantText` is off. */
@@ -1160,7 +1178,7 @@ index c1deeb7458..35f0c275a7 100644
  		const owners = new Map<string, Extension>();
  		for (const ext of this.#drawingExtensions()) {
  			for (const scheme of ext.linkSchemes) {
-@@ -1619,8 +1648,8 @@ export class ExtensionRunner {
+@@ -1685,8 +1714,8 @@ export class ExtensionRunner {
  	 * Like a command or shortcut, a click is the user's own action, and its handler may open a
  	 * dialog: it runs without the event-handler timeout. A failure is reported, not thrown.
  	 */
@@ -1172,10 +1190,10 @@ index c1deeb7458..35f0c275a7 100644
  		if (colon <= 0) return false;
  		const scheme = url.slice(0, colon).toLowerCase();
 diff --git a/packages/coding-agent/src/extensibility/extensions/types.ts b/packages/coding-agent/src/extensibility/extensions/types.ts
-index 9b15d05e0e..f97ada3fd3 100644
+index 2eb58d9813..112e24cfce 100644
 --- a/packages/coding-agent/src/extensibility/extensions/types.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/types.ts
-@@ -338,6 +338,30 @@ export interface ExtensionUIContext {
+@@ -354,6 +354,30 @@ export interface ExtensionUIContext {
  	/** Show a text input dialog. */
  	input(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined>;
  
@@ -1207,7 +1225,7 @@ index 9b15d05e0e..f97ada3fd3 100644
  	askDialog?(
  		questions: ExtensionAskDialogQuestion[],
 diff --git a/packages/coding-agent/src/extensibility/extensions/wrapper.ts b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
-index 61bb862530..67fc2aa9ba 100644
+index 61bb862530..3dd7ee2e09 100644
 --- a/packages/coding-agent/src/extensibility/extensions/wrapper.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
 @@ -8,6 +8,7 @@ import {
@@ -1337,7 +1355,7 @@ index 61bb862530..67fc2aa9ba 100644
  
  		// Execute the actual tool
 diff --git a/packages/coding-agent/src/ida/protocol.ts b/packages/coding-agent/src/ida/protocol.ts
-index b2ba9719c3..26ffc5e841 100644
+index b2ba9719c3..07ca478e90 100644
 --- a/packages/coding-agent/src/ida/protocol.ts
 +++ b/packages/coding-agent/src/ida/protocol.ts
 @@ -51,7 +51,16 @@ export function idaHostEndpoint(runtimeDir: string, daemonName: string): string
@@ -1359,7 +1377,7 @@ index b2ba9719c3..26ffc5e841 100644
  /** A method forwarded with `call`. */
  export type IdaCallMethod = (typeof IDA_CALL_METHODS)[number];
 diff --git a/packages/coding-agent/src/ida/supervisor.ts b/packages/coding-agent/src/ida/supervisor.ts
-index 461e101f89..3af8d02f47 100644
+index 461e101f89..354c53396e 100644
 --- a/packages/coding-agent/src/ida/supervisor.ts
 +++ b/packages/coding-agent/src/ida/supervisor.ts
 @@ -33,6 +33,7 @@ const STDERR_TAIL_LINES = 20;
@@ -1386,7 +1404,7 @@ index 461e101f89..3af8d02f47 100644
  			return value as T;
  		} finally {
 diff --git a/packages/coding-agent/src/ida/worker.py b/packages/coding-agent/src/ida/worker.py
-index 42a0f382d1..252280aa6c 100644
+index 42a0f382d1..debd5b5936 100644
 --- a/packages/coding-agent/src/ida/worker.py
 +++ b/packages/coding-agent/src/ida/worker.py
 @@ -12,12 +12,17 @@ import os
@@ -1625,10 +1643,10 @@ index ca30045d94..20750ddd16 100644
  }
  
 diff --git a/packages/coding-agent/src/launch/broker.ts b/packages/coding-agent/src/launch/broker.ts
-index 8be85c28da..0a96b32dc9 100644
+index 589b24cb39..613cbd6de1 100644
 --- a/packages/coding-agent/src/launch/broker.ts
 +++ b/packages/coding-agent/src/launch/broker.ts
-@@ -15,13 +15,14 @@ import {
+@@ -16,13 +16,14 @@ import {
  } from "@oh-my-pi/pi-tui/tools/streaming-output";
  import { workerEnvFromParent } from "../subprocess/worker-client";
  import {
@@ -1644,7 +1662,7 @@ index 8be85c28da..0a96b32dc9 100644
  import { hasLiveDaemonProjectPresence, pruneDeadDaemonRuntimeDirs } from "./presence";
  import {
  	DAEMON_IDLE_GRACE_ENV,
-@@ -33,6 +34,8 @@ import {
+@@ -34,6 +35,8 @@ import {
  	type DaemonOperation,
  	type DaemonRpcResult,
  	type DaemonSignal,
@@ -1653,7 +1671,7 @@ index 8be85c28da..0a96b32dc9 100644
  	type DaemonWireRequest,
  	parseDaemonSnapshot,
  	parseDaemonSpec,
-@@ -640,12 +643,41 @@ class DaemonBroker {
+@@ -643,12 +646,41 @@ class DaemonBroker {
  		}
  	}
  
@@ -1698,7 +1716,7 @@ index 8be85c28da..0a96b32dc9 100644
  			case "list": {
  				await Promise.all([...this.#records.values()].map(record => this.#refreshDetached(record)));
  				return {
-@@ -667,18 +699,18 @@ class DaemonBroker {
+@@ -670,18 +702,18 @@ class DaemonBroker {
  			case "send":
  				return this.#send(operation);
  			case "stop": {
@@ -1721,7 +1739,7 @@ index 8be85c28da..0a96b32dc9 100644
  				await this.#refreshDetached(record);
  				return { op: "describe", daemon: record.snapshot, spec: record.spec };
  			}
-@@ -687,7 +719,18 @@ class DaemonBroker {
+@@ -690,7 +722,18 @@ class DaemonBroker {
  		}
  	}
  
@@ -1741,7 +1759,7 @@ index 8be85c28da..0a96b32dc9 100644
  		if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/.test(spec.name)) {
  			throw new Error("Daemon name must be 1-48 letters, numbers, dots, underscores, or hyphens");
  		}
-@@ -734,6 +777,7 @@ class DaemonBroker {
+@@ -737,6 +780,7 @@ class DaemonBroker {
  				spec,
  				snapshot: {
  					name: spec.name,
@@ -1749,7 +1767,7 @@ index 8be85c28da..0a96b32dc9 100644
  					id: crypto.randomUUID(),
  					state: "starting",
  					createdAt: now,
-@@ -765,6 +809,17 @@ class DaemonBroker {
+@@ -768,6 +812,17 @@ class DaemonBroker {
  			this.#startingNames.delete(spec.name);
  		}
  		await this.#launch(record);
@@ -1767,7 +1785,7 @@ index 8be85c28da..0a96b32dc9 100644
  		let readyTimedOut = false;
  		if (spec.ready && awaitReady && !terminalState(record.snapshot.state)) {
  			// Wake on the sticky readyAt marker or any terminal state, not the live
-@@ -774,11 +829,19 @@ class DaemonBroker {
+@@ -777,11 +832,19 @@ class DaemonBroker {
  			// wake the wait rather than block for the full timeout.
  			const ready = await this.#waitUntil(
  				record,
@@ -1788,7 +1806,7 @@ index 8be85c28da..0a96b32dc9 100644
  		await record.persistQueue;
  		return { op: "start", daemon: record.snapshot, readyTimedOut };
  	}
-@@ -790,7 +853,7 @@ class DaemonBroker {
+@@ -794,7 +857,7 @@ class DaemonBroker {
  		record.snapshot.state = record.spec.ready ? "starting" : "running";
  		record.snapshot.persist = record.spec.persist;
  		record.snapshot.detached = record.spec.detached;
@@ -1797,7 +1815,7 @@ index 8be85c28da..0a96b32dc9 100644
  		record.snapshot.readyAt = undefined;
  		record.snapshot.exitedAt = undefined;
  		record.snapshot.exitCode = undefined;
-@@ -1137,7 +1200,7 @@ class DaemonBroker {
+@@ -1146,7 +1209,7 @@ class DaemonBroker {
  	}
  
  	async #logs(operation: Extract<DaemonOperation, { op: "logs" }>, signal?: AbortSignal): Promise<DaemonRpcResult> {
@@ -1806,7 +1824,7 @@ index 8be85c28da..0a96b32dc9 100644
  		await this.#refreshDetached(record);
  		const cursor = operation.cursor ?? record.snapshot.outputBytes;
  		let timedOut = false;
-@@ -1167,6 +1230,7 @@ class DaemonBroker {
+@@ -1176,6 +1239,7 @@ class DaemonBroker {
  			terminalOutput !== undefined && operation.renderTerminalRows === true
  				? await renderTerminalOutput(terminalOutput, { head: operation.head, maxRows: lines })
  				: undefined;
@@ -1814,7 +1832,7 @@ index 8be85c28da..0a96b32dc9 100644
  		return {
  			op: "logs",
  			name: record.snapshot.name,
-@@ -1183,7 +1247,7 @@ class DaemonBroker {
+@@ -1192,7 +1256,7 @@ class DaemonBroker {
  	}
  
  	async #wait(operation: Extract<DaemonOperation, { op: "wait" }>, signal?: AbortSignal): Promise<DaemonRpcResult> {
@@ -1823,7 +1841,7 @@ index 8be85c28da..0a96b32dc9 100644
  		// A wait observes exactly one launch generation. Automatic or explicit
  		// relaunches reuse the managed record, so polling the record without this
  		// binding can hang past an exit or consume the replacement's output.
-@@ -1240,8 +1304,9 @@ class DaemonBroker {
+@@ -1251,8 +1315,9 @@ class DaemonBroker {
  	}
  
  	async #send(operation: Extract<DaemonOperation, { op: "send" }>): Promise<DaemonRpcResult> {
@@ -1834,7 +1852,7 @@ index 8be85c28da..0a96b32dc9 100644
  		if (terminalState(record.snapshot.state) || record.snapshot.state === "stopping") {
  			throw new Error(`Daemon ${operation.name} is ${record.snapshot.state}`);
  		}
-@@ -1257,6 +1322,7 @@ class DaemonBroker {
+@@ -1268,6 +1333,7 @@ class DaemonBroker {
  			} else throw new Error(`Daemon ${operation.name} stdin is unavailable`);
  		}
  		if (operation.signal) {
@@ -1842,7 +1860,7 @@ index 8be85c28da..0a96b32dc9 100644
  			if (process.platform === "win32" && record.pty) {
  				if (operation.signal === "SIGINT") record.pty.write("\u0003");
  				else record.pty.kill();
-@@ -1269,8 +1335,9 @@ class DaemonBroker {
+@@ -1280,8 +1346,9 @@ class DaemonBroker {
  		return { op: "send", daemon: record.snapshot };
  	}
  
@@ -1853,7 +1871,7 @@ index 8be85c28da..0a96b32dc9 100644
  		if (terminalState(record.snapshot.state)) return;
  		record.stopRequested = true;
  		if (record.restartTimer) {
-@@ -1292,9 +1359,9 @@ class DaemonBroker {
+@@ -1302,9 +1369,9 @@ class DaemonBroker {
  		if (!settled && record.pty) record.pty.kill();
  	}
  
@@ -1866,7 +1884,7 @@ index 8be85c28da..0a96b32dc9 100644
  		await record.log?.close();
  		record.log = await DaemonLog.open(record.dir);
  		record.stopRequested = false;
-@@ -1309,15 +1376,16 @@ class DaemonBroker {
+@@ -1319,15 +1386,16 @@ class DaemonBroker {
  	}
  
  	async #mode(operation: Extract<DaemonOperation, { op: "mode" }>): Promise<DaemonRpcResult> {
@@ -1885,7 +1903,7 @@ index 8be85c28da..0a96b32dc9 100644
  			}
  		} else {
  			if (record.spec.detached && operation.mode === "session") {
-@@ -1349,9 +1417,16 @@ class DaemonBroker {
+@@ -1359,9 +1427,16 @@ class DaemonBroker {
  		return condition();
  	}
  
@@ -1904,7 +1922,7 @@ index 8be85c28da..0a96b32dc9 100644
  		const names = [...this.#records.keys()];
  		throw new Error(`Unknown daemon ${name}${names.length ? `. Available: ${names.join(", ")}` : ""}`);
  	}
-@@ -1601,9 +1676,13 @@ export interface DaemonBrokerStartOptions {
+@@ -1611,9 +1686,13 @@ export interface DaemonBrokerStartOptions {
  
  /** Start the detached project or global daemon broker selected by the CLI worker host. */
  export async function startDaemonBrokerFromEnvironment(options: DaemonBrokerStartOptions = {}): Promise<void> {
@@ -2083,7 +2101,7 @@ index 0dea6ba4c7..66784154d5 100644
  			return {
  				op: "start",
 diff --git a/packages/coding-agent/src/launch/services.ts b/packages/coding-agent/src/launch/services.ts
-index 865ce7e70f..5f102c709c 100644
+index 53fe06a4ee..62a9178bca 100644
 --- a/packages/coding-agent/src/launch/services.ts
 +++ b/packages/coding-agent/src/launch/services.ts
 @@ -1,13 +1,12 @@
@@ -2155,7 +2173,7 @@ index 865ce7e70f..5f102c709c 100644
  		session,
  		{
  			op: "logs",
-@@ -236,11 +246,12 @@ export async function startService(
+@@ -246,11 +256,12 @@ export async function startService(
  	const shell = session.settings.getShellConfig();
  	const spec: DaemonSpec = {
  		name: params.name,
@@ -2163,21 +2181,21 @@ index 865ce7e70f..5f102c709c 100644
  		application: shell.shell,
  		args: [...shell.args, `${shell.prefix ? `${shell.prefix} ` : ""}${params.command}`],
  		env: { ...shell.env, ...params.env },
- 		cwd: resolveToCwd(params.cwd ?? session.cwd, session.cwd),
+ 		cwd: serviceDirectory(params.cwd, session.cwd),
 -		pty: params.pty ?? true,
 +		pty: params.mode === "detached" ? false : (params.pty ?? true),
  		ready: ready
  			? {
  					log: ready.log,
-@@ -249,18 +260,27 @@ export async function startService(
+@@ -259,18 +270,27 @@ export async function startService(
  					timeoutMs: Math.round(Math.max(0.05, Math.min(3_600, ready.timeout ?? 30)) * 1_000),
  				}
  			: undefined,
 -		restart: "no",
--		persist: false,
+-		persist: cfgLaunchPersist.get(session.settings),
 -		detached: false,
 +		restart: params.restart ?? "no",
-+		persist: params.mode === "persist" || params.mode === "detached",
++		persist: params.mode === "persist" || params.mode === "detached" || cfgLaunchPersist.get(session.settings),
 +		detached: params.mode === "detached",
  	};
 -	const result = await request(
@@ -2203,7 +2221,7 @@ index 865ce7e70f..5f102c709c 100644
  		},
  		signal,
  	);
-@@ -278,7 +298,7 @@ export async function startService(
+@@ -288,7 +308,7 @@ export async function startService(
  		return { daemon: launched, readyTimedOut: result.readyTimedOut, readyInterrupted: false };
  	const timeoutMs = Math.max(0, spec.ready.timeoutMs - (Date.now() - launched.startedAt));
  	try {
@@ -2212,7 +2230,7 @@ index 865ce7e70f..5f102c709c 100644
  			session,
  			{ op: "wait", name: params.name, for: "ready", timeoutMs },
  			signal ? AbortSignal.any([signal, readyInterrupt]) : readyInterrupt,
-@@ -304,13 +324,13 @@ export async function sendService(
+@@ -314,13 +334,13 @@ export async function sendService(
  	signal?: AbortSignal,
  ): Promise<DaemonSnapshot> {
  	const data = /[\r\n]$/.test(content) ? content : `${content}\r`;
@@ -2228,7 +2246,7 @@ index 865ce7e70f..5f102c709c 100644
  	if (result.op !== "stop") throw new Error("Unexpected daemon stop response");
  	return result.daemon;
  }
-@@ -321,11 +341,7 @@ export async function modeService(
+@@ -331,11 +351,7 @@ export async function modeService(
  	mode: "persist" | "session" | "detached",
  	signal?: AbortSignal,
  ): Promise<DaemonSnapshot> {
@@ -2284,21 +2302,22 @@ index 41efccc370..2b6357c677 100644
  					this.#reportFailure(error);
  					return;
 diff --git a/packages/coding-agent/src/prompts/tools/bash.md b/packages/coding-agent/src/prompts/tools/bash.md
-index 2319d2bf65..f0a6d88af9 100644
+index a162fd4461..675eb23624 100644
 --- a/packages/coding-agent/src/prompts/tools/bash.md
 +++ b/packages/coding-agent/src/prompts/tools/bash.md
-@@ -4,5 +4,5 @@ Persistent shell: one fact command/pipeline; dependencies use `&&`.
- Internal URIs work as paths for builtins/coreutils, redirects, globs.
- {{#if asyncEnabled}}`async` defers finite results but keeps the deadline (default {{defaultTimeoutSec}}s); `timeout: 0` for watchers and long jobs.{{/if}}
- No `head`/`tail`/redirection; output trunc by default, full result at `artifact://<id>`.
--{{#if hasLaunch}}Long-lived services: unique name; ready requires name; no async/timeout; pty defaults true. ready needs log regex or port (both if given); host defaults 127.0.0.1, ready.timeout 30s.{{/if}}
-+{{#if hasLaunch}}Long-lived services: unique name; ready requires name; no async/timeout; pty defaults true. ready needs log regex or port (both if given); host defaults 127.0.0.1, ready.timeout 30s. For web development servers, always supply `previewUrl` with the real absolute HTTP(S) URL (no embedded credentials); Harness discovers it automatically. Choose the actual server port/path yourself, never ask the human to enter a URL or associate the service manually. Non-web services omit `previewUrl`.{{/if}}
- {{#if autoBackgroundEnabled}}Non-`pty` calls still running after {{autoBackgroundSeconds}}s (or 1s before `timeout`, if sooner) usually move to background job `bg_N` and keep running to `timeout` (not when the client terminal runs the command or the job cap is reached); the result arrives automatically as a follow-up message. NEVER poll.{{/if}}
+@@ -10,6 +10,7 @@ Don't trunc output by habit, result will be summarized and saved as an artifact.
+ Long-lived services:
+ - unique name; ready requires name; no async/timeout; pty defaults true.
+ - ready needs log regex or port (both if given); host defaults 127.0.0.1, ready.timeout 30s.
++- For web development servers, always supply `previewUrl` with the real absolute HTTP(S) URL (no embedded credentials); Harness discovers it automatically. Choose the actual server port/path yourself, never ask the human to enter a URL or associate the service manually. Non-web services omit `previewUrl`.
+ {{/if}}
+ {{#if autoBackgroundEnabled}}
+ Non-`pty` calls still running after {{autoBackgroundSeconds}}s (or 1s before `timeout`, if sooner) usually move to background job `bg_N` and keep running to `timeout`.
 diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
-index 64e5d68a44..45d0820053 100644
+index 519f5783d0..aad3cb0328 100644
 --- a/packages/coding-agent/src/sdk.ts
 +++ b/packages/coding-agent/src/sdk.ts
-@@ -323,11 +323,11 @@ import {
+@@ -335,11 +335,11 @@ import {
  	resolveToolCallIntent,
  } from "./job-widgets";
  import { createBrowserPrelude } from "./tools/browser";
@@ -2312,7 +2331,7 @@ index 64e5d68a44..45d0820053 100644
  import { isIrcEnabled } from "./irc/messaging";
  import { imageGenTool } from "./tools/image-gen";
  import { wrapToolWithMetaNotice } from "./tools/output-meta";
-@@ -975,6 +975,8 @@ export interface CreateAgentSessionOptions {
+@@ -984,6 +984,8 @@ export interface CreateAgentSessionOptions {
  	 * Print, RPC, ACP and subagent sessions read replies as text. Default: false.
  	 */
  	tuiTranscript?: boolean;
@@ -2321,7 +2340,7 @@ index 64e5d68a44..45d0820053 100644
  	/**
  	 * Name the unnamed session from the operator's messages once each reply begins
  	 * (see `title.generator`). Only the interactive TUI sets this; ignored for subagents. Default: false.
-@@ -1032,8 +1034,8 @@ export interface CreateAgentSessionResult {
+@@ -1041,8 +1043,8 @@ export interface CreateAgentSessionResult {
  	session: AgentSession;
  	/** Extensions result (loaded extensions + runtime) */
  	extensionsResult: LoadExtensionsResult;
@@ -2332,7 +2351,7 @@ index 64e5d68a44..45d0820053 100644
  	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
  	mcpManager?: MCPManager;
  	/** Warning if session was restored with a different model than saved */
-@@ -2402,6 +2404,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -2405,6 +2407,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  	const agentKind: AgentKind = isSubagentSession ? SUB_AGENT_RULE_NAME : MAIN_AGENT_RULE_NAME;
  	// Visuals (Mermaid, SVG figures, table charts) are drawn only in the top-level TUI transcript.
  	const tuiTranscript = options.tuiTranscript === true && !isSubagentSession;
@@ -2340,7 +2359,7 @@ index 64e5d68a44..45d0820053 100644
  	const resolvedAgentName = (options.agentName ?? agentKind).trim().toLowerCase();
  
  	// Discover rules and bucket them in one pass to avoid repeated scans over large rule sets.
-@@ -2581,11 +2584,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -2585,11 +2588,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			isToolActive: name => activeToolNames.has(name),
  			setActiveToolNames,
  			toolRegistry,
@@ -2355,7 +2374,7 @@ index 64e5d68a44..45d0820053 100644
  			// Explicit resolvers retain their existing pass-through contract. Ordinary
  			// sessions inherit stored affinity into the child's own provider session.
  			getApiKey: options.getApiKey,
-@@ -2783,6 +2787,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -2788,6 +2792,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			return getEnabledEvalPreludes(builtins);
  		};
  		toolSession.getEvalPreludes = getEvalPreludes;
@@ -2364,7 +2383,7 @@ index 64e5d68a44..45d0820053 100644
  		// SessionTools owns the advertised snapshot; before it exists the base
  		// prompt is built from, and therefore advertises, the live set.
  		toolSession.getAdvertisedEvalPreludes = () => session?.getAdvertisedEvalPreludes() ?? getEvalPreludes();
-@@ -4433,7 +4439,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4434,7 +4440,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  				memoryBackend: memoryBackend?.id,
  				securityEnabled: cfgSecurityEnabled.get(settings),
  				settingsApproval: toolSession.settingsApproval === true,
@@ -2373,7 +2392,7 @@ index 64e5d68a44..45d0820053 100644
  				evalPreludes: toolSession.getAdvertisedEvalPreludes?.(),
  				model: getActiveModelString(),
  				includeModelInPrompt: cfgIncludeModelInPrompt.get(settings),
-@@ -4725,7 +4731,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4729,7 +4735,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			await extensionRunner.emitAfterProviderResponse(response, model, signal);
  		};
  
@@ -2744,85 +2763,84 @@ index dc2f2331f1..a63b7ffec0 100644
  		return { submit: false, trimTrailing: 0 };
  	}
 diff --git a/packages/coding-agent/src/tools/ask.ts b/packages/coding-agent/src/tools/ask.ts
-index 8897536e35..33deb8e921 100644
+index a3fac6ec48..6824982329 100644
 --- a/packages/coding-agent/src/tools/ask.ts
 +++ b/packages/coding-agent/src/tools/ask.ts
-@@ -26,6 +26,7 @@ import type { ExtensionUISelectItem } from "../extensibility/extensions";
- import { formatKeyHint, formatKeyHints } from "@oh-my-pi/pi-tui/app-keybindings";
- import { editorKey, editorKeys } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
- import { theme } from "@oh-my-pi/pi-tui/theme";
-+import type { Theme } from "@oh-my-pi/pi-tui/theme/theme";
- import askDescription from "../prompts/tools/ask.md" with { type: "text" };
- import askHeadlessForkMessage from "../prompts/tools/ask-headless-fork.md" with { type: "text" };
- import { vocalizer } from "../tts/vocalizer";
-@@ -141,8 +142,8 @@ const RECOMMENDED_SUFFIX = " (Recommended)";
- // the deadline but never invoke `onTimeout`). Cancels beyond it are user Esc.
- const TIMEOUT_DETECTION_TOLERANCE_MS = 1_000;
+@@ -205,7 +205,10 @@ async function askChoice(
+ 		}
+ 	}
  
--function getDoneOptionLabel(): string {
--	return `${theme.status.success} Done selecting`;
-+function getDoneOptionLabel(uiTheme: Theme = theme): string {
-+	return `${uiTheme.status.success} Done selecting`;
+-	const doneLabel = disambiguateDisplayLabels([`${theme.status.success} Done selecting`], choiceRows)[0]!;
++	const doneLabel = disambiguateDisplayLabels(
++		[`${theme?.status.success ?? ""} Done selecting`.trim()],
++		choiceRows,
++	)[0]!;
+ 	const checked = new Set(preselected);
+ 	let other: string | undefined;
+ 	let cursor = Math.max(
+@@ -329,6 +332,38 @@ async function askFieldByField(
+ 	return { data, timedOut: false };
  }
  
- /** Add "(Recommended)" suffix to the option at the given index if not already present */
-@@ -199,6 +200,7 @@ interface AskSingleQuestionOptions {
++function askResult(
++	form: HtmlForm,
++	answered: { data: HtmlFormData; notes?: OptionNote[]; timedOut?: boolean },
++): AgentToolResult<AskToolDetails> {
++	const notes = answered.notes?.length ? answered.notes : undefined;
++	const details: AskToolDetails = {
++		answers: formAnswers(form, answered.data),
++		...(notes ? { notes } : {}),
++		...(answered.timedOut ? { timedOut: true } : {}),
++	};
++	const text = prompt.render(askResultTemplate, {
++		timedOut: answered.timedOut,
++		json: JSON.stringify(answered.data, null, 2),
++		notes: notes?.map(note => ({ ...note, text: note.text.replace(/\s+/g, " ").trim() })),
++	});
++	return { content: [{ type: "text", text }], details };
++}
++
++/** Re-answer a persisted HTML form through hosts without a whole-form dialog. */
++export async function reanswerAskForm(
++	ui: FallbackUI,
++	html: string,
++	signal?: AbortSignal,
++): Promise<AgentToolResult<AskToolDetails> | undefined> {
++	const form = parseHtmlForm(html);
++	if (!form.fields.some(field => field.name)) {
++		return { content: [{ type: "text", text: NO_NAMED_CONTROLS_ERROR }], details: { answers: [] } };
++	}
++	const answered = await askFieldByField(ui, form, undefined, signal ?? new AbortController().signal);
++	return answered === undefined ? undefined : askResult(form, answered);
++}
++
+ // =============================================================================
+ // Tool Class
+ // =============================================================================
+@@ -446,17 +481,6 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
+ 		}
+ 		if (!answered) return cancelAsk();
+ 
+-		const notes = answered.notes?.length ? answered.notes : undefined;
+-		const details: AskToolDetails = {
+-			answers: formAnswers(form, answered.data),
+-			...(notes ? { notes } : {}),
+-			...(answered.timedOut ? { timedOut: true } : {}),
+-		};
+-		const text = prompt.render(askResultTemplate, {
+-			timedOut: answered.timedOut,
+-			json: JSON.stringify(answered.data, null, 2),
+-			notes: notes?.map(note => ({ ...note, text: note.text.replace(/\s+/g, " ").trim() })),
+-		});
+-		return { content: [{ type: "text", text }], details };
++		return askResult(form, answered);
+ 	}
  }
- 
- interface UIContext {
-+	doneOptionLabel?: string;
- 	timeoutStartsOnPresentation?: boolean;
- 	select(
- 		prompt: string,
-@@ -235,7 +237,7 @@ async function askSingleQuestion(
- 	options: AskSingleQuestionOptions = {},
- ): Promise<SelectionResult> {
- 	const { recommended, timeout, signal, initialSelection, navigation } = options;
--	const doneLabel = getDoneOptionLabel();
-+	const doneLabel = ui.doneOptionLabel ?? getDoneOptionLabel();
- 	let selectedOptions = [...(initialSelection?.selectedOptions ?? [])];
- 	let customInput = initialSelection?.customInput;
- 	const note = initialSelection?.note;
-@@ -483,7 +485,7 @@ async function askSingleQuestion(
- 	return { selectedOptions, customInput, note, timedOut };
- }
- 
--function formatQuestionResult(result: QuestionResult): string {
-+export function formatQuestionResult(result: QuestionResult): string {
- 	const noteOn = result.noteOption === undefined ? "" : ` on ${result.noteOption}`;
- 	const noteSuffix = result.note ? ` (note${noteOn}: ${result.note})` : "";
- 	const custom = result.customInput === undefined ? undefined : `"${result.customInput}"`;
-@@ -497,7 +499,7 @@ function formatQuestionResult(result: QuestionResult): string {
- 	return `${result.id}: ${answer}${timeoutSuffix}${noteSuffix}`;
- }
- 
--function formatSingleQuestionResponse(result: {
-+export function formatSingleQuestionResponse(result: {
- 	selectedOptions: string[];
- 	customInput?: string;
- 	note?: string;
-@@ -692,7 +694,7 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
- 		// unconditionally — a sanitized model label would exit instead of
- 		// selecting. Fail closed like the other sentinels (multi-select only;
- 		// single-select has no Done row).
--		const doneActionLabel = getDoneOptionLabel();
-+		const doneActionLabel = getDoneOptionLabel(context.ui.theme);
- 		const doneCollision = params.questions
- 			.filter(question => question.multi === true)
- 			.flatMap(question => question.options)
-@@ -746,6 +748,7 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
- 
- 		const extensionUi = context.ui;
- 		const ui: UIContext = {
-+			doneOptionLabel: doneActionLabel,
- 			timeoutStartsOnPresentation: extensionUi.timeoutStartsOnPresentation,
- 			select: (prompt, options, dialogOptions) => extensionUi.select(prompt, options, dialogOptions),
- 			editor: (title, prefill, dialogOptions, editorOptions) =>
 diff --git a/packages/coding-agent/src/tools/bash.ts b/packages/coding-agent/src/tools/bash.ts
-index 9e01fc2bcf..65846c12b0 100644
+index 97b5f96e20..3ca8fe8792 100644
 --- a/packages/coding-agent/src/tools/bash.ts
 +++ b/packages/coding-agent/src/tools/bash.ts
-@@ -356,6 +356,9 @@ const bashSchemaWithService = type({
+@@ -419,6 +419,9 @@ const bashSchemaWithService = type({
  	"cwd?": "string",
  	"pty?": "boolean",
  	"name?": "string <= 48",
@@ -2832,7 +2850,7 @@ index 9e01fc2bcf..65846c12b0 100644
  	"ready?": type({
  		"log?": "string",
  		"port?": "number",
-@@ -371,6 +374,9 @@ const bashSchemaWithAsyncAndService = type({
+@@ -434,6 +437,9 @@ const bashSchemaWithAsyncAndService = type({
  	"pty?": "boolean",
  	"async?": "boolean",
  	"name?": "string <= 48",
@@ -2842,7 +2860,7 @@ index 9e01fc2bcf..65846c12b0 100644
  	"ready?": type({
  		"log?": "string",
  		"port?": "number",
-@@ -390,6 +396,7 @@ export interface BashToolInput {
+@@ -453,6 +459,7 @@ export interface BashToolInput {
  	timeout?: number;
  	cwd?: string;
  	name?: string;
@@ -2850,7 +2868,7 @@ index 9e01fc2bcf..65846c12b0 100644
  	ready?: ServiceReady;
  	async?: boolean;
  	pty?: boolean;
-@@ -1200,6 +1207,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -1237,6 +1244,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  			timeout: rawTimeout,
  			cwd,
  			name: rawName,
@@ -2858,7 +2876,7 @@ index 9e01fc2bcf..65846c12b0 100644
  			ready: rawReady,
  			async: rawAsync,
  			pty,
-@@ -1326,6 +1334,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -1367,6 +1375,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  				this.session,
  				{
  					name,
@@ -2867,7 +2885,7 @@ index 9e01fc2bcf..65846c12b0 100644
  					cwd: commandCwd,
  					pty: pty ?? true,
 diff --git a/packages/coding-agent/src/tools/browser.ts b/packages/coding-agent/src/tools/browser.ts
-index 53f46a6627..9641daddb0 100644
+index f2a5e875a2..a4cf17e8bd 100644
 --- a/packages/coding-agent/src/tools/browser.ts
 +++ b/packages/coding-agent/src/tools/browser.ts
 @@ -1,4 +1,6 @@
@@ -2875,18 +2893,18 @@ index 53f46a6627..9641daddb0 100644
 +import { assertBrowserTabAgentControl } from "../harness/services/browser-tab-control";
 +import { managedBrowserFor } from "../harness/services/managed-browser-service";
  import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
- import { isRecord, logger, untilAborted } from "@oh-my-pi/pi-utils";
+ import { getWebKitHostPath, isRecord, logger, untilAborted } from "@oh-my-pi/pi-utils";
  import type { EvalPreludeContext, EvalPreludeDefinition } from "../eval/preludes";
-@@ -174,6 +176,8 @@ export function resolveBrowserKind(
+@@ -184,6 +186,8 @@ export function resolveBrowserKind(
  	session: ToolSession,
  	env: Record<string, string | undefined> = process.env,
  ): BrowserKind {
 +	const managed = managedBrowserFor(session.getSessionId?.() ?? undefined);
 +	if (managed?.kind) return managed.kind;
  	const app = params.app;
- 	if (app?.cdp_url) {
- 		return { kind: "connected", cdpUrl: app.cdp_url.replace(/\/+$/, "") };
-@@ -339,35 +343,59 @@ async function invokeBrowser(
+ 	if (app !== undefined && URL_SCHEME.test(app)) {
+ 		return { kind: "connected", cdpUrl: app.replace(/\/+$/, "") };
+@@ -403,35 +407,59 @@ async function invokeBrowser(
  	if (parsed instanceof type.errors) {
  		throw new ToolError(`browser received invalid arguments: ${parsed.summary}`);
  	}
@@ -2955,16 +2973,23 @@ index 53f46a6627..9641daddb0 100644
  	}
  }
  
-@@ -435,7 +463,7 @@ async function openOnKind(
+@@ -572,13 +600,13 @@ async function openOnKind(
  		);
  	}
  	// Chrome's extension debugger API exposes no Security domain, so the relay cannot honor the override.
--	if (params.ignore_https_errors && kind.kind === "relay") {
-+	if (params.ignore_https_errors && kind.kind === "relay" && !kind.harnessManaged) {
+-	if (params.insecure && kind.kind === "relay") {
++	if (params.insecure && kind.kind === "relay" && !kind.harnessManaged) {
  		throw new ToolError(
- 			"ignore_https_errors is not supported through the Chrome relay: the extension debugger API does not expose the CDP Security domain. Pass app.relay:false to use omp's Chromium instead.",
+ 			'insecure is not supported through the Chrome relay: the extension debugger API does not expose the CDP Security domain. Pass app: "chromium" to use omp\'s Chromium instead.',
  		);
-@@ -490,7 +518,7 @@ async function openOnKind(
+ 	}
+ 	// Chrome never lets an extension choose where downloads go. Refused here, before an existing tab is closed to reopen.
+-	if (params.downloads !== undefined && kind.kind === "relay") {
++	if (params.downloads !== undefined && kind.kind === "relay" && !kind.harnessManaged) {
+ 		throw new ToolError(
+ 			"The omp browser relay cannot choose where Chrome saves downloads: open the tab without `downloads`, and tab.waitForDownload() and tab.downloads() report where Chrome saved each file.",
+ 		);
+@@ -633,7 +661,7 @@ async function openOnKind(
  		let relayNotice: string | null = null;
  		try {
  			// Read before the tab is acquired, so a cancel or the deadline landing during the read leaves no tab to close.
@@ -2973,7 +2998,7 @@ index 53f46a6627..9641daddb0 100644
  				stage = "reading the relay extension version";
  				relayNotice = await relayExtensionNotice(normalizeConnectedCdpUrl(kind.cdpUrl), openSignal);
  				throwIfAborted(openSignal);
-@@ -561,7 +589,7 @@ async function openOnKind(
+@@ -705,7 +733,7 @@ async function openOnKind(
  		details.viewport = tab.info.viewport;
  		const verb = result.created ? "Opened" : "Reused";
  		const lines = [
@@ -2982,7 +3007,7 @@ index 53f46a6627..9641daddb0 100644
  			`URL: ${url}`,
  			title ? `Title: ${title}` : null,
  			...(tab.backend === "tern" ? ternNotes(tab) : []),
-@@ -641,9 +669,16 @@ async function closeBrowser(
+@@ -785,9 +813,16 @@ async function closeBrowser(
  	details: BrowserPreludeDetails,
  	timeoutMs: number,
  	signal?: AbortSignal,
@@ -2999,7 +3024,7 @@ index 53f46a6627..9641daddb0 100644
  		// Only the caller's own tabs: another agent's tabs (a parent's, a sibling's)
  		// are reaped when that agent disposes. No owner (SDK callers) keeps the
  		// process-wide release.
-@@ -654,8 +689,11 @@ async function closeBrowser(
+@@ -798,8 +833,11 @@ async function closeBrowser(
  		const text = `Released ${count} managed tab${count === 1 ? "" : "s"}`;
  		return toolResult(details).text(text).done();
  	}
@@ -3013,7 +3038,7 @@ index 53f46a6627..9641daddb0 100644
  	return toolResult(details).text(text).done();
  }
  
-@@ -747,7 +785,7 @@ function describeBrowser(tab: TabSession): string {
+@@ -896,7 +934,7 @@ function describeBrowser(tab: TabSession): string {
  		case "connected":
  			return `connected ${handle.cdpUrl ?? handle.kind.cdpUrl}`;
  		case "relay":
@@ -3022,7 +3047,7 @@ index 53f46a6627..9641daddb0 100644
  	}
  }
  
-@@ -779,7 +817,7 @@ function describeKind(kind: BrowserKind): string {
+@@ -928,7 +966,7 @@ function describeKind(kind: BrowserKind): string {
  		case "connected":
  			return `connected:${kind.cdpUrl}`;
  		case "relay":
@@ -3032,7 +3057,7 @@ index 53f46a6627..9641daddb0 100644
  			return `cmux:${kind.surface ?? "split"}`;
  		case "tern":
 diff --git a/packages/coding-agent/src/tools/browser/downloads.ts b/packages/coding-agent/src/tools/browser/downloads.ts
-index a10691ffaa..7f67b147ab 100644
+index 5a31b8d4f2..8d34225f1f 100644
 --- a/packages/coding-agent/src/tools/browser/downloads.ts
 +++ b/packages/coding-agent/src/tools/browser/downloads.ts
 @@ -6,6 +6,7 @@ import type { Browser, CDPSession, Page } from "puppeteer-core";
@@ -3043,7 +3068,7 @@ index a10691ffaa..7f67b147ab 100644
  
  /** Completed download metadata returned by tab download helpers. */
  export interface BrowserDownload {
-@@ -45,6 +46,9 @@ const DOWNLOAD_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
+@@ -48,6 +49,9 @@ const FRAME_SESSION_EVENTS = ["frameattached", "framenavigated", "framedetached"
  
  /** Owns tab-scoped Chromium download behavior and completion events. */
  export class DownloadManager {
@@ -3053,19 +3078,35 @@ index a10691ffaa..7f67b147ab 100644
  	readonly #browser: Browser;
  	readonly #page: Page;
  	readonly #defaultDirectory: string;
-@@ -64,7 +68,9 @@ export class DownloadManager {
+@@ -77,7 +81,14 @@ export class DownloadManager {
  	 * for a browser the user drives (connected, relay): there the folder also receives the user's own downloads, which
- 	 * would otherwise be saved under bare GUIDs nobody renames.
+ 	 * would otherwise be saved under bare GUIDs nobody renames. `pageEvents` is for the omp relay.
  	 */
--	constructor(browser: Browser, page: Page, tabId: string, options: { perTab: boolean }) {
-+	constructor(browser: Browser, page: Page, tabId: string, options: { perTab: boolean; managed?: boolean }) {
+-	constructor(browser: Browser, page: Page, tabId: string, options: { perTab: boolean; pageEvents: boolean }) {
++	constructor(
++		browser: Browser,
++		page: Page,
++		tabId: string,
++		options: { perTab: boolean; pageEvents: boolean; managed?: boolean },
++	) {
 +		this.#managed = options.managed === true;
 +		this.#targetId = tabId;
  		this.#browser = browser;
  		this.#page = page;
  		this.#defaultDirectory = path.join(os.tmpdir(), `omp-downloads-${tabId}`);
-@@ -76,6 +82,11 @@ export class DownloadManager {
- 	 * so tabs never overwrite each other's, and each tab moves its own into its folder under the suggested name.
+@@ -90,7 +101,9 @@ export class DownloadManager {
+ 	 * browser setting, so the relay tracks them from here and a download clicked before any wait is listed.
+ 	 */
+ 	async start(directory?: string): Promise<void> {
+-		if (this.#pageEvents) this.#hearPage();
++		if (this.#managed) {
++			if (directory) await this.enable(directory);
++		} else if (this.#pageEvents) this.#hearPage();
+ 		else if (directory) await this.enable(directory);
+ 	}
+ 
+@@ -100,6 +113,11 @@ export class DownloadManager {
+ 	 * relay cannot point Chrome anywhere (the tab supervisor refuses a folder for it), so there this only listens.
  	 */
  	async enable(directory?: string): Promise<void> {
 +		if (this.#managed) {
@@ -3073,10 +3114,10 @@ index a10691ffaa..7f67b147ab 100644
 +			this.#directory = directory;
 +			return;
 +		}
- 		const resolved = path.resolve(directory ?? this.#defaultDirectory);
- 		await fs.mkdir(resolved, { recursive: true });
- 		if (!this.#session) await this.#attach();
-@@ -96,6 +107,28 @@ export class DownloadManager {
+ 		if (this.#pageEvents) {
+ 			this.#hearPage();
+ 			return;
+@@ -124,6 +142,28 @@ export class DownloadManager {
  
  	/** Wait for the next unclaimed completed download. */
  	async wait(signal?: AbortSignal): Promise<BrowserDownload> {
@@ -3105,7 +3146,7 @@ index a10691ffaa..7f67b147ab 100644
  		if (this.#unclaimed.length === 0) {
  			// A rejected `arming` nobody awaits would surface as an unhandled rejection.
  			if (signal?.aborted) throw signal.reason;
-@@ -131,6 +164,23 @@ export class DownloadManager {
+@@ -160,6 +200,23 @@ export class DownloadManager {
  	list(): BrowserDownload[] {
  		return this.#completed.map(download => ({ ...download }));
  	}
@@ -3130,10 +3171,10 @@ index a10691ffaa..7f67b147ab 100644
  	/** Detach event listeners and reject outstanding waits. */
  	async close(): Promise<void> {
 diff --git a/packages/coding-agent/src/tools/browser/registry.ts b/packages/coding-agent/src/tools/browser/registry.ts
-index 093f8d19f9..f1d552a654 100644
+index 212ca98def..aaef185822 100644
 --- a/packages/coding-agent/src/tools/browser/registry.ts
 +++ b/packages/coding-agent/src/tools/browser/registry.ts
-@@ -263,6 +263,27 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
+@@ -282,6 +282,27 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
  	}
  	if (kind.kind === "relay") {
  		const cdpUrl = normalizeConnectedCdpUrl(kind.cdpUrl);
@@ -3161,7 +3202,7 @@ index 093f8d19f9..f1d552a654 100644
  		// Loopback relays are owned by a machine-global broker and auto-started
  		// on demand (the extension dials in on its own). Hosts without a CLI
  		// worker entry (bun test, SDK embedding) never spawn brokers. Remote
-@@ -449,6 +470,16 @@ async function disposeBrowserHandle(handle: BrowserHandle, opts: ReleaseBrowserO
+@@ -473,6 +494,16 @@ async function disposeBrowserHandle(handle: BrowserHandle, opts: ReleaseBrowserO
  		}
  		return;
  	}
@@ -3179,10 +3220,10 @@ index 093f8d19f9..f1d552a654 100644
  		try {
  			handle.browser.disconnect();
 diff --git a/packages/coding-agent/src/tools/browser/relay/bridge.ts b/packages/coding-agent/src/tools/browser/relay/bridge.ts
-index 567eb1c899..73a1e536c6 100644
+index ae85c94c33..c9c1767030 100644
 --- a/packages/coding-agent/src/tools/browser/relay/bridge.ts
 +++ b/packages/coding-agent/src/tools/browser/relay/bridge.ts
-@@ -176,6 +176,8 @@ function parseTargetId(targetId: string): { key: string; kind: "tab" | "page" }
+@@ -191,6 +191,8 @@ function parseTargetId(targetId: string): { key: string; kind: "tab" | "page" }
  }
  
  class TabState {
@@ -3191,7 +3232,7 @@ index 567eb1c899..73a1e536c6 100644
  	/** Assigned in the constructor body from the owning instance. */
  	readonly tabKey: string;
  	url: string;
-@@ -240,6 +242,8 @@ class TabState {
+@@ -257,6 +259,8 @@ class TabState {
  		snap: TabSnapshot,
  	) {
  		this.tabKey = tabKeyOf(extCode, tabId);
@@ -3200,7 +3241,7 @@ index 567eb1c899..73a1e536c6 100644
  		this.url = snap.url;
  		this.title = snap.title;
  		this.active = snap.active;
-@@ -250,6 +254,8 @@ class TabState {
+@@ -267,6 +271,8 @@ class TabState {
  	}
  
  	update(snap: TabSnapshot): void {
@@ -3209,7 +3250,7 @@ index 567eb1c899..73a1e536c6 100644
  		this.url = snap.url;
  		this.title = snap.title;
  		this.active = snap.active;
-@@ -515,6 +521,8 @@ export class RelayBridge {
+@@ -532,6 +538,8 @@ export class RelayBridge {
  			if (!this.#eligible(tab)) continue;
  			out.push({
  				id: pageTargetIdFromKey(tab.tabKey),
@@ -3218,7 +3259,7 @@ index 567eb1c899..73a1e536c6 100644
  				type: "page",
  				title: tab.title,
  				url: tab.url,
-@@ -1464,6 +1472,28 @@ export class RelayBridge {
+@@ -1542,6 +1550,28 @@ export class RelayBridge {
  			case "Browser.setDownloadBehavior":
  				this.#reply(conn, msg, {});
  				return;
@@ -3248,7 +3289,7 @@ index 567eb1c899..73a1e536c6 100644
  				this.#replyError(conn, msg, "Browser contexts are not supported by the omp browser relay");
  				return;
 diff --git a/packages/coding-agent/src/tools/browser/relay/kind.ts b/packages/coding-agent/src/tools/browser/relay/kind.ts
-index 81c3d1550a..d3356b9cbe 100644
+index 81c3d1550a..6594510a47 100644
 --- a/packages/coding-agent/src/tools/browser/relay/kind.ts
 +++ b/packages/coding-agent/src/tools/browser/relay/kind.ts
 @@ -12,6 +12,7 @@ import { parseFlag } from "@oh-my-pi/pi-utils";
@@ -3260,7 +3301,7 @@ index 81c3d1550a..d3356b9cbe 100644
  
  /** Default endpoint of the `omp-browser-relay` CLI. */
 diff --git a/packages/coding-agent/src/tools/browser/relay/protocol.ts b/packages/coding-agent/src/tools/browser/relay/protocol.ts
-index af7ac17c3b..ef690b600a 100644
+index c9bdb42bb3..b82d228c80 100644
 --- a/packages/coding-agent/src/tools/browser/relay/protocol.ts
 +++ b/packages/coding-agent/src/tools/browser/relay/protocol.ts
 @@ -8,6 +8,8 @@
@@ -3277,11 +3318,11 @@ index af7ac17c3b..ef690b600a 100644
  /** RPCs the relay may ask the extension to perform. */
  export type RelayRpcRequest =
 +	| { op: "harnessDownloads"; tabId: number; action: "enable" | "list"; directory?: string }
- 	| { op: "attach"; tabId: number }
+ 	/** `clearForeignFrames`: the tab is one omp drives, so another extension's frames may be emptied past a refusal. */
+ 	| { op: "attach"; tabId: number; clearForeignFrames?: boolean }
  	| { op: "detach"; tabId: number }
- 	| { op: "send"; tabId: number; sessionId?: string; method: string; params?: Record<string, unknown> }
 diff --git a/packages/coding-agent/src/tools/browser/relay/server.ts b/packages/coding-agent/src/tools/browser/relay/server.ts
-index 757650c47a..b0ec5334df 100644
+index 0fee131fee..c407a9044a 100644
 --- a/packages/coding-agent/src/tools/browser/relay/server.ts
 +++ b/packages/coding-agent/src/tools/browser/relay/server.ts
 @@ -28,6 +28,7 @@ import { isOlderOmpVersion } from "./protocol";
@@ -3292,7 +3333,7 @@ index 757650c47a..b0ec5334df 100644
  	/** Shared secret the extension must present as `?token=`; unset disables the check. */
  	token?: string;
  	/** Group tabs the agent actively drives under one per-window Chrome tab group (default on); `false` disables. */
-@@ -116,7 +117,9 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
+@@ -118,7 +119,9 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
  	const log = opts.log ?? (() => {});
  	const group =
  		opts.group === false ? null : opts.group === true || opts.group === undefined ? DEFAULT_GROUP : opts.group;
@@ -3303,7 +3344,7 @@ index 757650c47a..b0ec5334df 100644
  	const bridge = new RelayBridge({ log, group, updateExtension });
  	const sockets = new Set<RelayWebSocket>();
  	const startedAt = Date.now();
-@@ -137,7 +140,9 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
+@@ -139,7 +142,9 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
  					? req.url.slice(`http://${rawHost}`.length)
  					: req.url;
  			const url = new URL(requestUrl, `http://${fallback}`);
@@ -3314,7 +3355,7 @@ index 757650c47a..b0ec5334df 100644
  			if (path === "/cdp") {
  				// Browsers set Origin on websocket upgrades; native CDP clients
  				// don't. Reject any Origin so a web page can't drive the relay.
-@@ -172,7 +177,7 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
+@@ -174,7 +179,7 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
  					};
  					return Response.json(info, { status: 503 });
  				}
@@ -3323,7 +3364,7 @@ index 757650c47a..b0ec5334df 100644
  			}
  			if (path === "/json" || path === "/json/list") {
  				return Response.json(bridge.listTargets());
-@@ -195,6 +200,34 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
+@@ -197,6 +202,34 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
  			message(ws: RelayWebSocket, message: string | Buffer): void {
  				const text = typeof message === "string" ? message : new TextDecoder().decode(message);
  				if (ws.data.role === "ext") {
@@ -3358,7 +3399,7 @@ index 757650c47a..b0ec5334df 100644
  					bridge.extMessage(ws, text);
  				} else if (ws.data.connId !== undefined) {
  					bridge.cdpMessage(ws.data.connId, text);
-@@ -221,7 +254,7 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
+@@ -223,7 +256,7 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
  	log("relay listening", { port: opts.port });
  	return {
  		bridge,
@@ -3368,15 +3409,15 @@ index 757650c47a..b0ec5334df 100644
  			clearInterval(keepalive);
  			server.stop(true);
 diff --git a/packages/coding-agent/src/tools/browser/tab-protocol.ts b/packages/coding-agent/src/tools/browser/tab-protocol.ts
-index 14e93b3646..d7f4d0d842 100644
+index 1ebc1ecc07..82432743c7 100644
 --- a/packages/coding-agent/src/tools/browser/tab-protocol.ts
 +++ b/packages/coding-agent/src/tools/browser/tab-protocol.ts
 @@ -1,3 +1,4 @@
 +import type { WebMcpListOptions, WebMcpInvokeOptions, WebMcpEventsOptions } from "./webmcp";
  import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
+ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
  
- export type Transferable = Bun.Transferable;
-@@ -51,6 +52,7 @@ export type AttachPage = { kind: "create"; nearTargetId?: string } | { kind: "ow
+@@ -53,6 +54,7 @@ export type AttachPage = { kind: "create"; nearTargetId?: string } | { kind: "ow
  
  /** omp created the payload's page: closing the tab closes the page. */
  export function ownsPage(payload: WorkerInitPayload): boolean {
@@ -3384,7 +3425,7 @@ index 14e93b3646..d7f4d0d842 100644
  	return payload.mode === "headless" || payload.page.kind !== "borrowed";
  }
  
-@@ -78,6 +80,7 @@ export type WorkerInitPayload =
+@@ -97,6 +99,7 @@ export type WorkerInitPayload =
  	  }
  	| {
  			mode: "attach";
@@ -3392,7 +3433,7 @@ index 14e93b3646..d7f4d0d842 100644
  			browserWSEndpoint: string;
  			safeDir: string;
  			/** The tab's upload staging folder, which outlives a recycled worker; see `UploadStaging`. */
-@@ -111,9 +114,22 @@ export type WorkerInitPayload =
+@@ -135,9 +138,22 @@ export type WorkerInitPayload =
  /** Result of one host tool requested by browser-run JavaScript. */
  export type ToolReply = { ok: true; value: unknown } | { ok: false; error: RunErrorPayload };
  
@@ -3417,7 +3458,7 @@ index 14e93b3646..d7f4d0d842 100644
  	| { type: "tool-reply"; id: string; reply: ToolReply }
  	/** `keepPage` leaves a page omp created open in its browser; only the worker's hold on it goes. */
 diff --git a/packages/coding-agent/src/tools/browser/tab-supervisor.ts b/packages/coding-agent/src/tools/browser/tab-supervisor.ts
-index f991fcbdcb..527268edd6 100644
+index a7d176f945..9e853999c2 100644
 --- a/packages/coding-agent/src/tools/browser/tab-supervisor.ts
 +++ b/packages/coding-agent/src/tools/browser/tab-supervisor.ts
 @@ -1,3 +1,4 @@
@@ -3425,15 +3466,15 @@ index f991fcbdcb..527268edd6 100644
  import {
  	getProjectDir,
  	getPuppeteerDir,
-@@ -57,6 +58,7 @@ import { cfgBrowserScreenshotDir } from "./settings";
- import { listTernBlocks, noTernBlockError, pickTernBlock } from "./tern/blocks";
+@@ -60,6 +61,7 @@ import { listTernBlocks, noTernBlockError, pickTernBlock } from "./tern/blocks";
  import type * as Tern from "./tern/tern-tab";
+ import { TernError } from "./tern/wire";
  import { newUploadStagingDir, removeUploadStaging, sweepUploadStaging } from "./upload-files";
 +import { assertBrowserTabAgentControl, harnessTabControlState } from "../../harness/services/browser-tab-control";
+ import { WebKitUnavailableError } from "./webkit/host";
  
  // Coding-agent binary/bundle workers route through the CLI entrypoint with a
- // hidden argv mode, so compiled/npm builds only need one JavaScript entry.
-@@ -216,6 +218,7 @@ export interface AcquireTabResult {
+@@ -233,6 +235,7 @@ export interface AcquireTabResult {
  
  export interface RunInTabOptions {
  	code: string;
@@ -3441,7 +3482,7 @@ index f991fcbdcb..527268edd6 100644
  	timeoutMs: number;
  	signal?: AbortSignal;
  	session: ToolSession;
-@@ -224,6 +227,7 @@ export interface RunInTabOptions {
+@@ -241,6 +244,7 @@ export interface RunInTabOptions {
  }
  
  export interface ReleaseTabOptions {
@@ -3449,7 +3490,7 @@ index f991fcbdcb..527268edd6 100644
  	kill?: boolean;
  	/** Leave a page omp opened open in its browser and let go of it, instead of closing it. */
  	keepPage?: boolean;
-@@ -439,6 +443,7 @@ async function acquireTabImpl(
+@@ -456,6 +460,7 @@ async function acquireTabImpl(
  	const reattaching = awaitWorkerRecovery(name, opts, "Browser tab open aborted");
  	if (reattaching) await reattaching;
  	const existing = tabs.get(name);
@@ -3457,7 +3498,7 @@ index f991fcbdcb..527268edd6 100644
  	if (existing) {
  		if (existing.browser === browser && existing.state === "alive") {
  			const requestedCmuxSurface = "client" in browser ? (opts.cmuxSurface ?? browser.surface) : undefined;
-@@ -480,6 +485,7 @@ async function acquireTabImpl(
+@@ -497,6 +502,7 @@ async function acquireTabImpl(
  				if (tabs.get(name) !== existing || existing.state !== "alive") {
  					return await acquireTabImpl(name, browser, { ...opts, deadlineStartMs: startedAt });
  				}
@@ -3465,7 +3506,7 @@ index f991fcbdcb..527268edd6 100644
  				// The creator may opt out later: an explicit `persist` on
  				// reuse by the owning session updates the tab (omitted
  				// leaves it). Reuse by any other session never changes it.
-@@ -906,6 +912,7 @@ export async function runInTab(name: string, opts: RunInTabOptions): Promise<Run
+@@ -1061,6 +1067,7 @@ export async function runInTab(name: string, opts: RunInTabOptions): Promise<Run
  		name,
  		{
  			code: opts.code,
@@ -3473,7 +3514,7 @@ index f991fcbdcb..527268edd6 100644
  			timeoutMs: opts.timeoutMs,
  			signal: opts.signal,
  			session: opts.session,
-@@ -931,6 +938,7 @@ async function runInTabWithSnapshot(
+@@ -1090,6 +1097,7 @@ async function runInTabWithSnapshot(
  	name: string,
  	opts: {
  		code: string;
@@ -3481,7 +3522,7 @@ index f991fcbdcb..527268edd6 100644
  		timeoutMs: number;
  		signal?: AbortSignal;
  		session?: ToolSession;
-@@ -969,6 +977,8 @@ async function runInTabWithSnapshot(
+@@ -1126,6 +1134,8 @@ async function runInTabWithSnapshot(
  				: `Tab ${JSON.stringify(name)} is busy: another call on this tab is still running. Await each call before starting the next instead of running them together (Promise.all, asyncio.gather), or group the steps in one tab.run(...)`,
  		);
  	}
@@ -3490,7 +3531,7 @@ index f991fcbdcb..527268edd6 100644
  	// An already-aborted call never runs: without this early exit the worker
  	// branch below would send `abort` before `run`, which the worker ignores
  	// for a not-yet-active run and then execute anyway.
-@@ -1093,6 +1103,7 @@ async function runInTabWithSnapshot(
+@@ -1250,6 +1260,7 @@ async function runInTabWithSnapshot(
  				id,
  				name,
  				code: opts.code,
@@ -3498,7 +3539,7 @@ index f991fcbdcb..527268edd6 100644
  				timeoutMs: opts.timeoutMs,
  				session: snapshot,
  			});
-@@ -1439,7 +1450,10 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
+@@ -1601,7 +1612,10 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
  	// close can fail and still report `closed` (its CDP socket broke), and the relay retracts a
  	// target whose debugger the user dismissed, so the worker cannot close it at all. A dead
  	// tab's page was closed by the teardown that killed it.
@@ -3510,7 +3551,7 @@ index f991fcbdcb..527268edd6 100644
  		try {
  			// `false` is "not confirmed closed" (the CDP session could not be
  			// created, or `Target.getTargets` failed) — the same unconfirmed
-@@ -1570,6 +1584,26 @@ async function findTargetForTab(tab: WorkerTabSession): Promise<Target | undefin
+@@ -1737,6 +1751,26 @@ async function findTargetForTab(tab: WorkerTabSession): Promise<Target | undefin
  	return undefined;
  }
  
@@ -3537,7 +3578,7 @@ index f991fcbdcb..527268edd6 100644
  /**
   * Set a tab's web lifecycle state through a supervisor-owned CDP session —
   * no worker-protocol change needed; CDP allows multiple sessions per target.
-@@ -1711,6 +1745,7 @@ export async function freezeTabsForOwner(ownerId: string): Promise<number> {
+@@ -1878,6 +1912,7 @@ export async function freezeTabsForOwner(ownerId: string): Promise<number> {
  	let count = 0;
  	for (const tab of tabs.values()) {
  		if (tab.ownerSessionId !== ownerId) continue;
@@ -3545,15 +3586,23 @@ index f991fcbdcb..527268edd6 100644
  		if (await setTabFrozen(tab, true).catch(() => false)) count++;
  	}
  	return count;
-@@ -1928,6 +1963,7 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
+@@ -1892,6 +1927,7 @@ export function isIdleCloseCandidate(tab: TabSession, ownerId: string, nowMs: nu
+ 	return (
+ 		tab.ownerSessionId === ownerId &&
+ 		isIdleManaged(tab) &&
++		harnessTabControlState(tab) === "agent" &&
+ 		tab.pending.size === 0 &&
+ 		nowMs - tab.lastActivityAt >= idleMs
+ 	);
+@@ -2095,6 +2131,7 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
  	}
  	return {
  		mode: "attach",
 +		harnessManaged: browser.kind.kind === "relay" && browser.kind.harnessManaged === true,
- 		browserWSEndpoint,
+ 		browserWSEndpoint:
+ 			page.kind === "create" ? browserWSEndpoint : adoptEndpoint(browserWSEndpoint, browser, page.targetId),
  		safeDir,
- 		uploadDir,
-@@ -2318,6 +2354,7 @@ async function closeOrphanTarget(tab: WorkerTabSession, budgetMs: number): Promi
+@@ -2503,6 +2540,7 @@ async function closeOrphanTarget(tab: WorkerTabSession, budgetMs: number): Promi
  function closeAbandonedWorkerPage(browser: PuppeteerBrowserHandle, worker: WorkerHandle): void {
  	const targetId = workerPageTargets.get(worker);
  	workerPageTargets.delete(worker);
@@ -3562,27 +3611,27 @@ index f991fcbdcb..527268edd6 100644
  	// The close outlives its caller, and every caller here may go on to release
  	// the last browser reference — `closeTargetById` yields before it looks the
 diff --git a/packages/coding-agent/src/tools/browser/tab-worker.ts b/packages/coding-agent/src/tools/browser/tab-worker.ts
-index 50f1c02935..230fb4218c 100644
+index 5e04828f99..571d42bf4b 100644
 --- a/packages/coding-agent/src/tools/browser/tab-worker.ts
 +++ b/packages/coding-agent/src/tools/browser/tab-worker.ts
-@@ -1800,7 +1800,7 @@ export class WorkerCore {
+@@ -1818,7 +1818,7 @@ export class WorkerCore {
  			client.on("Page.javascriptDialogClosed", this.#onDialogClosed);
  			client.on("OMP.debuggerDetached", this.#onDebuggerDetached);
  			this.#page.on("error", this.#onPageCrashed);
--			if (this.#ownsPage) {
-+			if (this.#ownsPage || (payload.mode === "attach" && payload.harnessManaged)) {
+-			if (this.#ownsPage || (payload.mode === "attach" && payload.userDriven)) {
++			if (this.#ownsPage || (payload.mode === "attach" && (payload.userDriven || payload.harnessManaged))) {
  				// Background Chromium tabs stop producing frames, stalling rAF,
- 				// IntersectionObserver, and input acknowledgements. Keep owned tabs
- 				// interactive without raising a window; explicit settle-freeze still applies.
-@@ -1817,6 +1817,7 @@ export class WorkerCore {
- 			this.#userDriven = payload.mode !== "headless" && payload.userDriven === true;
+ 				// IntersectionObserver, and input acknowledgements; in a visible browser a tab
+ 				// that was never selected drops trusted input outright. Keep the page
+@@ -1839,6 +1839,7 @@ export class WorkerCore {
  			this.#downloads = new DownloadManager(this.#browser, this.#page, this.#targetId, {
  				perTab: !this.#userDriven,
+ 				pageEvents: payload.mode === "attach" && payload.relay === true,
 +				managed: payload.mode === "attach" && payload.harnessManaged === true,
  			});
- 			if (payload.downloadsPath) await this.#downloads.enable(payload.downloadsPath);
+ 			await this.#downloads.start(payload.downloadsPath);
  			const baseUserAgent = await this.#page.evaluate(() => navigator.userAgent);
-@@ -1852,8 +1853,14 @@ export class WorkerCore {
+@@ -1874,8 +1875,14 @@ export class WorkerCore {
  			if (payload.mode === "headless" && page && !page.isClosed()) {
  				await page.close().catch(() => undefined);
  			}
@@ -3599,7 +3648,7 @@ index 50f1c02935..230fb4218c 100644
  				await page.close().catch(() => undefined);
  			}
  			this.#transport.send({ type: "init-failed", error: errorPayload(error) });
-@@ -2046,86 +2053,104 @@ export class WorkerCore {
+@@ -2069,86 +2076,104 @@ export class WorkerCore {
  			runPage = createRunPageScope(this.#requirePage(), () => this.#requireNetwork().restoreInterception());
  			const browser = this.#requireBrowser();
  			const tabApi = this.#createTabApi(msg.name, msg.timeoutMs, signal, msg.session, output, screenshots, active);
@@ -3780,7 +3829,7 @@ index 50f1c02935..230fb4218c 100644
  			}
  		} catch (error) {
  			failure = { error };
-@@ -2958,7 +2983,7 @@ export class WorkerCore {
+@@ -2978,7 +3003,7 @@ export class WorkerCore {
  			downloads: () =>
  				op("tab.downloads()", quickOpMs, async sig => {
  					throwIfAborted(sig);
@@ -3790,7 +3839,7 @@ index 50f1c02935..230fb4218c 100644
  			text: (selector = "body") =>
  				read(`tab.text(${JSON.stringify(selector)})`, quickOpMs, sig =>
 diff --git a/packages/coding-agent/src/tools/computer.ts b/packages/coding-agent/src/tools/computer.ts
-index 7da8f6f4f9..17b9a7bbfe 100644
+index f4ac8ea19a..c9f4778008 100644
 --- a/packages/coding-agent/src/tools/computer.ts
 +++ b/packages/coding-agent/src/tools/computer.ts
 @@ -17,6 +17,7 @@ import {
@@ -3801,7 +3850,7 @@ index 7da8f6f4f9..17b9a7bbfe 100644
  import { renderCallChain, renderFunctionRun } from "./run-code";
  import { throwIfAborted } from "./tool-errors";
  import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
-@@ -271,12 +272,23 @@ async function runComputer(
+@@ -252,12 +253,23 @@ async function runComputer(
  	params: ComputerRunParams | ComputerCallParams,
  	context: EvalPreludeContext,
  ): Promise<AgentToolResult<unknown>> {
@@ -3827,7 +3876,7 @@ index 7da8f6f4f9..17b9a7bbfe 100644
  	throwIfAborted(signal);
  
 diff --git a/packages/coding-agent/src/tools/computer/protocol.ts b/packages/coding-agent/src/tools/computer/protocol.ts
-index 7c81d46f4f..6955dd0cfa 100644
+index 7c81d46f4f..37691bd331 100644
 --- a/packages/coding-agent/src/tools/computer/protocol.ts
 +++ b/packages/coding-agent/src/tools/computer/protocol.ts
 @@ -9,6 +9,8 @@ import screenStateTemplate from "../../prompts/tools/computer-screen-state.md" w
@@ -3875,7 +3924,7 @@ index 7c81d46f4f..6955dd0cfa 100644
  	| { type: "result"; id: string; ok: true; payload: ComputerRunOk }
  	| { type: "result"; id: string; ok: false; error: RunErrorPayload }
 diff --git a/packages/coding-agent/src/tools/computer/supervisor.ts b/packages/coding-agent/src/tools/computer/supervisor.ts
-index 7f6e42c5d2..147e7aedfa 100644
+index 6d86ef89f8..e8e6326163 100644
 --- a/packages/coding-agent/src/tools/computer/supervisor.ts
 +++ b/packages/coding-agent/src/tools/computer/supervisor.ts
 @@ -29,6 +29,12 @@ import {
@@ -3908,7 +3957,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  	/** The owner's agent turn `turn` ended: let the display sleep now, keeping control, refs and the worker. */
  	releaseDisplay?(turn: number): void;
  	/**
-@@ -182,6 +189,9 @@ function errorFromPayload(payload: RunErrorPayload): Error {
+@@ -188,6 +195,9 @@ function errorFromPayload(payload: RunErrorPayload): Error {
  
  /** Supervises one lazy, crash-isolated computer worker per agent session. */
  export class ComputerSupervisor implements ComputerController {
@@ -3918,7 +3967,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  	readonly #session: ToolSession;
  	readonly #createWorker: ComputerWorkerFactory;
  	readonly #callSessionTool: ComputerSessionToolCaller;
-@@ -192,7 +202,8 @@ export class ComputerSupervisor implements ComputerController {
+@@ -198,7 +208,8 @@ export class ComputerSupervisor implements ComputerController {
  	#startResolve?: () => void;
  	#pendingCapabilities = new Map<string, PendingCapabilities>();
  	#pending = new Map<string, PendingRun>();
@@ -3928,7 +3977,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  	/**
  	 * Snapshots of runs waiting for the worker to start: a resume the worker gets before their `run` would find
  	 * nothing to hold, so it moves them to the turn that went on here.
-@@ -200,6 +211,7 @@ export class ComputerSupervisor implements ComputerController {
+@@ -206,6 +217,7 @@ export class ComputerSupervisor implements ComputerController {
  	readonly #startingRuns = new Set<ComputerSessionSnapshot>();
  	#nextId = 0;
  	#controlEpoch = 0;
@@ -3936,7 +3985,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  	readonly #escapeStops: ComputerEscapeStops;
  	/** Key the worker's native sessions count the user's Escape stops under. */
  	readonly #escapeKey = `computer-${Snowflake.next()}`;
-@@ -278,6 +290,9 @@ export class ComputerSupervisor implements ComputerController {
+@@ -284,6 +296,9 @@ export class ComputerSupervisor implements ComputerController {
  		if (this.#closed) throw new ToolError("Computer session is closed");
  		if (this.#escapeStopped()) throw new ToolError(ESCAPE_REFUSED_MESSAGE);
  		if (signal?.aborted) throw new ToolAbortError();
@@ -3946,7 +3995,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  		const epoch = this.#controlEpoch;
  		const session = { ...snapshot };
  		this.#startingRuns.add(session);
-@@ -292,6 +307,10 @@ export class ComputerSupervisor implements ComputerController {
+@@ -298,6 +313,10 @@ export class ComputerSupervisor implements ComputerController {
  		const { promise, resolve, reject } = Promise.withResolvers<ComputerRunOk>();
  		const pending: PendingRun = { resolve, reject, signal, context, toolCalls: new Map() };
  		this.#pending.set(id, pending);
@@ -3957,7 +4006,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  		const abort = (): void => {
  			this.#safeSend({ type: "abort", id });
  			for (const controller of pending.toolCalls.values()) controller.abort(signal?.reason);
-@@ -314,6 +333,7 @@ export class ComputerSupervisor implements ComputerController {
+@@ -320,6 +339,7 @@ export class ComputerSupervisor implements ComputerController {
  				const own = error instanceof Error && !(error instanceof ToolAbortError) ? error.message : undefined;
  				throw new ToolError(own ? `${own}\n\n${ESCAPE_STOPPED_MESSAGE}` : ESCAPE_STOPPED_MESSAGE);
  			}
@@ -3965,7 +4014,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  			// The stop landed after the script finished, its input out: keep what it did, led by the user's stop.
  			if (this.#escapeStopped()) {
  				return { ...result, displays: [{ type: "text", text: ESCAPE_AFTER_CALL_MESSAGE }, ...result.displays] };
-@@ -322,6 +342,13 @@ export class ComputerSupervisor implements ComputerController {
+@@ -328,6 +348,13 @@ export class ComputerSupervisor implements ComputerController {
  		} finally {
  			signal?.removeEventListener("abort", abort);
  			this.#pending.delete(id);
@@ -3979,7 +4028,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  		}
  	}
  
-@@ -360,8 +387,14 @@ export class ComputerSupervisor implements ComputerController {
+@@ -366,8 +393,14 @@ export class ComputerSupervisor implements ComputerController {
  			this.#startReject = undefined;
  			return;
  		}
@@ -3995,7 +4044,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  			this.#revocations.delete(message.id);
  			return;
  		}
-@@ -384,11 +417,11 @@ export class ComputerSupervisor implements ComputerController {
+@@ -390,11 +423,11 @@ export class ComputerSupervisor implements ComputerController {
  			return;
  		}
  		if (message.type === "control-request") {
@@ -4009,7 +4058,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  		}
  	}
  
-@@ -449,7 +482,12 @@ export class ComputerSupervisor implements ComputerController {
+@@ -455,7 +488,12 @@ export class ComputerSupervisor implements ComputerController {
  		}
  	}
  
@@ -4023,7 +4072,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  		this.#controlEpoch += 1;
  		for (const pending of this.#pending.values()) {
  			for (const controller of pending.toolCalls.values()) controller.abort(new ToolAbortError());
-@@ -457,12 +495,24 @@ export class ComputerSupervisor implements ComputerController {
+@@ -463,12 +501,24 @@ export class ComputerSupervisor implements ComputerController {
  		if (!this.#worker) return;
  		const id = `computer-revoke-${++this.#nextId}`;
  		const acknowledged = Promise.withResolvers<void>();
@@ -4050,7 +4099,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  		} finally {
  			this.#revocations.delete(id);
  		}
-@@ -572,9 +622,9 @@ export class ComputerSupervisor implements ComputerController {
+@@ -578,9 +628,9 @@ export class ComputerSupervisor implements ComputerController {
  		this.#pending.clear();
  		for (const pending of this.#pendingCapabilities.values()) pending.reject(reason);
  		this.#pendingCapabilities.clear();
@@ -4061,8 +4110,8 @@ index 7f6e42c5d2..147e7aedfa 100644
 +		await worker?.terminate();
  	}
  
- 	async close(): Promise<void> {
-@@ -608,6 +658,17 @@ export class ComputerSupervisor implements ComputerController {
+ 	async reset(): Promise<void> {
+@@ -625,6 +675,17 @@ export class ComputerSupervisor implements ComputerController {
  const ownedSupervisors = new Map<string, Set<ComputerController>>();
  /** Per owner with agent turns: the turn in flight, or between turns the one that ended last, counted from 1. */
  const ownerTurns = new Map<string, { turn: number; inFlight: boolean }>();
@@ -4080,7 +4129,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  
  /** Registers a controller for owner-scoped session cleanup. */
  export function registerComputerController(ownerId: string | undefined, controller: ComputerController): () => void {
-@@ -622,11 +683,13 @@ export function registerComputerController(ownerId: string | undefined, controll
+@@ -639,11 +700,13 @@ export function registerComputerController(ownerId: string | undefined, controll
  }
  
  /** Revoke task-scoped foreground ownership without resetting frames or the worker. */
@@ -4098,7 +4147,7 @@ index 7f6e42c5d2..147e7aedfa 100644
  
  /**
 diff --git a/packages/coding-agent/src/tools/computer/worker.ts b/packages/coding-agent/src/tools/computer/worker.ts
-index 0131e2476a..19532406e1 100644
+index b9c32064fa..1495c042fd 100644
 --- a/packages/coding-agent/src/tools/computer/worker.ts
 +++ b/packages/coding-agent/src/tools/computer/worker.ts
 @@ -1,4 +1,5 @@
@@ -4107,7 +4156,7 @@ index 0131e2476a..19532406e1 100644
  import * as fs from "node:fs/promises";
  import * as os from "node:os";
  import * as path from "node:path";
-@@ -58,6 +59,7 @@ import {
+@@ -60,6 +61,7 @@ import {
  	type ToolReply,
  } from "./protocol";
  import { describeWindowMiss, matchesWindowApp } from "./window-miss";
@@ -4115,7 +4164,7 @@ index 0131e2476a..19532406e1 100644
  
  /** A native input call; resolves to its takeover focus report when it took over. */
  type InputCall = Promise<DesktopFocusReturn | null | void>;
-@@ -122,6 +124,8 @@ export interface NativeDesktopSession {
+@@ -124,6 +126,8 @@ export interface NativeDesktopSession {
  	axClick(ref: string, opts?: PointerOptions | null): InputCall;
  	axType(ref: string, text: string, opts?: PointerOptions | null): InputCall;
  	axKeyChord(ref: string, keys: string[], opts?: PointerOptions | null): InputCall;
@@ -4124,7 +4173,7 @@ index 0131e2476a..19532406e1 100644
  	close(): Promise<void>;
  }
  
-@@ -159,6 +163,7 @@ type ObservationResult = ScreenshotResult & { ax: string; nodeCount: number; tru
+@@ -161,6 +165,7 @@ type ObservationResult = ScreenshotResult & { ax: string; nodeCount: number; tru
  type PendingTool = { resolve(value: unknown): void; reject(reason?: unknown): void };
  interface ActiveRun {
  	id: string;
@@ -4132,7 +4181,7 @@ index 0131e2476a..19532406e1 100644
  	/** Escape stops the user acknowledged; any more stop the run. */
  	acknowledgedEscapeStops: number;
  	ac: AbortController;
-@@ -177,6 +182,8 @@ interface ComputerRunContext {
+@@ -179,6 +184,8 @@ interface ComputerRunContext {
  	output: RunOutput;
  	confirmControl(reason: string): Promise<ControlVerdict>;
  	screenshots: ComputerScreenshot[];
@@ -4141,7 +4190,7 @@ index 0131e2476a..19532406e1 100644
  }
  
  type RunContextAccessor = () => ComputerRunContext;
-@@ -647,7 +654,6 @@ async function emitScreenshot(
+@@ -656,7 +663,6 @@ async function emitScreenshot(
  ): Promise<ScreenshotResult> {
  	const destination = path.join(os.tmpdir(), `omp-computer-${Snowflake.next()}.png`);
  	await Bun.write(destination, frame.data);
@@ -4149,7 +4198,7 @@ index 0131e2476a..19532406e1 100644
  	const result: ScreenshotResult = {
  		path: destination,
  		width: frame.width,
-@@ -658,12 +664,28 @@ async function emitScreenshot(
+@@ -667,12 +673,28 @@ async function emitScreenshot(
  	};
  	if (frame.screenLocked) result.screenLocked = true;
  	const scaled = frame.width !== frame.sourceWidth || frame.height !== frame.sourceHeight;
@@ -4180,7 +4229,7 @@ index 0131e2476a..19532406e1 100644
  	if (!options?.silent) {
  		const dimensions = `${frame.width}×${frame.height}${scaled ? ` (scaled from ${frame.sourceWidth}×${frame.sourceHeight})` : ""}`;
  		const coordinates = `coordinateWidth=${frame.coordinateWidth} coordinateHeight=${frame.coordinateHeight}`;
-@@ -1339,9 +1361,7 @@ export class ComputerWorkerCore {
+@@ -1359,9 +1381,7 @@ export class ComputerWorkerCore {
  				if (this.#active?.id === message.id) this.#active.ac.abort(new ToolAbortError());
  				return;
  			case "revoke-control":
@@ -4191,7 +4240,7 @@ index 0131e2476a..19532406e1 100644
  				return;
  			case "release-display":
  				this.#releasedTurn = Math.max(this.#releasedTurn, message.turn);
-@@ -1360,6 +1380,27 @@ export class ComputerWorkerCore {
+@@ -1380,6 +1400,27 @@ export class ComputerWorkerCore {
  		}
  	}
  
@@ -4219,7 +4268,7 @@ index 0131e2476a..19532406e1 100644
  	/** Returns the raw session; the desktop scope gets `#guarded`, which checks for the user's Escape on every access. */
  	async #ensureSession(snapshot: ComputerSessionSnapshot, escape: ComputerEscapeScope): Promise<NativeDesktopSession> {
  		if (this.#session) return this.#session;
-@@ -1425,6 +1466,7 @@ export class ComputerWorkerCore {
+@@ -1445,6 +1486,7 @@ export class ComputerWorkerCore {
  		const signal = AbortSignal.any([timeoutSignal, ac.signal, runAc.signal]);
  		const active: ActiveRun = {
  			id: message.id,
@@ -4227,7 +4276,7 @@ index 0131e2476a..19532406e1 100644
  			acknowledgedEscapeStops: message.escape.acknowledged,
  			ac,
  			signal,
-@@ -1450,6 +1492,14 @@ export class ComputerWorkerCore {
+@@ -1470,6 +1512,14 @@ export class ComputerWorkerCore {
  			snapshot: message.session,
  			output,
  			screenshots,
@@ -4242,7 +4291,7 @@ index 0131e2476a..19532406e1 100644
  			confirmControl: reason =>
  				this.#confirmControl(active, reason, deadline - Math.min(CONTROL_ANSWER_RESERVE_MS, message.timeoutMs / 4)),
  		};
-@@ -1532,7 +1582,17 @@ export class ComputerWorkerCore {
+@@ -1552,7 +1602,17 @@ export class ComputerWorkerCore {
  			if (failure === undefined && !signal.aborted) this.#session?.retire();
  			else if (!nativeCancelled) this.#session?.cancel();
  			runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Computer run ended")));
@@ -4260,7 +4309,7 @@ index 0131e2476a..19532406e1 100644
  		}
  		if (failure !== undefined) {
  			this.#transport.send({
-@@ -1590,19 +1650,109 @@ export class ComputerWorkerCore {
+@@ -1610,19 +1670,109 @@ export class ComputerWorkerCore {
  				if (typeof value !== "function") return value;
  				return (...args: unknown[]): unknown => {
  					this.#checkEscape();
@@ -4383,7 +4432,7 @@ index 0131e2476a..19532406e1 100644
  				};
  			},
  		});
-@@ -1685,8 +1835,12 @@ export class ComputerWorkerCore {
+@@ -1705,8 +1855,12 @@ export class ComputerWorkerCore {
  		const pending = Promise.withResolvers<unknown>();
  		active.pendingTools.set(id, pending);
  		const timeoutMs = Math.max(0, Math.floor(answerDeadline - performance.now()));
@@ -4397,7 +4446,7 @@ index 0131e2476a..19532406e1 100644
  	}
  
 diff --git a/packages/coding-agent/src/tools/context.ts b/packages/coding-agent/src/tools/context.ts
-index 36028c7943..1318f79654 100644
+index 36028c7943..9fbe34fa56 100644
 --- a/packages/coding-agent/src/tools/context.ts
 +++ b/packages/coding-agent/src/tools/context.ts
 @@ -38,8 +38,33 @@ declare module "@oh-my-pi/pi-agent-core" {
@@ -4475,10 +4524,10 @@ index 36028c7943..1318f79654 100644
  	}
  
 diff --git a/packages/coding-agent/src/tools/eval.ts b/packages/coding-agent/src/tools/eval.ts
-index 01869cb46a..d458279972 100644
+index 1379f72f72..97b9fd1eba 100644
 --- a/packages/coding-agent/src/tools/eval.ts
 +++ b/packages/coding-agent/src/tools/eval.ts
-@@ -611,6 +611,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
+@@ -608,6 +608,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
  			}
  			const execution = runWithEvalShadowCell(activeShadowCell, () =>
  				this.#runCells({
@@ -4486,7 +4535,7 @@ index 01869cb46a..d458279972 100644
  					session,
  					cells,
  					languages,
-@@ -818,6 +819,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
+@@ -815,6 +816,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
  	 * inside a managed background job (which passes the job's own signal).
  	 */
  	async #runCells(options: {
@@ -4494,7 +4543,7 @@ index 01869cb46a..d458279972 100644
  		session: ToolSession;
  		cells: ResolvedEvalCell[];
  		languages: EvalLanguage[];
-@@ -981,6 +983,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
+@@ -973,6 +975,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
  				let result: ExecutorBackendResult;
  				try {
  					result = await backend.execute(cell.code, {
@@ -4503,10 +4552,10 @@ index 01869cb46a..d458279972 100644
  						sessionId,
  						sessionFile: sessionFile ?? undefined,
 diff --git a/packages/coding-agent/src/tools/image-gen.ts b/packages/coding-agent/src/tools/image-gen.ts
-index e6d3bdb947..164a2b7172 100644
+index 95f1c7610f..3f694caf9e 100644
 --- a/packages/coding-agent/src/tools/image-gen.ts
 +++ b/packages/coding-agent/src/tools/image-gen.ts
-@@ -143,7 +143,7 @@ async function saveImagesToTemp(images: ImageGenerationResult["images"]): Promis
+@@ -154,7 +154,7 @@ async function saveImagesToTemp(images: ImageGenerationResult["images"]): Promis
   * call: the session model when it can carry the tool on the same provider,
   * otherwise the cheapest available carrier there.
   */
@@ -4516,10 +4565,10 @@ index e6d3bdb947..164a2b7172 100644
  	selectedModel: Model,
  	activeModel: Model | undefined,
 diff --git a/packages/coding-agent/src/tools/index.ts b/packages/coding-agent/src/tools/index.ts
-index bc65b39d18..4916dc0734 100644
+index 1ec93606a0..01906173ad 100644
 --- a/packages/coding-agent/src/tools/index.ts
 +++ b/packages/coding-agent/src/tools/index.ts
-@@ -229,6 +229,8 @@ export interface ToolSession {
+@@ -230,6 +230,8 @@ export interface ToolSession {
  	 * false for print, RPC, ACP, and subagent sessions. See `CreateAgentSessionOptions.tuiTranscript`.
  	 */
  	tuiTranscript?: boolean;
@@ -4528,7 +4577,7 @@ index bc65b39d18..4916dc0734 100644
  	/** Whether this session has begun disposal. */
  	isDisposed?: () => boolean;
  	/**
-@@ -357,6 +359,8 @@ export interface ToolSession {
+@@ -358,6 +360,8 @@ export interface ToolSession {
  	getEvalKernelOwnerId?: () => string | null;
  	/** Current enabled eval prelude definitions. */
  	getEvalPreludes?: () => readonly EvalPreludeDefinition[];
@@ -4580,10 +4629,10 @@ index 22ae6ba17d..cfd374f8dd 100644
  }
  
 diff --git a/packages/coding-agent/test/extensions-runner.test.ts b/packages/coding-agent/test/extensions-runner.test.ts
-index 21e7ec0b0d..88cce51372 100644
+index 07a8525175..e994b986eb 100644
 --- a/packages/coding-agent/test/extensions-runner.test.ts
 +++ b/packages/coding-agent/test/extensions-runner.test.ts
-@@ -2757,7 +2757,7 @@ describe("ExtensionRunner", () => {
+@@ -2858,7 +2858,7 @@ describe("ExtensionRunner", () => {
  			name: "dangerous_tool",
  			label: "Dangerous Tool",
  			description: "Test tool",
@@ -4592,7 +4641,7 @@ index 21e7ec0b0d..88cce51372 100644
  			approval: "exec" as const,
  			execute: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
  		};
-@@ -2969,6 +2969,76 @@ describe("ExtensionRunner", () => {
+@@ -3070,6 +3070,76 @@ describe("ExtensionRunner", () => {
  			}
  		});
  
@@ -4792,8 +4841,58 @@ index d5781da79c..491cf29543 100644
  });
  
  describe("STTController submit trigger integration", () => {
+diff --git a/packages/coding-agent/test/tools/browser-open-lease.test.ts b/packages/coding-agent/test/tools/browser-open-lease.test.ts
+index 01ad1e7898..4a08d84df6 100644
+--- a/packages/coding-agent/test/tools/browser-open-lease.test.ts
++++ b/packages/coding-agent/test/tools/browser-open-lease.test.ts
+@@ -161,12 +161,15 @@ describe("browser open — requested timeout bounds the whole acquisition (#6365
+ describe("browser open — caller cancellation rolls back the fresh browser (#6365)", () => {
+ 	it("aborting before tab publication rejects with ToolAbortError and leaves both maps empty", async () => {
+ 		spyOn(CmuxSocketClient.prototype, "connect").mockResolvedValue(undefined);
+-		const closeSpy = spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => undefined);
++		const browserClosed = Promise.withResolvers<void>();
++		const closeSpy = spyOn(CmuxSocketClient.prototype, "close").mockImplementation(() => browserClosed.resolve());
+ 		const openSplitGate = Promise.withResolvers<void>();
++		const openSplitEntered = Promise.withResolvers<void>();
+ 		const surfaceClosed: string[] = [];
+ 		spyOn(CmuxSocketClient.prototype, "request").mockImplementation(
+ 			async (method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> => {
+ 				if (method === "browser.open_split") {
++					openSplitEntered.resolve();
+ 					await openSplitGate.promise;
+ 					return { surface_id: "surface-abort", url: "about:blank" };
+ 				}
+@@ -188,7 +191,7 @@ describe("browser open — caller cancellation rolls back the fresh browser (#63
+ 
+ 		// Browser acquisition has resolved; tab acquisition is parked in
+ 		// `open_split`. Cancel here — before any tab is published.
+-		await Promise.resolve();
++		await openSplitEntered.promise;
+ 		controller.abort();
+ 
+ 		const outcome = await settled;
+@@ -196,15 +199,13 @@ describe("browser open — caller cancellation rolls back the fresh browser (#63
+ 		if (outcome.ok) throw new Error("unreachable");
+ 		expect(outcome.err).toBeInstanceOf(ToolAbortError);
+ 
+-		// The open-acquisition lease rollback disposes the fresh browser exactly
+-		// once and leaves nothing owned solely by the failed open.
++		// Let the orphaned acquisition unwind, then verify its rollback disposed
++		// the fresh browser exactly once and left nothing owned by the failed open.
++		openSplitGate.resolve();
++		await browserClosed.promise;
+ 		expect(getTabsMapForTest().has("fresh")).toBe(false);
+ 		expect(registry.getBrowsersMapForTest().size).toBe(0);
+ 		expect(closeSpy).toHaveBeenCalledTimes(1);
+-
+-		// Let the orphaned acquisition unwind so it does not leak past the test.
+-		openSplitGate.resolve();
+-		await Promise.resolve();
+ 	});
+ });
+ 
 diff --git a/packages/natives/native/index.d.ts b/packages/natives/native/index.d.ts
-index 39e35ed96a..6e735eac9c 100644
+index 8567c24e1a..02dbd2f9da 100644
 --- a/packages/natives/native/index.d.ts
 +++ b/packages/natives/native/index.d.ts
 @@ -31,6 +31,13 @@ export declare class AudioPlayback {
@@ -4810,33 +4909,7 @@ index 39e35ed96a..6e735eac9c 100644
    /**
     * Asks the worker when it is idle, so permissions are read live. While
     * another operation holds the worker, answers from the snapshot of the
-@@ -595,7 +602,7 @@ export declare class RunTrace {
-    * instead of an invented primary producer. Decoding ends at capture EOF.
-    * Segmented minimizer submissions share one epoch and final status;
-    * their history carries `segment`, with `logicalEnd`/`logicalStatus`
--   * finalizing the last actual root RunEnd after output draining.
-+   * finalizing the last actual root `RunEnd` after output draining.
-    * Serialization borrows the locked model rather than cloning its history.
-    */
-   snapshot(): string
-@@ -705,9 +712,13 @@ export declare class TextPredictor {
- /**
-  * Dedicated writer thread for one terminal fd.
-  *
-- * `dup(2)`'d at construction and closed on drop. The duplicate keeps the
-- * pump's fd alive if the original is closed or replaced; file-status flags
-- * such as `O_NONBLOCK` are shared and handled by polling for `POLLOUT`.
-+ * Duplicated (close-on-exec) at construction and closed on drop. The
-+ * duplicate keeps the pump's fd alive if the original is closed or replaced;
-+ * file-status flags such as `O_NONBLOCK` are shared and handled by polling for
-+ * `POLLOUT`. Close-on-exec keeps the terminal out of every child the process
-+ * spawns without explicit fd handling (`std::process::Command`, gitoxide
-+ * filter drivers), which could otherwise read the user's keystrokes and
-+ * terminal replies through it.
-  */
- export declare class TtyWriter {
-   /**
-@@ -1630,6 +1641,25 @@ export interface DesktopMenuItem {
+@@ -1664,6 +1671,25 @@ export interface DesktopMenuItem {
  export interface DesktopObservation {
    capture: DesktopCapture
    accessibility: AxSnapshot
@@ -4862,7 +4935,7 @@ index 39e35ed96a..6e735eac9c 100644
  }
  
  export interface DesktopPoint {
-@@ -1647,6 +1677,8 @@ export interface DesktopScreenState {
+@@ -1681,6 +1707,8 @@ export interface DesktopScreenState {
  }
  
  export interface DesktopSessionOptions {
@@ -4871,22 +4944,11 @@ index 39e35ed96a..6e735eac9c 100644
    display?: string
    /**
     * Sessions created with the same key share one physical-Escape stop
-@@ -3412,7 +3444,9 @@ export declare function renderSnapcompactPng(text: string, options: SnapcompactR
- 
- /**
-  * Run the pi-shell engine as a process shell in this process (`omp zsh`,
-- * `omp bash`, `omp sh`): `argv` is the shell's whole command line,
-+ * `omp bash`, `omp sh`).
-+ *
-+ * `argv` is the shell's whole command line,
-  * `argv[0]` naming it (`zsh`, `bash` or `sh` pick the dialect), as a real
-  * shell gets it. Synchronous: blocks the calling thread until the shell
-  * exits and returns the status the process should exit with (0–255; 101
 diff --git a/packages/stats/src/db.ts b/packages/stats/src/db.ts
-index 6c816ffbae..69401bec26 100644
+index 1755356c5a..dcfb86013d 100644
 --- a/packages/stats/src/db.ts
 +++ b/packages/stats/src/db.ts
-@@ -1749,6 +1749,21 @@ const FRUSTRATION_COUNTS_SQL = `
+@@ -1752,6 +1752,21 @@ const FRUSTRATION_COUNTS_SQL = `
  function hasRangeCutoff(cutoff: number | null | undefined): cutoff is number {
  	return cutoff !== null && cutoff !== undefined && cutoff > 0;
  }
@@ -4908,7 +4970,7 @@ index 6c816ffbae..69401bec26 100644
  
  function toFrustrationCounts(row: FrustrationCountsRow | undefined): FrustrationCounts {
  	return {
-@@ -1768,9 +1783,11 @@ export function getFrustrationOverall(cutoff?: number | null): FrustrationCounts
+@@ -1771,9 +1786,11 @@ export function getFrustrationOverall(cutoff?: number | null): FrustrationCounts
  		SELECT ${FRUSTRATION_COUNTS_SQL}
  		FROM user_messages u
  		LEFT JOIN frustration_verdicts v ON v.prose_hash = u.prose_hash
@@ -4922,7 +4984,7 @@ index 6c816ffbae..69401bec26 100644
  	return toFrustrationCounts(row);
  }
  
-@@ -1785,10 +1802,13 @@ export function getFrustrationByModel(cutoff?: number | null): FrustrationModelR
+@@ -1788,10 +1805,13 @@ export function getFrustrationByModel(cutoff?: number | null): FrustrationModelR
  		SELECT u.model AS model, u.provider AS provider, MIN(u.timestamp) AS first_seen, ${FRUSTRATION_COUNTS_SQL}
  		FROM user_messages u
  		LEFT JOIN frustration_verdicts v ON v.prose_hash = u.prose_hash
@@ -4938,7 +5000,7 @@ index 6c816ffbae..69401bec26 100644
  	return rows.map(row => ({
  		model: row.model,
  		provider: row.provider,
-@@ -1802,7 +1822,7 @@ function pendingProseSql(hasCutoff: boolean): string {
+@@ -1805,7 +1825,7 @@ function pendingProseSql(hasCutoff: boolean): string {
  	return `
  		SELECT u.prose_hash AS hash, MIN(u.prose) AS prose
  		FROM user_messages u
@@ -4947,7 +5009,7 @@ index 6c816ffbae..69401bec26 100644
  		  AND NOT EXISTS (SELECT 1 FROM frustration_verdicts v WHERE v.prose_hash = u.prose_hash)
  		GROUP BY u.prose_hash
  	`;
-@@ -1813,7 +1833,7 @@ export function getPendingFrustrationProse(cutoff?: number | null): PendingProse
+@@ -1816,7 +1836,7 @@ export function getPendingFrustrationProse(cutoff?: number | null): PendingProse
  	if (!db) return [];
  	const hasCutoff = hasRangeCutoff(cutoff);
  	const stmt = db.query(pendingProseSql(hasCutoff));
@@ -4956,7 +5018,7 @@ index 6c816ffbae..69401bec26 100644
  }
  
  /** Count and total characters of {@link getPendingFrustrationProse} without loading the text. */
-@@ -1823,7 +1843,9 @@ export function getPendingFrustrationTotals(cutoff?: number | null): { messages:
+@@ -1826,7 +1846,9 @@ export function getPendingFrustrationTotals(cutoff?: number | null): { messages:
  	const stmt = db.query(
  		`SELECT COUNT(*) AS messages, COALESCE(SUM(LENGTH(prose)), 0) AS chars FROM (${pendingProseSql(hasCutoff)})`,
  	);
@@ -4967,7 +5029,7 @@ index 6c816ffbae..69401bec26 100644
  	return { messages: row?.messages ?? 0, chars: row?.chars ?? 0 };
  }
  
-@@ -2180,3 +2202,4 @@ export function insertSpotlightRequests(rows: Iterable<SpotlightRequestRow>): nu
+@@ -2185,3 +2207,4 @@ export function insertSpotlightRequests(rows: Iterable<SpotlightRequestRow>): nu
  		return writer.finish();
  	});
  }
@@ -5018,7 +5080,7 @@ index 64ea73c99c..8f23e05ffc 100644
  			tripped = true;
  			logger.error("frustration judge run stopped: no text succeeded", { failed: job.failed, error: lastError });
 diff --git a/packages/stats/src/rollup.ts b/packages/stats/src/rollup.ts
-index 99b8375862..87c0b94049 100644
+index 99b8375862..7c2f71e1d2 100644
 --- a/packages/stats/src/rollup.ts
 +++ b/packages/stats/src/rollup.ts
 @@ -26,6 +26,7 @@

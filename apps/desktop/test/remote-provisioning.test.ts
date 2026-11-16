@@ -11,14 +11,14 @@ import { applyRemoteProvisioning } from "../src/remote/provisioning.js";
 
 test("model provisioning preserves unrelated remote settings and never persists OAuth refresh tokens", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-provisioning-"));
-  const previousUrl = process.env.OMP_AUTH_BROKER_URL, previousToken = process.env.OMP_AUTH_BROKER_TOKEN;
+  const previousUrl = process.env.JULING_AUTH_BROKER_URL, previousToken = process.env.JULING_AUTH_BROKER_TOKEN;
   try {
     await mkdir(join(root, "agent")); await writeFile(join(root, "agent", "config.yml"), "locale: zh\nmodelRoles:\n  default: old/model\n");
     await applyRemoteProvisioning(root, "http://127.0.0.1:12345", { modelsYml: "providers:\n  custom:\n    apiKey: fixture-api-key\n", settings: { modelRoles: { default: "custom/new" } }, brokerToken: "temporary-broker-token" });
     const config = await readFile(join(root, "agent", "config.yml"), "utf8");
     assert.match(config, /locale: zh/); assert.match(config, /custom\/new/); assert.doesNotMatch(config, /refresh/);
     assert.match(await readFile(join(root, "agent", "models.yml"), "utf8"), /fixture-api-key/);
-  } finally { if (previousUrl === undefined) delete process.env.OMP_AUTH_BROKER_URL; else process.env.OMP_AUTH_BROKER_URL = previousUrl; if (previousToken === undefined) delete process.env.OMP_AUTH_BROKER_TOKEN; else process.env.OMP_AUTH_BROKER_TOKEN = previousToken; await rm(root, { recursive: true, force: true }); }
+  } finally { if (previousUrl === undefined) delete process.env.JULING_AUTH_BROKER_URL; else process.env.JULING_AUTH_BROKER_URL = previousUrl; if (previousToken === undefined) delete process.env.JULING_AUTH_BROKER_TOKEN; else process.env.JULING_AUTH_BROKER_TOKEN = previousToken; await rm(root, { recursive: true, force: true }); }
 });
 test("the local credential relay filters MCP secrets and refreshes OAuth at the local vault", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-vault-relay-")); let refreshes = 0;

@@ -15,8 +15,11 @@ const THINKING_B = { id: "assistant-thinking/6/0", label: "Message 6", tokens: 7
 
 const ENTRIES: Record<ContextCategoryId, ContextEntrySummary[]> = {
   "system-prompt": [
-    ENTRY({ id: "system-prompt/0", label: "System Block 1", tokens: 13_000, preview: "You are a coding agent running inside the OMP runtime…" }),
+    ENTRY({ id: "system-prompt/0", label: "System Block 1", tokens: 13_000, preview: "You are a coding agent running inside the Juling runtime…" }),
     ENTRY({ id: "system-prompt/1", label: "System Block 2", tokens: 42_000, preview: "## Project instructions\n\n- Follow the workspace conventions…" }),
+  ],
+  "instruction-files": [
+    ENTRY({ id: "instruction-files/0", label: "AGENTS.md", path: "AGENTS.md", tokens: 2_400, preview: "# 项目协作说明\n\n- 先读取功能索引。\n- 保留用户已有改动。" }),
   ],
   skills: [],
   "built-in-tools": [
@@ -67,6 +70,7 @@ export const PREVIEW_CONTEXT_VIEW: ContextViewIndex = {
   snapcompact: { visionCapable: true, savedTokens: 6_400 },
   categories: [
     { id: "system-prompt", label: "System Prompt", tokens: context.systemPromptTokens + context.systemContextTokens, entries: 2, overviewLabel: "System Prompt (excluding Skills)" },
+    { id: "instruction-files", label: "Instruction Files", tokens: 2_400, entries: 1 },
     { id: "skills", label: "Skills", tokens: context.skillsTokens, entries: 0, openable: false },
     { id: "built-in-tools", label: "Built-in Tools", tokens: 12_000, entries: 3 },
     { id: "custom-tools", label: "Custom Tools", tokens: 6_000, entries: 1 },

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1228,7 +1228,7 @@ describe("P1/P2 model-config adapter surfaces", () => {
     }
   });
 
-  test("LM Harness native decisions become judges with their loaded context window", async () => {
+  test("LM Studio native decisions become judges with their loaded context window", async () => {
     const dir = await mkdtemp(join(tmpdir(), "omp-lm-decisions-"));
     try {
       const service = createOmpModelsService({ agentDir: dir, fetch: (async input => {
@@ -1236,7 +1236,7 @@ describe("P1/P2 model-config adapter surfaces", () => {
         const payload = url.endsWith("/api/v1/models") ? { models: [{ key: "decision-model", type: "decision", has_vision_adapter: true, max_context_length: 32768, loaded_instances: [{ id: "loaded-judge", config: { context_length: 8192 } }] }] } : url.endsWith("/api/v0/models") ? { data: [] } : { data: [{ id: "loaded-judge" }] };
         return new Response(JSON.stringify(payload), { status: 200 });
       }) as typeof fetch });
-      const result = await service.probeProvider({ providerId: "lm-harness", discoveryType: "lm-harness", endpointUrl: "http://127.0.0.1:1234/v1" });
+      const result = await service.probeProvider({ providerId: "lm-studio", discoveryType: "lm-studio", endpointUrl: "http://127.0.0.1:1234/v1" });
       assert.equal(result.models[0]?.kind, "judge"); assert.equal(result.models[0]?.api, "openai-decisions"); assert.equal(result.models[0]?.contextWindow, 8192); assert.equal(result.models[0]?.image, true); assert.equal(result.models[0]?.reasoning, false);
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
@@ -1409,7 +1409,7 @@ describe("P1/P2 model-config adapter surfaces", () => {
     });
   });
 
-  test("project role storage writes cwd .omp/config.yml when a workspace exists", async () => {
+  test("project role storage writes cwd .juling/config.yml when a workspace exists", async () => {
     const dir = await mkdtemp(join(tmpdir(), "omp-models-project-"));
     const cwd = await mkdtemp(join(tmpdir(), "omp-models-cwd-"));
     try {
@@ -1418,12 +1418,38 @@ describe("P1/P2 model-config adapter surfaces", () => {
       const service = createOmpModelsService({ agentDir: dir, getCwd: () => cwd });
       await service.setRoleStorage({ storage: "project" });
       await service.setRole({ roleId: "default", selector: "acme/slow" });
-      const project = await readFile(join(cwd, ".omp", "config.yml"), "utf8");
+      const project = await readFile(join(cwd, ".juling", "config.yml"), "utf8");
       assert.match(project, /acme\/slow/);
       const snapshot = await service.get();
       assert.equal(snapshot.modelRoleStorage, "project");
       assert.equal(snapshot.projectScopeAvailable, true);
       assert.equal(snapshot.roles.find((role) => role.id === "default")?.scope, "project");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("project role storage reads legacy .omp/config.yml but writes .juling", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-legacy-"));
+    const cwd = await mkdtemp(join(tmpdir(), "omp-models-legacy-cwd-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\nmodelRoleStorage: project\n", "utf8");
+      await mkdir(join(cwd, ".omp"), { recursive: true });
+      const legacyConfig = "modelRoles:\n  default: acme/legacy\n";
+      await writeFile(join(cwd, ".omp", "config.yml"), legacyConfig, "utf8");
+
+      const service = createOmpModelsService({ agentDir: dir, getCwd: () => cwd });
+      const snapshot = await service.get();
+      assert.equal(snapshot.roles.find((role) => role.id === "default")?.scope, "project");
+      assert.equal(snapshot.roles.find((role) => role.id === "default")?.primary, "acme/legacy");
+
+      // Writes land in the canonical tree; the legacy file stays byte-identical.
+      await service.setRole({ roleId: "default", selector: "acme/canonical" });
+      assert.match(await readFile(join(cwd, ".juling", "config.yml"), "utf8"), /acme\/canonical/);
+      assert.equal(await readFile(join(cwd, ".omp", "config.yml"), "utf8"), legacyConfig);
+      assert.equal((await service.get()).roles.find((role) => role.id === "default")?.primary, "acme/canonical");
     } finally {
       await rm(dir, { recursive: true, force: true });
       await rm(cwd, { recursive: true, force: true });

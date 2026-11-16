@@ -277,7 +277,10 @@ export class HarnessRuntimeCommandArbiter {
 			throw new HarnessRuntimeCommandError("BUSY_COMPACTING", "Runtime is compacting");
 		}
 		if (!this.#registeredOperations.has(request.operation.kind)) {
-			throw new HarnessRuntimeCommandError("COMMAND_BLOCKED", "Operation is not registered with the Runtime arbiter");
+			throw new HarnessRuntimeCommandError(
+				"COMMAND_BLOCKED",
+				"Operation is not registered with the Runtime arbiter",
+			);
 		}
 		if (this.#interaction !== undefined && !DEFERRED_SESSION_PREFERENCE_KINDS.has(request.operation.kind)) {
 			throw new HarnessRuntimeCommandError("COMMAND_BLOCKED", "An interaction is active");

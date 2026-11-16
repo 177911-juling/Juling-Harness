@@ -8,7 +8,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { parseFrontmatter } from "./frontmatter.js";
-import { getConfigDirName, getPluginsDir } from "./paths.js";
+import { getConfigDirNames, getPluginsDirsForRead } from "./paths.js";
 import type { DiscoveredSkill, DiscoveryWarning } from "./types.js";
 
 /**
@@ -195,29 +195,26 @@ export async function scanSkillsFromDir(
 }
 
 /**
- * Resolve the nearest .omp/ directory by walking up from cwd, stopping before home.
- * Returns the path to installed_plugins.json if found.
+ * Resolve the nearest config directory (`.juling` first, then legacy `.omp`)
+ * by walking up from cwd, stopping before home. Pass 2 anchors on `.git` when
+ * no config dir exists yet.
  */
-export async function resolveActiveProjectRegistryPath(cwd: string): Promise<string | undefined> {
+async function findProjectConfigDir(cwd: string, configDirName: string): Promise<string | undefined> {
   const homeDir = os.homedir();
-  let dir = path.resolve(cwd);
 
-  // Pass 1: walk up looking for an existing .omp/ directory (nearest wins)
+  let dir = path.resolve(cwd);
   while (dir !== homeDir) {
-    const ompDir = path.join(dir, getConfigDirName());
-    if (await isDirectory(ompDir)) {
-      return path.join(ompDir, "plugins", "installed_plugins.json");
-    }
+    const candidate = path.join(dir, configDirName);
+    if (await isDirectory(candidate)) return candidate;
     const parent = path.dirname(dir);
     if (parent === dir) break; // filesystem root
     dir = parent;
   }
 
-  // Pass 2: walk up looking for .git as a fallback anchor
   dir = path.resolve(cwd);
   while (dir !== homeDir) {
     if (await isDirectory(path.join(dir, ".git"))) {
-      return path.join(dir, getConfigDirName(), "plugins", "installed_plugins.json");
+      return path.join(dir, configDirName);
     }
     const parent = path.dirname(dir);
     if (parent === dir) break;
@@ -225,6 +222,30 @@ export async function resolveActiveProjectRegistryPath(cwd: string): Promise<str
   }
 
   return undefined;
+}
+
+/**
+ * Resolve project plugin registries by priority: canonical `.juling` first,
+ * then the pre-rebrand `.omp` tree. Returns the `installed_plugins.json`
+ * paths that exist, highest priority first.
+ */
+export async function resolveActiveProjectRegistryPaths(cwd: string): Promise<string[]> {
+  const results: string[] = [];
+  for (const configDirName of getConfigDirNames()) {
+    const configDir = await findProjectConfigDir(cwd, configDirName);
+    if (!configDir) continue;
+    const registryPath = path.join(configDir, "plugins", "installed_plugins.json");
+    if (await isDirectory(path.dirname(registryPath))) results.push(registryPath);
+  }
+  return results;
+}
+
+/**
+ * Highest-priority project plugin registry path, or undefined.
+ */
+export async function resolveActiveProjectRegistryPath(cwd: string): Promise<string | undefined> {
+  const [first] = await resolveActiveProjectRegistryPaths(cwd);
+  return first;
 }
 
 export interface ClaudePluginRoot {
@@ -276,12 +297,14 @@ async function canonicalPath(p: string): Promise<string | null> {
 }
 
 /**
- * List Claude marketplace plugin roots from the registry stack:
+ * List Claude marketplace plugin roots from the registry stack, highest
+ * priority last so later registries shadow earlier ones per plugin ID:
  * 1. ~/.claude/plugins/installed_plugins.json
- * 2. ~/.omp/plugins/installed_plugins.json (OMP authoritative, shadows Claude)
- * 3. Nearest .omp/plugins/installed_plugins.json (project, shadows user)
+ * 2. ~/.omp/plugins/installed_plugins.json (pre-rebrand tree)
+ * 3. ~/.juling/plugins/installed_plugins.json (canonical, shadows the above)
+ * 4. Nearest project `.juling`/`.omp` plugins/installed_plugins.json (shadows user)
  *
- * Mirrors OMP's listClaudePluginRoots logic.
+ * Mirrors the vendor's listClaudePluginRoots logic and priority list.
  */
 export async function listClaudePluginRoots(
   home: string,
@@ -291,12 +314,63 @@ export async function listClaudePluginRoots(
   const warnings: DiscoveryWarning[] = [];
   const projectRoots: ClaudePluginRoot[] = [];
 
-  const resolvedProjectPath = cwd ? await resolveActiveProjectRegistryPath(cwd) : undefined;
-  const projectRoot = resolvedProjectPath
-    ? path.dirname(path.dirname(path.dirname(resolvedProjectPath)))
+  const resolvedProjectPaths = cwd ? await resolveActiveProjectRegistryPaths(cwd) : [];
+  const [nearestProjectRegistry] = resolvedProjectPaths;
+  const projectRoot = nearestProjectRegistry
+    ? path.dirname(path.dirname(path.dirname(nearestProjectRegistry)))
     : cwd;
   const activeProjectCanonical = projectRoot ? await canonicalPath(projectRoot) : null;
   const canonicalCache = new Map<string, string | null>();
+
+  /**
+   * Append a plugin registry, dropping lower-priority roots for the same
+   * plugin ID so the caller can apply registries from lowest to highest.
+   */
+  const applyRegistry = (
+    content: string,
+    registryPath: string,
+    target: ClaudePluginRoot[],
+    forceScope: "user" | "project" | undefined,
+    parseFailure: string
+  ): void => {
+    const registry = parseClaudePluginsRegistry(content);
+    if (!registry) {
+      warnings.push({ message: `${parseFailure}: ${registryPath}` });
+      return;
+    }
+    for (const [pluginId, entries] of Object.entries(registry.plugins)) {
+      if (!Array.isArray(entries) || entries.length === 0) continue;
+      const atIndex = pluginId.lastIndexOf("@");
+      if (atIndex === -1) {
+        warnings.push({ message: `Invalid plugin ID format (missing @marketplace): ${pluginId}` });
+        continue;
+      }
+      const pluginName = pluginId.slice(0, atIndex);
+      const marketplace = pluginId.slice(atIndex + 1);
+
+      const filtered = target.filter((r) => r.id !== pluginId);
+      target.length = 0;
+      target.push(...filtered);
+
+      for (const entry of entries) {
+        if (!entry.installPath || typeof entry.installPath !== "string") {
+          warnings.push({ message: `Plugin ${pluginId} entry has no installPath` });
+          continue;
+        }
+        if (target.some((r) => r.id === pluginId && r.path === entry.installPath)) continue;
+
+        target.push({
+          id: pluginId,
+          marketplace,
+          plugin: pluginName,
+          version: entry.version || "unknown",
+          path: entry.installPath,
+          scope: forceScope ?? (entry.scope === "local" ? "project" : "user"),
+          enabled: entry.enabled !== false,
+        });
+      }
+    }
+  };
 
   // 1. Claude Code registry (~/.claude/plugins/installed_plugins.json)
   const claudeRegistryPath = path.join(home, ".claude", "plugins", "installed_plugins.json");
@@ -349,90 +423,21 @@ export async function listClaudePluginRoots(
     }
   }
 
-  // 2. OMP registry (~/.omp/plugins/installed_plugins.json) — authoritative, shadows Claude
-  const ompRegistryPath = path.join(getPluginsDir(home), "installed_plugins.json");
-  const ompContent = await readFile(ompRegistryPath);
-  if (ompContent) {
-    const ompRegistry = parseClaudePluginsRegistry(ompContent);
-    if (ompRegistry) {
-      for (const [pluginId, entries] of Object.entries(ompRegistry.plugins)) {
-        if (!Array.isArray(entries) || entries.length === 0) continue;
-        const atIndex = pluginId.lastIndexOf("@");
-        if (atIndex === -1) {
-          warnings.push({ message: `Invalid plugin ID format (missing @marketplace): ${pluginId}` });
-          continue;
-        }
-        const pluginName = pluginId.slice(0, atIndex);
-        const marketplace = pluginId.slice(atIndex + 1);
-
-        // OMP is authoritative: drop all Claude-sourced entries for this plugin ID
-        const filtered = roots.filter((r) => r.id !== pluginId);
-        roots.length = 0;
-        roots.push(...filtered);
-
-        for (const entry of entries) {
-          if (!entry.installPath || typeof entry.installPath !== "string") {
-            warnings.push({ message: `Plugin ${pluginId} entry has no installPath` });
-            continue;
-          }
-          if (roots.some((r) => r.id === pluginId && r.path === entry.installPath)) continue;
-
-          roots.push({
-            id: pluginId,
-            marketplace,
-            plugin: pluginName,
-            version: entry.version || "unknown",
-            path: entry.installPath,
-            scope: entry.scope === "local" ? "project" : "user",
-            enabled: entry.enabled !== false,
-          });
-        }
-      }
-    } else {
-      warnings.push({ message: `Failed to parse OMP plugin registry: ${ompRegistryPath}` });
+  // 2. Juling plugin registries: legacy `.omp` first, then canonical `.juling`,
+  // so the canonical tree shadows the pre-rebrand one and both shadow Claude.
+  for (const pluginsDir of getPluginsDirsForRead(home).reverse()) {
+    const registryPath = path.join(pluginsDir, "installed_plugins.json");
+    const content = await readFile(registryPath);
+    if (content) {
+      applyRegistry(content, registryPath, roots, undefined, "Failed to parse Juling plugin registry");
     }
   }
 
-  // 3. Project registry (nearest .omp/plugins/installed_plugins.json) — shadows user
-  if (resolvedProjectPath) {
-    const projectContent = await readFile(resolvedProjectPath);
-    if (projectContent) {
-      const projectRegistry = parseClaudePluginsRegistry(projectContent);
-      if (projectRegistry) {
-        for (const [pluginId, entries] of Object.entries(projectRegistry.plugins)) {
-          if (!Array.isArray(entries) || entries.length === 0) continue;
-          const atIndex = pluginId.lastIndexOf("@");
-          if (atIndex === -1) {
-            warnings.push({
-              message: `Invalid plugin ID format (missing @marketplace): ${pluginId}`,
-            });
-            continue;
-          }
-          const pluginName = pluginId.slice(0, atIndex);
-          const marketplace = pluginId.slice(atIndex + 1);
-
-          for (const entry of entries) {
-            if (!entry.installPath || typeof entry.installPath !== "string") {
-              warnings.push({ message: `Plugin ${pluginId} entry has no installPath` });
-              continue;
-            }
-
-            projectRoots.push({
-              id: pluginId,
-              marketplace,
-              plugin: pluginName,
-              version: entry.version || "unknown",
-              path: entry.installPath,
-              scope: "project",
-              enabled: entry.enabled !== false,
-            });
-          }
-        }
-      } else {
-        warnings.push({
-          message: `Failed to parse project plugin registry: ${resolvedProjectPath}`,
-        });
-      }
+  // 3. Project registries (nearest .juling/plugins, then legacy .omp/plugins) — shadow user
+  for (const registryPath of [...resolvedProjectPaths].reverse()) {
+    const content = await readFile(registryPath);
+    if (content) {
+      applyRegistry(content, registryPath, projectRoots, "project", "Failed to parse project plugin registry");
     }
   }
 

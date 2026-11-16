@@ -57,12 +57,14 @@ function service(options: {
   sessionsRoot: string;
   archiveRoot: string;
   isResident?: (sessionId: string) => boolean;
+  removeArtifacts?: (path: string) => Promise<void>;
 }): HarnessSessionDeleteService {
   return new HarnessSessionDeleteService({
     allowedCwd: options.workspace,
     sessionsRoot: options.sessionsRoot,
     archiveRoot: options.archiveRoot,
     ...(options.isResident === undefined ? {} : { isResident: options.isResident }),
+    ...(options.removeArtifacts === undefined ? {} : { removeArtifacts: options.removeArtifacts }),
   });
 }
 
@@ -109,6 +111,31 @@ test("delete removes an archived session (.jsonl.gz) and its archived artifacts"
     await svc.delete("session-b");
     assert.ok(!(await exists(gz)), "archived session file is gone");
     assert.ok(!(await exists(gzArtifacts)), "archived artifacts are gone");
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("delete retry removes artifacts after the transcript was already deleted", async () => {
+  const seed = await fixture();
+  let failures = 1;
+  try {
+    const svc = service({
+      ...seed,
+      removeArtifacts: async (path) => {
+        if (failures > 0) {
+          failures -= 1;
+          throw new Error("injected artifacts failure");
+        }
+        await rm(path, { recursive: true, force: true });
+      },
+    });
+    assert.equal(errorCode(await svc.delete("session-a").catch((error) => error)), "IO_ERROR");
+    assert.ok(!(await exists(seed.sessionFile)), "the first attempt removed the transcript");
+    assert.ok(await exists(seed.artifactsDir), "the injected failure leaves artifacts");
+
+    assert.deepEqual(await svc.delete("session-a"), { sessionId: "session-a", deleted: true });
+    assert.ok(!(await exists(seed.artifactsDir)), "the retry removes the known-layout residue");
   } finally {
     await rm(seed.root, { recursive: true, force: true });
   }
@@ -167,6 +194,22 @@ test("removeSessionPin drops a pinned id and tolerates a missing or corrupt pin 
     await writeFile(pinPath, "not-json{", "utf8");
     await removeSessionPin("session-b", seed.agentDir);
     assert.equal(await readFile(pinPath, "utf8"), "not-json{", "corrupt pin file is never rewritten");
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("concurrent pin removals preserve unrelated ids and leave one valid JSON file", async () => {
+  const seed = await fixture();
+  try {
+    const pinPath = join(seed.agentDir, "session-pins.json");
+    await writeFile(pinPath, JSON.stringify(["session-a", "session-b", "session-c"]), "utf8");
+    await Promise.all([
+      removeSessionPin("session-a", seed.agentDir),
+      removeSessionPin("session-b", seed.agentDir),
+    ]);
+    assert.deepEqual(JSON.parse(await readFile(pinPath, "utf8")), ["session-c"]);
+    assert.deepEqual((await readdir(seed.agentDir)).filter((name) => name.includes(".tmp") || name.endsWith(".lock")), []);
   } finally {
     await rm(seed.root, { recursive: true, force: true });
   }

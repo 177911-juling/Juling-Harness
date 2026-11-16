@@ -37,7 +37,7 @@ import {
 } from "./omp-seam.mjs";
 import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.js";
 
-const REAL_UPSTREAM_COMMIT = "b5a6b2f7e5b6606b6562e678ead83f21738f34a0";
+const REAL_UPSTREAM_COMMIT = "04cd1a7549a02d62ad1d24826198d52507595683";
 const FIXTURE_COMMAND_MANIFEST_HASH = `sha256:${"c".repeat(64)}`;
 
 test("packaged capability order and hash match the Runtime protocol", () => {
@@ -60,7 +60,7 @@ async function fixtureInputs() {
     repository: "https://example.invalid/upstream.git",
     commit: REAL_UPSTREAM_COMMIT,
     firstPlatform: "win32-x64",
-    entrypoint: "omp.exe",
+    entrypoint: "juling.exe",
   };
   const series = {
     upstreamCommit: REAL_UPSTREAM_COMMIT,
@@ -70,7 +70,7 @@ async function fixtureInputs() {
   await mkdir(patchesDirectory);
   await writeFile(join(patchesDirectory, "0001-first.patch"), "patch-one\n");
   await writeFile(join(patchesDirectory, "0002-second.patch"), "patch-two\n");
-  const binaryPath = join(root, "omp.exe");
+  const binaryPath = join(root, "juling.exe");
   await writeFile(binaryPath, "fixture-binary-bytes\n");
   const vendorPackageJson = join(root, "package.json");
   await writeFile(vendorPackageJson, `${JSON.stringify({ name: "@oh-my-pi/pi-coding-agent", version: "17.2.12" })}\n`);
@@ -157,7 +157,7 @@ test("artifact manifest carries the contract fields derived from real pin/series
   assert.deepEqual(manifest.harnessProtocol, { min: 1, max: 1 });
   assert.equal(manifest.profile, "limited");
   assert.equal(manifest.platform, "win32-x64");
-  assert.equal(manifest.entrypoint, "omp.exe");
+  assert.equal(manifest.entrypoint, "juling.exe");
   assert.equal(manifest.channel, "stable");
   assert.match(manifest.capabilityHash, /^sha256:[a-f0-9]{64}$/u);
   assert.match(manifest.commandManifestHash, /^sha256:[a-f0-9]{64}$/u);
@@ -182,14 +182,14 @@ test("artifact manifest carries the contract fields derived from real pin/series
 
   assert.equal(checksums.algorithm, "sha256");
   assert.equal(
-    checksums.files["omp.exe"],
+    checksums.files["juling.exe"],
     sha256Hex("fixture-binary-bytes\n"),
     "checksums must hash the real binary bytes",
   );
   const manifestText = await readFile(join(inputs.root, "out", "runtime-manifest.json"), "utf8");
   assert.equal(checksums.files["runtime-manifest.json"], sha256Hex(manifestText));
   assert.deepEqual(
-    await readFile(join(inputs.root, "out", "omp.exe"), "utf8"),
+    await readFile(join(inputs.root, "out", "juling.exe"), "utf8"),
     "fixture-binary-bytes\n",
     "the built entrypoint binary must be part of the artifact",
   );
@@ -299,14 +299,14 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   const upstreamVersion = await readUpstreamVersion();
   assert.equal(upstream.commit, REAL_UPSTREAM_COMMIT);
   assert.equal(series.upstreamCommit, upstream.commit);
-  assert.equal(upstream.entrypoint, "omp.exe");
-  assert.deepEqual(upstream.entrypoints, { win32: "omp.exe", darwin: "omp", linux: "omp" });
+  assert.equal(upstream.entrypoint, "juling.exe");
+  assert.deepEqual(upstream.entrypoints, { win32: "juling.exe", darwin: "juling", linux: "juling" });
   assert.deepEqual(upstream.platforms, ["win32-x64", "win32-arm64", "darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"]);
-  assert.equal(upstreamVersion, "18.18.0");
+  assert.equal(upstreamVersion, "18.19.0");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^harness\.\d+$/u);
   assert.equal(patchsetVersion, series.patchsetVersion);
-  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.18.0-${patchsetVersion}`);
+  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.19.0-${patchsetVersion}`);
   for (const name of series.patches) {
     assert.ok(existsSync(join(PATCHES_DIRECTORY, name)), `series patch must exist: ${name}`);
   }
@@ -435,9 +435,9 @@ test("real patch series contributes real patch content hashes", async () => {
   }
 });
 
-test("a macOS artifact is named omp regardless of the build machine", async () => {
+test("a macOS artifact is named juling regardless of the build machine", async () => {
   const inputs = await fixtureInputs();
-  const binaryPath = join(inputs.root, "omp");
+  const binaryPath = join(inputs.root, "juling");
   await writeFile(binaryPath, "fixture-binary-bytes\n");
   const { manifest, checksums } = await generateRuntimeArtifact({
     ...inputs,
@@ -447,9 +447,9 @@ test("a macOS artifact is named omp regardless of the build machine", async () =
     outDirectory: join(inputs.root, "out-darwin"),
   });
   assert.equal(manifest.platform, "darwin-arm64");
-  assert.equal(manifest.entrypoint, "omp");
-  assert.deepEqual(Object.keys(checksums.files).sort(), ["omp", "runtime-manifest.json"]);
-  assert.ok(existsSync(join(inputs.root, "out-darwin", "omp")));
+  assert.equal(manifest.entrypoint, "juling");
+  assert.deepEqual(Object.keys(checksums.files).sort(), ["juling", "runtime-manifest.json"]);
+  assert.ok(existsSync(join(inputs.root, "out-darwin", "juling")));
   await assert.rejects(
     generateRuntimeArtifact({
       ...inputs,
@@ -458,7 +458,7 @@ test("a macOS artifact is named omp regardless of the build machine", async () =
       entrypoint: MANAGED_ENTRYPOINT,
       outDirectory: join(inputs.root, "out-darwin-exe"),
     }),
-    /for darwin-arm64 must be "omp"/u,
+    /for darwin-arm64 must be "juling"/u,
   );
 });
 
@@ -472,8 +472,8 @@ test("pin entrypoints and platforms must agree with the managed table", async ()
       platform: "win32-x64",
       outDirectory: join(inputs.root, "out-pin"),
     });
-  await assert.rejects(generate({ ...inputs.upstream, entrypoints: { win32: "omp.exe", darwin: "omp.exe" } }), /entrypoint for darwin/u);
-  await assert.rejects(generate({ ...inputs.upstream, entrypoints: { linux: "omp.exe" } }), /entrypoint for linux/u);
+  await assert.rejects(generate({ ...inputs.upstream, entrypoints: { win32: "juling.exe", darwin: "juling.exe" } }), /entrypoint for darwin/u);
+  await assert.rejects(generate({ ...inputs.upstream, entrypoints: { linux: "juling.exe" } }), /entrypoint for linux/u);
   await assert.rejects(generate({ ...inputs.upstream, platforms: ["win32-x64", "solaris-x64"] }), /solaris-x64 is not a supported/u);
 });
 

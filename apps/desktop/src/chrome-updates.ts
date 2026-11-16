@@ -195,6 +195,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
 
   const removeAll = (): void => {
     ipc.removeHandler(CHROME_UPDATES_CHANNELS.versionGet);
+    ipc.removeHandler(CHROME_UPDATES_CHANNELS.snapshot);
     ipc.removeHandler(CHROME_UPDATES_CHANNELS.check);
     ipc.removeHandler(CHROME_UPDATES_CHANNELS.startApp);
     ipc.removeHandler(CHROME_UPDATES_CHANNELS.startRuntime);
@@ -213,6 +214,13 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
   ipc.handle(CHROME_UPDATES_CHANNELS.versionGet, (event) => {
     if (event.sender.isDestroyed() || !options.isTrustedSender(event.sender)) return null;
     return { version: options.appVersion, bundledVersion: options.bundledAppVersion ?? options.appVersion, payloadVersion: options.payloadVersion };
+  });
+
+  // Development builds have no unified update coordinator. The packaged
+  // coordinator replaces this handler with its authoritative state.
+  ipc.handle(CHROME_UPDATES_CHANNELS.snapshot, (event) => {
+    if (event.sender.isDestroyed() || !options.isTrustedSender(event.sender)) return null;
+    return null;
   });
 
   ipc.handle(CHROME_UPDATES_CHANNELS.check, async (event): Promise<UpdateCheckResult | null> => {
@@ -528,7 +536,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
             steps: 3,
             receivedBytes: received,
             totalBytes: total,
-            message: `正在下载 OMP Runtime (${Math.round((received / total) * 100)}%)...`,
+            message: `正在下载 Juling Runtime (${Math.round((received / total) * 100)}%)...`,
           });
         });
 
@@ -667,14 +675,14 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
     let dialogOpts: OpenDialogOptionsLike;
     if (input.source === "directory") {
       dialogOpts = {
-        title: "选择 OMP Runtime 目录",
+        title: "选择 Juling Runtime 目录",
         properties: ["openDirectory"],
       };
     } else {
       dialogOpts = {
-        title: "选择 OMP Runtime 清单",
+        title: "选择 Juling Runtime 清单",
         properties: ["openFile"],
-        filters: [{ name: "OMP Runtime 工件", extensions: ["zip", "json"] }],
+        filters: [{ name: "Juling Runtime 工件", extensions: ["zip", "json"] }],
       };
     }
 

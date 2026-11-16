@@ -2,7 +2,7 @@
  * @juling-harness/transport-web
  *
  * P0 browser-port transport adapter (FRONTEND_INTEGRATION.md §10): a typed,
- * in-process semantic boundary over {@link OmpHarnessWebApi}. The adapter
+ * in-process semantic boundary over {@link JulingHarnessWebApi}. The adapter
  * forwards exact envelopes without reinterpretation, clones defensively in
  * both directions, and fails closed on malformed responses or use after
  * close. The HTTP/WebSocket implementation (P2) replaces the api object's
@@ -13,7 +13,7 @@
  * fields.
  */
 
-export type { OmpHarnessWebApi } from "./web-transport.js";
+export type { JulingHarnessWebApi } from "./web-transport.js";
 export { WebClientTransport, createWebTransport } from "./web-transport.js";
 export { WebTransportError } from "./errors.js";
 export { LoopbackWebAdapter, createLoopbackHttpServer } from "./server.js";

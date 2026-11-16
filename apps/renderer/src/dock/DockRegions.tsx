@@ -908,7 +908,7 @@ export function FloatWindow({ group: storedGroup, bounds, order, nativeKey }: { 
   const tabbed = group.panels.length > 1;
   const minHeight = Math.max(200, minimumBody(definitionFor(definitions, group.active)) + 42 + (tabbed ? 36 : 0));
   const rect = snapped && snap && manager ? snapCells(snap.template, snap.tree, manager.size())[cell!]! : nativeKey || group.maximized ? { x: 0, y: 0, width: bounds.width, height: bounds.height } : clampFloat(group.rect, { width: bounds.width, height: bounds.height }, minHeight);
-  const control = (action: "minimize" | "maximize") => { if (nativeKey) void globalThis.ompHarnessChrome!.controlFloatWindow!({ key: nativeKey, action }); else store.dispatch({ type: "float", groupId: group.id, ...(action === "minimize" ? { minimized: true } : { maximized: !group.maximized }) }); };
+  const control = (action: "minimize" | "maximize") => { if (nativeKey) void globalThis.julingHarnessChrome!.controlFloatWindow!({ key: nativeKey, action }); else store.dispatch({ type: "float", groupId: group.id, ...(action === "minimize" ? { minimized: true } : { maximized: !group.maximized }) }); };
   const dragTitle = (event: ReactPointerEvent<HTMLElement>) => {
     if (nativeKey) return;
     if (readWorkbenchBounds(globalThis.document)) { drag(event, group.panels, group.id); return; }
@@ -1005,7 +1005,7 @@ export function DockFloatingLayer() {
   const { t } = useI18n();
   const [error, setError] = useState<string | null>(null);
   const [bounds, setBounds] = useState<DockRect | null>(null);
-  const hasLocalFloats = layout.floats.some(group => !isNativeFloat(group) || !globalThis.ompHarnessChrome?.prepareFloatWindow);
+  const hasLocalFloats = layout.floats.some(group => !isNativeFloat(group) || !globalThis.julingHarnessChrome?.prepareFloatWindow);
   useLayoutEffect(() => {
     if (!hasLocalFloats) return;
     let frame = 0;
@@ -1053,7 +1053,7 @@ export function DockFloatingLayer() {
     const managed = store.windowManager?.get(store.windowId(group.id));
     if (managed?.content.kind === "conversation") return null;
     if (managed && managed.placement !== "native" && !store.windowManager!.visible(managed)) return null;
-    if (isNativeFloat(group) && globalThis.ompHarnessChrome?.prepareFloatWindow) return <NativeFloat key={`${preview}:${group.id}`} group={group} namespace={preview ? "preview" : "real"} onError={message => setError(`${t("dockPin.failed")}：${message}`)} />;
+    if (isNativeFloat(group) && globalThis.julingHarnessChrome?.prepareFloatWindow) return <NativeFloat key={`${preview}:${group.id}`} group={group} namespace={preview ? "preview" : "real"} onError={message => setError(`${t("dockPin.failed")}：${message}`)} />;
     return bounds && !group.minimized ? <FloatWindow key={group.id} group={group} order={order} bounds={bounds} /> : null;
   })}
     {!!minimizedPins.length && <div className="dock-pinned-capsules" role="group" aria-label={t("dockPin.minimized")}>{minimizedPins.map(group => <MinimizedCapsule key={group.id} owner={store.windowManager ?? store} capsuleId={`pin:${preview}:${group.id}`} locked={preferences.locked} onClick={() => store.dispatch({ type: "open", panel: group.active })}><Icon name="pin" extra="sm" /><span className="dock-capsule-title">{floatTitle(definitionFor(definitions, group.active).title, conversationTitle)}</span><Icon name="restore" extra="sm" /></MinimizedCapsule>)}</div>}

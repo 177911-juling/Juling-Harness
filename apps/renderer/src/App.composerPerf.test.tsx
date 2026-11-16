@@ -50,6 +50,8 @@ afterEach(async () => {
   __resetAppSettingsForTests(null);
 });
 beforeEach(() => {
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 0));
+  vi.stubGlobal("cancelAnimationFrame", (handle: number) => clearTimeout(handle));
   probe.shell = 0;
   probe.canvas = 0;
   probe.rect = 0;
@@ -66,7 +68,7 @@ beforeEach(() => {
   });
 });
 
-async function mount() {
+async function mount(command?: ClientTransport["command"], withProject = false, onMount?: (emit: (event: ClientEvent) => void) => void) {
   localStorage.setItem(STARTUP_NOTICE_STORAGE_KEY, STARTUP_NOTICE_ID);
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
   __resetAppSettingsForTests(JSON.stringify({ language: "en", startupPage: "workbench", rememberLayout: false, restoreLastSession: false }));
@@ -79,13 +81,16 @@ async function mount() {
   const snapshot = initial.snapshot!;
   const transport = {
     bootstrap: async () => ({ ...initial, cursor: "0", residents: { ...initial.residents, activeSessionId: snapshot.sessionId, residents: [] } }),
-    query: async (request: { queryName: string }) => structuredClone((contractFixtures.queryResponses as Record<string, unknown>)[request.queryName]),
-    command: async (request: { commandName: string; requestId: string }) => ({ commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: new Date().toISOString() }),
+    query: async (request: { queryName: string }) => withProject && request.queryName === "projects.list"
+      ? { ok: true, queryName: request.queryName, result: { activeWorkspaceId: "ws-0001", workspaces: [{ workspaceId: "ws-0001", name: "Fixture project", lastOpenedAt: "2026-01-01T00:00:00.000Z", active: true }] } }
+      : structuredClone((contractFixtures.queryResponses as Record<string, unknown>)[request.queryName]),
+    command: command ?? (async (request: { commandName: string; requestId: string }) => ({ commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: new Date().toISOString() })),
     subscribe: (_scope: unknown, listener: (event: ClientEvent) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
     close: async () => {},
   } as unknown as ClientTransport;
   const client = new HarnessClientImpl(transport);
   clients.push(client);
+  onMount?.(event => { for (const listener of listeners) listener(event); });
   render(<App client={client} />);
   await waitFor(() => expect(document.querySelector("#workbench")).not.toBeNull());
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
@@ -145,7 +150,7 @@ it("publishes the deferred draft once the typing pauses", async () => {
 
 it("keeps draft books across execution-target remounts", async () => {
   const initial = structuredClone(contractFixtures.bootstrap);
-  vi.stubGlobal("ompHarnessRemote", {
+  vi.stubGlobal("julingHarnessRemote", {
     list: async () => ({ profiles: [{ id: "remote", name: "Test", host: "test" }], statuses: [{ id: "remote", state: "connected" }] }),
     onChanged: () => () => {}, onEvent: () => () => {}, select: async () => {},
     bootstrap: async () => ({ ...initial, snapshot: null, selected: { ...initial.selected, workspaceId: "ws-default", sessionId: null }, residents: { ...initial.residents, activeSessionId: null, residents: [] } }),
@@ -182,4 +187,95 @@ it("keeps the sent text intact while the draft publish is still pending", async 
   fireEvent.keyDown(editor, { key: "Enter" });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
   expect(editor.textContent).toBe("");
+});
+
+it("waits for the created session snapshot after its receipt before prompting exactly once", async () => {
+  const initial = structuredClone(contractFixtures.bootstrap);
+  const created = { ...initial.snapshot!, sessionId: "created-session", stateVersion: (Number(initial.snapshot!.stateVersion) + 1) as never };
+  let createRequestId = "";
+  let emit!: (event: ClientEvent) => void;
+  const prompts: unknown[] = [];
+  const command: ClientTransport["command"] = async request => {
+    if (request.commandName === "session.create") createRequestId = request.requestId;
+    if (request.commandName === "core.prompt") prompts.push(request.input);
+    return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: new Date().toISOString() };
+  };
+  await mount(command, false, next => { emit = next; });
+  fireEvent.click(document.querySelector<HTMLButtonElement>(".new-convo-btn")!);
+  await waitFor(() => expect(createRequestId).not.toBe(""));
+  act(() => emit({
+    kind: "command.receipt", cursor: "1", occurredAt: new Date().toISOString(),
+    receipt: { requestId: createRequestId, commandName: "session.create", status: "completed", result: created, observedAt: new Date().toISOString() },
+  } as unknown as ClientEvent));
+
+  const createdEditor = document.querySelector<HTMLElement>("#composerInput")!;
+  await type(createdEditor, "wait for the snapshot");
+  fireEvent.keyDown(createdEditor, { key: "Enter" });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(prompts).toEqual([]);
+
+  act(() => emit({
+    kind: "snapshot", authorityEpoch: initial.authority.authorityEpoch, runtimeEpoch: created.runtimeEpoch,
+    stateVersion: created.stateVersion, cursor: "2", occurredAt: new Date().toISOString(), snapshot: created,
+  } as unknown as ClientEvent));
+  await waitFor(() => expect(prompts).toHaveLength(1));
+  expect(prompts[0]).toEqual({ text: "wait for the snapshot" });
+});
+
+it("files a failed send under its original owner instead of the newly selected draft", async () => {
+  const initial = structuredClone(contractFixtures.bootstrap);
+  vi.stubGlobal("julingHarnessRemote", {
+    list: async () => ({ profiles: [{ id: "remote", name: "Test", host: "test" }], statuses: [{ id: "remote", state: "connected" }] }),
+    onChanged: () => () => {}, onEvent: () => () => {}, select: async () => {},
+    bootstrap: async () => ({ ...initial, snapshot: null, selected: { ...initial.selected, workspaceId: "ws-default", sessionId: null }, residents: { ...initial.residents, activeSessionId: null, residents: [] } }),
+    query: async (_id: string, request: { queryName: string }) => structuredClone((contractFixtures.queryResponses as Record<string, unknown>)[request.queryName]),
+  });
+  const prompt = Promise.withResolvers<never>();
+  const promptStarted = Promise.withResolvers<void>();
+  const command: ClientTransport["command"] = async request => {
+    if (request.commandName === "core.prompt") {
+      promptStarted.resolve();
+      return prompt.promise;
+    }
+    return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: new Date().toISOString() };
+  };
+  const localEditor = await mount(command, true);
+  const selectFixture = async () => {
+    const project = document.querySelector<HTMLButtonElement>(".project-head");
+    if (project?.getAttribute("aria-expanded") === "false") fireEvent.click(project);
+    await waitFor(() => expect(Array.from(document.querySelectorAll<HTMLButtonElement>(".thread-row button")).some(button => button.textContent?.includes("Fixture session"))).toBe(true));
+    fireEvent.click(Array.from(document.querySelectorAll<HTMLButtonElement>(".thread-row button")).find(button => button.textContent?.includes("Fixture session"))!);
+  };
+  await selectFixture();
+  await type(localEditor, "payload for A");
+  fireEvent.keyDown(localEditor, { key: "Enter" });
+  await promptStarted.promise;
+  // Submitting hides the draft-only context strip. Switch targets from a new
+  // draft, then return to the original session to verify its restored draft.
+  fireEvent.click(document.querySelector<HTMLButtonElement>(".new-convo-btn")!);
+
+  const choose = async (name: string) => {
+    await waitFor(() => expect(document.querySelector(".execution-picker > button")).not.toBeNull());
+    fireEvent.click(document.querySelector<HTMLButtonElement>(".execution-picker > button")!);
+    const item = Array.from(document.querySelectorAll<HTMLButtonElement>(".execution-menu-row")).find(button => button.textContent?.startsWith(name));
+    expect(item).toBeTruthy();
+    fireEvent.click(item!);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)); });
+    return document.querySelector<HTMLElement>("#composerInput")!;
+  };
+  await choose("Test");
+  fireEvent.click(document.querySelector<HTMLButtonElement>(".new-convo-btn")!);
+  await waitFor(() => expect(document.querySelector("#composerInput")).not.toBeNull());
+  const remoteEditor = document.querySelector<HTMLElement>("#composerInput")!;
+  await type(remoteEditor, "draft for B");
+  await act(async () => { prompt.reject(new Error("send failed")); await prompt.promise.catch(() => {}); });
+  expect(remoteEditor.textContent).toBe("draft for B");
+
+  const restoredLocal = await choose("此计算机");
+  await selectFixture();
+  await waitFor(() => expect(restoredLocal.textContent).toBe("payload for A"));
+  expect(restoredLocal.textContent).toBe("payload for A");
+  fireEvent.click(document.querySelector<HTMLButtonElement>(".new-convo-btn")!);
+  await choose("Test");
+  expect(document.querySelector<HTMLElement>("#composerInput")!.textContent).toBe("draft for B");
 });

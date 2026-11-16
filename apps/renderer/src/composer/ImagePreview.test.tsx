@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SurfaceProvider, surfaceWindow } from "../dock/SurfaceContext";
 import { ImagePreview, type ImagePreviewSubject } from "./ImagePreview";
 
-type Chrome = NonNullable<typeof globalThis.ompHarnessChrome>;
-const originalChrome = Object.getOwnPropertyDescriptor(window, "ompHarnessChrome");
+type Chrome = NonNullable<typeof globalThis.julingHarnessChrome>;
+const originalChrome = Object.getOwnPropertyDescriptor(window, "julingHarnessChrome");
 const frames: HTMLIFrameElement[] = [];
 const image: ImagePreviewSubject = { url: "blob:screen", label: "屏幕.png", mimeType: "image/png" };
 const bytes = new Uint8Array([1, 2, 3]);
@@ -18,7 +18,7 @@ function chromeMocks() {
 }
 
 function installChrome(target: Window, chrome: ReturnType<typeof chromeMocks> | undefined) {
-  Object.defineProperty(target, "ompHarnessChrome", { configurable: true, writable: true, value: chrome });
+  Object.defineProperty(target, "julingHarnessChrome", { configurable: true, writable: true, value: chrome });
 }
 
 function childSurface() {
@@ -67,8 +67,8 @@ afterEach(() => {
   cleanup();
   frames.splice(0).forEach((frame) => frame.remove());
   vi.restoreAllMocks();
-  if (originalChrome) Object.defineProperty(window, "ompHarnessChrome", originalChrome);
-  else Reflect.deleteProperty(window, "ompHarnessChrome");
+  if (originalChrome) Object.defineProperty(window, "julingHarnessChrome", originalChrome);
+  else Reflect.deleteProperty(window, "julingHarnessChrome");
 });
 
 describe("ImagePreview", () => {

@@ -35,6 +35,7 @@ import { ToolWindowTabs, WindowTabAdd, WindowTabs } from "./Tabs";
 import { ConversationLayoutPreview } from "./LayoutPreview";
 import { useWorkbenchPageMotion } from "./pageMotion";
 import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
+import { prepareTargetSelection } from "./targetSelection";
 import "./workspace.css";
 
 export function ConversationWorkspace({ client, renderDocument }: { client: HarnessClient; renderDocument: (client: HarnessClient) => ReactNode }) {
@@ -181,10 +182,18 @@ function ConversationDocumentHost({ enabled, record, client: initialClient, stor
       releaseHost();
     }, 0); };
   }, [client, localDock, hosts, record.id]);
+  const targetSelectionGeneration = useRef(0);
   const onSelectTarget = async (targetId: string | null) => {
-    const target = await registryRef.current.readyClient(targetId);
-    const bootstrap = await target.bootstrap();
-    store.open({ targetId, ...(bootstrap.selected?.workspaceId ? { workspaceId: bootstrap.selected.workspaceId } : {}), draftId: crypto.randomUUID() });
+    // Both picker and RemoteScopeNotice share this document scope. A slower
+    // SSH selection must not reopen the document after a later local choice.
+    const generation = ++targetSelectionGeneration.current;
+    const selection = await prepareTargetSelection(
+      targetId,
+      id => registryRef.current.readyClient(id),
+      () => generation === targetSelectionGeneration.current,
+    );
+    if (selection === undefined) return;
+    store.open({ ...selection, draftId: crypto.randomUUID() });
   };
   const context = { store, document: record, view, active, visible, root: host.element, surface, header: { title: host.title, actions: host.actions } };
   return createPortal(<WindowOwnerContext.Provider value={record.id}><ConversationViewContext.Provider value={context}><SurfaceProvider document={surface}>
@@ -244,7 +253,7 @@ function ConversationWindow({ view, store, hosts, bounds, order, snapLayer }: { 
   const record = store.documentFor(view.id)!;
   const dragging = useSyncExternalStore(dragPreview.subscribe, () => dragPreview.snapshot()?.conversation?.documentId === view.documentId);
   const frame = useRef<HTMLDivElement>(null);
-  const native = view.placement === "native" && !!globalThis.ompHarnessChrome?.prepareFloatWindow;
+  const native = view.placement === "native" && !!globalThis.julingHarnessChrome?.prepareFloatWindow;
   const cell = store.snapCell(view.id), snap = store.getSnapshot().snap;
   const snapped = cell !== undefined && !!snap && !native && !view.maximized;
   const locked = useConversationLayoutLocked(store, view.documentId);
@@ -261,7 +270,7 @@ function ConversationWindow({ view, store, hosts, bounds, order, snapLayer }: { 
       frameProps={{ className: `dock-conversation-window${snapped ? " is-snapped" : ""}${dragging ? " dock-drag-source" : ""}`, ...{ "data-conversation-view": view.id, "data-conversation-owner": view.documentId, "data-workbench-surface": view.pin === "none" ? "" : undefined, "data-dock-group": conversationPanelId(view.id), "data-dock-region": "float" }, style: snapped ? { position: "absolute" } : undefined }}
       onTitleDrag={event => { if (!nativeKey) dragConversation(event, store, { viewId: view.id }); }}
       onRectChange={rect => store.setWindow(view.id, { rect })}
-      onControl={action => { if (nativeKey) void globalThis.ompHarnessChrome!.controlFloatWindow!({ key: nativeKey, action }); else control(action); }}
+      onControl={action => { if (nativeKey) void globalThis.julingHarnessChrome!.controlFloatWindow!({ key: nativeKey, action }); else control(action); }}
       onClose={() => store.close(view.id)} closeLabel="关闭对话视图"
       titleContent={<HeaderSlot hosts={hosts} id={view.documentId} kind="title" fallback={record.title} />}
       titleExtra={view.pin !== "none" ? <span className="dock-pin-status"><Icon name={native ? "external" : "pin"} extra="sm" /></span> : null}

@@ -57,7 +57,7 @@ extraResources:
   - from: apps/desktop/dist/ssh-askpass
     to: ssh-askpass
     filter:
-      - "omp-ssh-askpass.exe"
+      - "juling-ssh-askpass.exe"
       - "askpass.sh"
       - "askpass.cjs"
   - from: apps/renderer/dist
@@ -69,10 +69,13 @@ extraResources:
     to: icon.ico
   - from: apps/desktop/resources/icon.png
     to: icon.png
+  # MIT notice for the bundled Runtime; required wherever the Runtime ships.
+  - from: NOTICE
+    to: third-party-notices.txt
 
 # Signed Runtime seed next to the exe (not inside asar).
 # Only the current series version is staged by pack:win:prepare.
-# Layout: $INSTDIR\runtime\versions\<ver>\omp.exe
+# Layout: $INSTDIR\runtime\versions\<ver>\juling.exe
 extraFiles:
   - from: packaging/runtime-payload
     to: runtime/versions

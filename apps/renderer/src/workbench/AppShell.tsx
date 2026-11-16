@@ -68,7 +68,7 @@ import { isPlaceholderSessionTitle, reconcileProvisionalProjectThread, resolvePr
 import { workspaceForSession } from "../sidebar/sessionTitle";
 import { type ThreadWaitKind } from "../sidebar/threadWait";
 import { streamingProjectHistoryRefreshKey, useProjectHistories } from "../sidebar/useProjectHistories";
-import { createResumeGenerationGate, ensureSelectedSessionActive, type NewSessionWaitResult } from "../sessionLifecycle";
+import { createResumeGenerationGate, ensureSelectedSessionActive, waitForRuntimeSession, type NewSessionWaitResult } from "../sessionLifecycle";
 import { createSerialTaskQueue } from "../workspaceActionQueue";
 import { type ArchivePending, type ClientStateSource, type ProjectShellActionResult, type Route, type SecondaryRoute, type ShellChrome, type ShellDialog, type ThreadRowActionKind, type ViewState } from "./types";
 import { CURRENT_PROJECT, PROJECT_THREADS_INITIAL, PROJECT_THREADS_PAGE, PROJECT_THREADS_QUERY_MAX, type SelectedProject } from "./sessionSelection";
@@ -138,7 +138,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   useEffect(() => {
     if (previewMode.preview) return;
     let disposed = false;
-    void globalThis.ompHarnessChrome?.getAppVersion?.().then((info) => {
+    void globalThis.julingHarnessChrome?.getAppVersion?.().then((info) => {
       if (!disposed) setLocalAppVersion(info.version);
     }).catch(() => {});
     void appUpdate.check(true);
@@ -651,7 +651,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     ? t("conversation.newChat")
     : t("conversation.untitledSession");
   const threadTitle = state.loading && mdi ? mdi.document.title : previewMode.preview
-    ? (previewThread?.thread.title ?? "跟踪上游 pi-web 更新到 omp-web")
+    ? (previewThread?.thread.title ?? "跟踪上游 pi-web 更新到 juling-web")
     : currentThreadTitle ?? (state.route === "history" ? t("menu.history") : state.route === "home" ? t("menu.home") : state.route === "agent-hub" ? "Agent Hub" : state.route === "capabilities" ? t("menu.capabilities") : state.route === "model-config" ? t("menu.modelConfig") : untitledThreadTitle);
   const onProvisionalSessionChange = useCallback((change: {
     readonly sessionId?: SessionId;
@@ -1495,8 +1495,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     setCreatingSession(true);
     const creatingScope = dockSelectionRef.current;
     const pending = work()
-      .then((created): NewSessionWaitResult => {
+      .then(async (created): Promise<NewSessionWaitResult> => {
         if (created?.sessionId) {
+          await waitForRuntimeSession(client, created.sessionId as SessionId);
           const scope: DockScope = { target: creatingScope.target, project: creatingScope.project, session: created.sessionId };
           dock.store.adoptDraft(scope, { scope: creatingScope, preview: false });
           if (dockSelectionRef.current.session === creatingScope.session) {
@@ -1515,7 +1516,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         if (sessionCreateWaitRef.current === pending) sessionCreateWaitRef.current = null;
       });
     sessionCreateWaitRef.current = pending;
-  }, [dock.store, commitDockSelection, setSelectedProvisionalSessionId]);
+  }, [client, dock.store, commitDockSelection, setSelectedProvisionalSessionId]);
   const ensureNewSession = useCallback(() => {
     if (previewMode.preview || sessionCreateWaitRef.current) return;
     runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
@@ -2067,7 +2068,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       case "help.tutorial": openOnboardingTour(); return;
     }
   };
-  useEffect(() => globalThis.ompHarnessChrome?.onMenuCommand?.((command) => runMenuCommand.current(command)), []);
+  useEffect(() => globalThis.julingHarnessChrome?.onMenuCommand?.((command) => runMenuCommand.current(command)), []);
 
   // 项目 shell 动作（外部编辑器 / 文件管理器）：AppShell 统一持有，
   // 顶栏面包屑菜单与侧栏应用菜单共用同一套状态与 Toast 提示。
@@ -2079,7 +2080,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   // 时保持禁用并给出原因，绝不使用 preview fixture 里的演示路径。
   const projectShellUnavailable = realActiveWorkspace === undefined
     ? "请先打开本地项目"
-    : (globalThis.ompHarnessChrome?.openProjectInEditor === undefined || globalThis.ompHarnessChrome?.openProjectDirectory === undefined)
+    : (globalThis.julingHarnessChrome?.openProjectInEditor === undefined || globalThis.julingHarnessChrome?.openProjectDirectory === undefined)
       ? "仅桌面端可用"
       : undefined;
 
@@ -2105,14 +2106,14 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
 
   const openProjectInEditor = () => {
     const workspace = realActiveWorkspace;
-    const openInEditor = globalThis.ompHarnessChrome?.openProjectInEditor;
+    const openInEditor = globalThis.julingHarnessChrome?.openProjectInEditor;
     if (workspace === undefined || openInEditor === undefined) return;
     void runProjectShellAction("editor", () => openInEditor(workspace.workspaceId));
   };
 
   const openProjectDirectory = () => {
     const workspace = realActiveWorkspace;
-    const openDirectory = globalThis.ompHarnessChrome?.openProjectDirectory;
+    const openDirectory = globalThis.julingHarnessChrome?.openProjectDirectory;
     if (workspace === undefined || openDirectory === undefined) return;
     void runProjectShellAction("directory", async () => {
       await openDirectory(workspace.workspaceId);
@@ -2513,6 +2514,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
                 void pickProject();
               }}
               onOpenWorkspace={(workspaceId) => openWorkspace(workspaceId)}
+              onSelectThread={chrome.onSelectThread}
               onRoute={go}
             />
           ) : pageRoute === "history" ? (
@@ -2690,6 +2692,16 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
             {...(dockSelection.project === null ? {} : { workspaceId: dockSelection.project })}
           />
           <span className="sr-only">client contract v{CLIENT_CONTRACT_VERSION}{snapshot ? ` · session ${snapshot.sessionId}` : ""}</span>
+          {/* P9 蓝图状态条：全宽 mono 读数带（运行时/项目/会话/模型/连接）。
+              预览模式给演示读数，标记遵守 marks。 */}
+          <div className="bp-statusbar" role="status" aria-label={t("shell.currentLocation")}>
+            <span className="bp-cell bp-runtime"><i className={hubRuntimeConnected ? "bp-dot ok" : "bp-dot err"} aria-hidden="true" />{previewMode.preview ? t("common.preview") : hubRuntimeConnected ? "Juling · CONNECTED" : "Juling · OFFLINE"}</span>
+            <span className="bp-cell">{previewMode.preview ? (findPreviewProject(chrome.previewProjectId)?.name ?? "—") : (realActiveWorkspace?.name ?? "—")}</span>
+            <span className="bp-cell bp-grow ellipsis">{threadTitle || t("conversation.untitledSession")}</span>
+            <span className="bp-cell">{typeof snapshot?.model === "string" ? snapshot.model : (snapshot?.model?.selector ?? "—")}</span>
+            <span className="bp-cell bp-ctx">{previewMode.preview ? "ctx —" : (state.clientState?.entities.telemetry?.context?.percent === undefined ? "ctx —" : `ctx ${Math.round(state.clientState.entities.telemetry.context.percent)}%`)}</span>
+            <span className="bp-cell bp-rev">JULING HARNESS · v{CLIENT_CONTRACT_VERSION}</span>
+          </div>
         </div>
       </div>
       </div>

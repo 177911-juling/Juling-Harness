@@ -106,7 +106,7 @@ function Surface() {
     <PanelRegistration panels={{
       agents: visibility => <AgentRosterPanel agents={PREVIEW_DOCK_AGENTS} visible={visibility.visible} ready onMain={() => {}} onOpen={() => {}} />,
       context: () => <ContextCard context={PREVIEW_CONTEXT_CARD} onOpenDetails={() => {}} />,
-      "git-quick": visibility => <GitQuickCard client={client} workspaceName="omp-web" visible={visibility.visible} worktrees={<SessionWorktreesPane client={client} visible launcher launcherLabel="Worktree" />} onReference={addReference} onCommitReference={reference => { composer.current?.insertChip({ kind: "git-commit", label: gitCommitReferenceLabel(reference), reference }); composer.current?.focus(); }} onOpen={next => { setIntent({ ...next, key: ++sequence.current }); dock.dispatch({ type: "open", panel: "git" }); }} />,
+      "git-quick": visibility => <GitQuickCard client={client} workspaceName="juling-web" visible={visibility.visible} worktrees={<SessionWorktreesPane client={client} visible launcher launcherLabel="Worktree" />} onReference={addReference} onCommitReference={reference => { composer.current?.insertChip({ kind: "git-commit", label: gitCommitReferenceLabel(reference), reference }); composer.current?.focus(); }} onOpen={next => { setIntent({ ...next, key: ++sequence.current }); dock.dispatch({ type: "open", panel: "git" }); }} />,
       git: visibility => <GitWorkbench client={client} visible={visibility.visible} workspaceName="juling-harness" intent={intent} worktrees={<SessionWorktreesPane client={client} visible launcher launcherLabel="Worktree" />} onReference={addReference} />,
     }} />
   </GitWorkspaceProvider>;

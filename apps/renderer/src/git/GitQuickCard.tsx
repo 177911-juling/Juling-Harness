@@ -14,6 +14,7 @@ import { GitGraphSvg, gitRefClass } from "./GitCommitGraph";
 import { buildGitGraphRows } from "./gitGraphLayout";
 import { useGitWorkspace } from "./GitWorkspaceContext";
 import { useGitQuickReads, type GitQuickView } from "./useGitQuickReads";
+import { readGitHistoryLayout, readGitView, writeGitPreference } from "./viewMemory";
 import "./gitQuickCard.css";
 
 type OpenTarget = Omit<GitOpenIntent, "key">;
@@ -42,13 +43,10 @@ function GitQuickCardBody({ client, workspaceId, workspaceName, visible, worktre
   const executionTarget = useExecutionTarget();
   const shared = useGitWorkspace();
   const { repository, remote } = shared;
-  const [view, setView] = useState<GitQuickView>(() => {
-    const saved = localStorage.getItem(storage);
-    return saved === "history" || saved === "issue" || saved === "pr" ? saved : "changes";
-  });
+  const [view, setView] = useState<GitQuickView>(() => readGitView(storage));
   const { read, source, target } = useGitQuickReads(client, workspaceId, preview, visible, view, zh);
   const tabsId = useId();
-  const [historyLayout, setHistoryLayout] = useState<"list" | "graph">(() => localStorage.getItem(`${storage}:history-layout`) === "graph" ? "graph" : "list");
+  const [historyLayout, setHistoryLayout] = useState<"list" | "graph">(() => readGitHistoryLayout(`${storage}:history-layout`));
   const graphRows = useMemo(() => read.log ? buildGitGraphRows(read.log) : [], [read.log]);
   const [adding, setAdding] = useState(false);
   const [referenceError, setReferenceError] = useState("");
@@ -109,12 +107,12 @@ function GitQuickCardBody({ client, workspaceId, workspaceName, visible, worktre
       if (generation.current !== current) return;
       onCommitReference(gitCommitReferenceSnapshot({ commit, files,
         repositoryKey: JSON.stringify([preview ? "preview" : "real", executionTarget.id ?? "local", repository?.repositoryId ?? workspaceId ?? target]),
-        workspaceName: workspaceName ?? (preview ? "omp-web" : String(target)) }));
+        workspaceName: workspaceName ?? (preview ? "juling-web" : String(target)) }));
     } catch (cause) { if (generation.current === current) setReferenceError(hostErrorMessage(cause, zh ? "无法加入提交引用" : "Could not add commit reference")); }
     finally { if (generation.current === current) setAdding(false); }
   };
   const selectGroup = (next: "working" | "staged") => { setChosenGroup(true); setGroup(next); };
-  const chooseHistoryLayout = (next: "list" | "graph") => { setHistoryLayout(next); localStorage.setItem(`${storage}:history-layout`, next); };
+  const chooseHistoryLayout = (next: "list" | "graph") => { setHistoryLayout(next); writeGitPreference(`${storage}:history-layout`, next); };
   const sync = (label: string, icon: IconName, action: "fetch" | "pull" | "push") => <button type="button" className="icon-btn small" aria-label={label} data-tip={label} disabled={shared.busy || !repository?.isRepository} onClick={() => void shared.execute(action === "fetch" ? { kind: "fetch", prune: true } : action === "pull" ? { kind: "pull", strategy: "ff-only" } : { kind: "push" })}><Icon name={icon} extra="sm" /></button>;
   const status = (value?: string) => {
     switch (value) {
@@ -126,7 +124,7 @@ function GitQuickCardBody({ client, workspaceId, workspaceName, visible, worktre
   };
   const review = (value?: string) => value === "APPROVED" ? zh ? "已批准" : "Approved" : value === "CHANGES_REQUESTED" ? zh ? "需修改" : "Changes requested" : value === "REVIEW_REQUIRED" ? zh ? "等待评审" : "Review required" : zh ? "暂无评审" : "No review";
 
-  const chooseView = (next: GitQuickView) => { setView(next); localStorage.setItem(storage, next); };
+  const chooseView = (next: GitQuickView) => { setView(next); writeGitPreference(storage, next); };
   const tabs: { view: GitQuickView; icon: IconName; label: string }[] = [
     { view: "changes", icon: "changes", label: zh ? "更改" : "Changes" },
     { view: "history", icon: "history", label: zh ? "历史" : "History" },

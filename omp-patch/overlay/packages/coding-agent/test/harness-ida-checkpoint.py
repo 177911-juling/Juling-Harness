@@ -22,12 +22,12 @@ def main():
             return True
         scope = {"os": os, "shutil": shutil, "_db": lambda: None, "_idb_path": lambda: str(source), "ida_loader": types.SimpleNamespace(save_database=save_database), "_DIRTY": True}
         exec(compile(ast.Module(body=functions, type_ignores=[]), str(worker), "exec"), scope)
-        scope["_rpc_save"]({"studioBackup": str(backup)})
+        scope["_rpc_save"]({"harnessBackup": str(backup)})
         assert backup.read_bytes() == b"current-in-memory"
         assert pathlib.Path(str(backup) + ".before-flush").read_bytes() == b"original-on-disk"
         source.write_bytes(b"newer-change")
         try:
-            scope["_rpc_save"]({"studioBackup": str(backup)})
+            scope["_rpc_save"]({"harnessBackup": str(backup)})
         except FileExistsError:
             pass
         else:
@@ -39,7 +39,7 @@ def main():
         scope["_rpc_save"] = failed_checkpoint
         scope["io"] = io
         try:
-            scope["_rpc_exec"]({"studioBackup": str(backup), "code": "raise AssertionError('must not execute')"})
+            scope["_rpc_exec"]({"harnessBackup": str(backup), "code": "raise AssertionError('must not execute')"})
         except OSError as error:
             assert str(error) == "disk full"
         else:
@@ -50,13 +50,13 @@ def main():
         sent, closes = [], []
         scope.update({"json": __import__("json"), "sys": sys, "traceback": __import__("traceback"),
                       "uuid": types.SimpleNamespace(uuid4=lambda: types.SimpleNamespace(hex="close")),
-                      "_STUDIO_IDENTITY": "db", "_STUDIO_VERSION": 0, "_arm_sigint": lambda: None,
+                      "_HARNESS_IDENTITY": "db", "_HARNESS_VERSION": 0, "_arm_sigint": lambda: None,
                       "_send": sent.append, "_error": str,
                       "DB": types.SimpleNamespace(close=lambda save: closes.append(save))})
         exec(compile(ast.Module(body=functions, type_ignores=[]), str(worker), "exec"), scope)
         def close_request():
-            scope["_handle"](scope["json"].dumps({"id": 1, "method": "studio", "params": {
-                "method": "close", "identity": "db", "version": scope["_STUDIO_VERSION"],
+            scope["_handle"](scope["json"].dumps({"id": 1, "method": "harness", "params": {
+                "method": "close", "identity": "db", "version": scope["_HARNESS_VERSION"],
                 "params": {"save": True}}}))
         close_request()
         assert sent[-1]["ok"] is False and not closes

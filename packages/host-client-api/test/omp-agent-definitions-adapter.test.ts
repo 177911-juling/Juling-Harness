@@ -40,17 +40,17 @@ describe("createOmpAgentDefinitionsService", () => {
     const cwd = join(home, "project");
     try {
       await writeAgent(
-        join(cwd, ".omp", "agents"),
+        join(cwd, ".juling", "agents"),
         "scout",
         "---\nname: scout\ndescription: project scout\n---\nProject body.\n",
       );
       await writeAgent(
-        join(home, ".omp", "agent", "agents"),
+        join(home, ".juling", "agent", "agents"),
         "scout",
         "---\nname: scout\ndescription: user scout\n---\nUser body.\n",
       );
       await writeAgent(
-        join(home, ".omp", "agent", "agents"),
+        join(home, ".juling", "agent", "agents"),
         "custom",
         "---\nname: custom\ndescription: Use this agent when doing custom work\ntools: read, grep\nmodel: \"@smol\"\nthinking-level: low\n---\nDo the custom thing.\n",
       );
@@ -87,7 +87,7 @@ describe("createOmpAgentDefinitionsService", () => {
         blocking: true,
       });
       assert.equal(write.applied, true);
-      const text = await readFile(join(home, ".omp", "agent", "agents", "notes.md"), "utf8");
+      const text = await readFile(join(home, ".juling", "agent", "agents", "notes.md"), "utf8");
       assert.match(text, /^---\n/);
       assert.match(text, /name: notes/);
       assert.match(text, /thinking-level: low/);
@@ -104,7 +104,7 @@ describe("createOmpAgentDefinitionsService", () => {
         scope: "user",
         prewalk: false,
       });
-      const withPrewalk = await readFile(join(home, ".omp", "agent", "agents", "notes.md"), "utf8");
+      const withPrewalk = await readFile(join(home, ".juling", "agent", "agents", "notes.md"), "utf8");
       assert.match(withPrewalk, /prewalk: false/);
       const after = await service.get();
       assert.equal(after.agents.find((agent) => agent.name === "notes")?.prewalk, false);
@@ -115,7 +115,7 @@ describe("createOmpAgentDefinitionsService", () => {
         scope: "user",
         advisor: true,
       });
-      const withAdvisor = await readFile(join(home, ".omp", "agent", "agents", "notes.md"), "utf8");
+      const withAdvisor = await readFile(join(home, ".juling", "agent", "agents", "notes.md"), "utf8");
       assert.match(withAdvisor, /advisor: true/);
       const afterAdvisor = await service.get();
       assert.equal(afterAdvisor.agents.find((agent) => agent.name === "notes")?.advisor, true);
@@ -137,7 +137,7 @@ describe("createOmpAgentDefinitionsService", () => {
     const home = await mkdtemp(join(tmpdir(), "omp-agents-delete-"));
     try {
       await writeAgent(
-        join(home, ".omp", "agent", "agents"),
+        join(home, ".juling", "agent", "agents"),
         "scout",
         "---\nname: scout\ndescription: custom scout\n---\nCustom.\n",
       );
@@ -157,7 +157,7 @@ describe("createOmpAgentDefinitionsService", () => {
     try {
       const service = createOmpAgentDefinitionsService({ home, now: () => NOW });
       await service.configure({ name: "scout", disabled: true, overrideModel: "@smol", prewalkOverride: "off", advisorOverride: "on" });
-      const text = await readFile(join(home, ".omp", "agent", "config.yml"), "utf8");
+      const text = await readFile(join(home, ".juling", "agent", "config.yml"), "utf8");
       assert.match(text, /disabledAgents:/);
       assert.match(text, /scout/);
       assert.match(text, /agentModelOverrides:/);
@@ -183,7 +183,7 @@ describe("createOmpAgentDefinitionsService", () => {
     const home = await mkdtemp(join(tmpdir(), "omp-agents-numeric-"));
     try {
       await writeAgent(
-        join(home, ".omp", "agent", "agents"),
+        join(home, ".juling", "agent", "agents"),
         "111",
         "---\nname: 111\ndescription: 222\nthinking-level: \"off\"\n---\n\n",
       );
@@ -201,7 +201,7 @@ describe("createOmpAgentDefinitionsService", () => {
         thinkingLevel: "off",
       });
       assert.equal(write.applied, true);
-      const text = await readFile(join(home, ".omp", "agent", "agents", "111.md"), "utf8");
+      const text = await readFile(join(home, ".juling", "agent", "agents", "111.md"), "utf8");
       assert.match(text, /name: "111"/);
       assert.match(text, /description: "222"/);
       await service.configure({ name: "111", disabled: false });
@@ -213,7 +213,7 @@ describe("createOmpAgentDefinitionsService", () => {
   test("files missing name or description become warnings", async () => {
     const home = await mkdtemp(join(tmpdir(), "omp-agents-warn-"));
     try {
-      await writeAgent(join(home, ".omp", "agent", "agents"), "broken", "---\nname: broken\n---\nNo description.\n");
+      await writeAgent(join(home, ".juling", "agent", "agents"), "broken", "---\nname: broken\n---\nNo description.\n");
       const service = createOmpAgentDefinitionsService({ home, now: () => NOW });
       const result = await service.get();
       assert.equal(result.agents.some((agent) => agent.name === "broken"), false);
@@ -240,6 +240,51 @@ describe("createOmpAgentDefinitionsService", () => {
           return true;
         },
       );
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("legacy .omp agent definitions and overlays stay readable but are never written", async () => {
+    const home = await mkdtemp(join(tmpdir(), "omp-agents-legacy-"));
+    const cwd = join(home, "project");
+    const legacyUserAgent = "---\nname: legacy-user\ndescription: legacy user agent\n---\nLegacy user body.\n";
+    const legacyConfig = "task:\n  disabledAgents:\n    - scout\n";
+    try {
+      await writeAgent(join(home, ".omp", "agent", "agents"), "legacy-user", legacyUserAgent);
+      await writeAgent(
+        join(cwd, ".omp", "agents"),
+        "legacy-project",
+        "---\nname: legacy-project\ndescription: legacy project agent\n---\nLegacy project body.\n",
+      );
+      await writeAgent(
+        join(home, ".juling", "agent", "agents"),
+        "legacy-user",
+        "---\nname: legacy-user\ndescription: canonical user agent\n---\nCanonical body.\n",
+      );
+      await writeFile(join(home, ".omp", "agent", "config.yml"), legacyConfig, "utf8");
+
+      const service = createOmpAgentDefinitionsService({ home, cwd, now: () => NOW });
+      const result = await service.get();
+      // Canonical `.juling` wins for the same name; the legacy project file still shows.
+      assert.equal(result.agents.find((agent) => agent.name === "legacy-user")?.description, "canonical user agent");
+      assert.equal(result.agents.find((agent) => agent.name === "legacy-user")?.systemPrompt, "Canonical body.");
+      const project = result.agents.find((agent) => agent.name === "legacy-project");
+      assert.equal(project?.source, "project");
+      assert.equal(project?.systemPrompt, "Legacy project body.");
+      // Legacy `config.yml` overlays are honored read-only.
+      assert.equal(result.agents.find((agent) => agent.name === "scout")?.disabled, true);
+
+      // Writes land in the canonical tree; the legacy tree stays byte-identical.
+      await service.upsert({
+        name: "written",
+        description: "Use this agent when writing",
+        systemPrompt: "Write.",
+        scope: "user",
+      });
+      assert.match(await readFile(join(home, ".juling", "agent", "agents", "written.md"), "utf8"), /name: written/);
+      assert.equal(await readFile(join(home, ".omp", "agent", "agents", "legacy-user.md"), "utf8"), legacyUserAgent);
+      assert.equal(await readFile(join(home, ".omp", "agent", "config.yml"), "utf8"), legacyConfig);
     } finally {
       await rm(home, { recursive: true, force: true });
     }

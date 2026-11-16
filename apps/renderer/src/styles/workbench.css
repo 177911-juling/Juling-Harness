@@ -2,26 +2,26 @@
    Juling Harness — 核心工作台
    ============================================================ */
 
-/* ---------- 顶部工作区栏 ---------- */
+/* ---------- 顶部工作区栏 ----------
+   蓝图 HUD P7：顶栏 = 图纸 title block —— 现有 DOM（面包屑/遥测/按钮）重排为
+   分格读数条：搜索行风格的格间竖线、格内 mono 小标签在上值在下。 */
 .topbar {
   height: var(--topbar-h);
   flex: none;
   display: flex;
   align-items: center;
   gap: var(--sp-8);
-  padding: 0 var(--sp-12) 0 var(--sp-8);
+  padding: 0 var(--sp-16);
   border-bottom: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--bg-inset);
   position: relative;
   z-index: var(--z-topbar);
 }
-/* 左组：面包屑 + Fork/Handoff。
-   面包屑按内容宽度排布（不 flex:1 撑开），Fork/Handoff 因此紧贴对话标题；
-   组本身 flex:1 吃掉剩余空间，把 Agent Hub / 历史 / 遥测推到最右。 */
+/* tb-left 与 tb-right 之间自然形成 title block 的格；格间竖线画在面包屑段上。 */
 .tb-left {
   display: flex;
-  align-items: center;
-  gap: var(--sp-8);
+  align-items: stretch;
+  gap: 0;
   flex: 1;
   /* 保证最窄档仍有“项目图标 + 分支图标 + 可收缩的对话标题”；
      更窄时让 tb-right/telemetry 收缩，而不是把面包屑压成 0 宽重叠。 */
@@ -32,20 +32,46 @@
 }
 .tb-crumb {
   display: flex;
-  align-items: center;
-  gap: var(--sp-2);
+  align-items: stretch;
+  gap: 0;
   min-width: 0;
   flex: 0 1 auto;
   font-size: var(--fs-12);
 }
-/* ver2 面包屑段：项目 › 分支 › 标题，各段都是可点按钮，hover 高亮 */
+/* title block 格：竖线分隔 + 标签行。P10 修正：竖排导致图标被顶到文字上方、
+   高度参差 —— 改回**单行**布局：图标与值同行，mono 小标签作为前置前缀
+   （PROJECT omp-web），格间竖线保留。 */
+.tb-crumb .crumb-item {
+  position: relative;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-6);
+  height: var(--topbar-h);
+  min-height: 0;
+  padding: 0 var(--sp-10);
+  border-radius: 0;
+}
+.tb-crumb .crumb-item + .crumb-item { border-left: none; }
+.tb-crumb .crumb-item::before { content: none; }
+/* 标签与值之间加一点间距：用 ::after 不行（在值后面），改给 icon 后的
+   label 一个左边距由 gap 处理，图标色淡化为标签级。 */
+.tb-crumb .crumb-item > .icon { color: var(--text-faint); }
+/* 标签重色弱化：值才是主角。 */
+.tb-crumb .crumb-item .crumb-label { color: var(--text-2); font-weight: var(--fw-medium); }
+.tb-crumb .crumb-item .crumb-current { color: var(--text); font-weight: var(--fw-semibold); }
+/* 项目格固定青色标签；分支格 mono 值已有；会话格标签取「会话」语义词。 */
+.tb-crumb .crumb-item[id] { max-width: 240px; }
+.tb-crumb .crumb-sep { display: none; }
+/* ver2 面包屑段：项目 › 分支 › 标题，各段都是可点按钮，hover 高亮。
+   P7 title block 化后这里只保留颜色/省略行为，几何由上面的分格规则接管。 */
 .crumb-item {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-4);
   height: 26px;
   padding: 0 var(--sp-6);
-  border-radius: var(--r-6);
+  border-radius: var(--r-4);
   color: var(--text-2);
   white-space: nowrap;
   max-width: 220px;
@@ -65,7 +91,9 @@
 .crumb-item .crumb-label { max-width: 100%; }
 .crumb-chevron { width: 12px; height: 12px; color: var(--text-faint); }
 .crumb-current { color: var(--text); font-weight: var(--fw-semibold); }
-.crumb-sep { color: var(--text-faint); flex: none; user-select: none; }
+/* 蓝图 HUD：面包屑分隔符改 mono 刻度符，右分支读数用青色（与遥测同语言）。 */
+.crumb-sep { color: var(--text-faint); flex: none; user-select: none; font-family: var(--font-mono); }
+.tb-crumb .crumb-branch-label { color: var(--accent-2); font-family: var(--font-mono); font-size: calc(11px * var(--text-font-scale)); letter-spacing: 0.02em; }
 .crumb-item .dot { width: 6px; height: 6px; margin-left: 1px; }
 
 /* 窄窗口下按可用宽度逐步折叠：先隐项目名（保留文件夹图标），
@@ -89,7 +117,8 @@
    否则 26px 的两个方块半径差 2px，挨在一起会看成两个不同层级的控件。 */
 .topbar .tb-right .dock-rail-toggle { padding: 0; border-radius: var(--r-6); }
 
-/* ---------- Session Telemetry（紧凑 · 扁平化：无边框无背景，纯文字） ---------- */
+/* ---------- Session Telemetry（紧凑 · 扁平化：无边框无背景，纯文字） ----------
+   蓝图 HUD：遥测读数 = 苍青 mono 坐标读数（--accent-2），token 热值仍用琥珀。 */
 .telemetry {
   display: flex;
   align-items: center;
@@ -103,7 +132,9 @@
      strip look like one button covering three separate targets. */
   font-family: var(--font-mono);
   font-size: calc(10.5px * var(--text-font-scale));
-  color: var(--text-3);
+  color: var(--accent-2);
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
   border-radius: var(--r-4);
 }
 /* Telemetry 内部分区（Token / Context 独立点击）— real buttons now, so the
@@ -129,7 +160,7 @@
 .telemetry .t-group:hover :is(b, .t-tok-icon),
 .telemetry .t-group.open :is(b, .t-tok-icon) { color: var(--accent); }
 .telemetry .t-item { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
-.telemetry .t-item b { color: var(--text-2); font-weight: var(--fw-medium); }
+.telemetry .t-item b { color: var(--accent); font-weight: var(--fw-medium); }
 /* 压缩档用一张条形图图标替掉整串数字（切换规则在 App.css 的 chrome-size 段），
    宽档不占位，dom 里的数字读数保持完整。 */
 .telemetry .t-tok-icon { display: none; align-items: center; }
@@ -237,6 +268,20 @@
   --toast-from: -1;
   animation: var(--motion-toast);
 }
+/* P10：舱内浮空横幅近黑化（琥珀刻度条 + 舱面底）。 */
+:is(.app-body.adaptive-workbench, .conversation-workspace, .cw-shell) .banner.is-floating {
+  background: color-mix(in srgb, var(--amber) 12%, var(--cocoon-surface, #0c1322));
+  color: var(--cocoon-text, #e8edf5);
+  border-color: color-mix(in srgb, var(--amber) 40%, var(--cocoon-border, rgba(190, 214, 245, 0.14)));
+  border-left: 2px solid var(--amber);
+  border-radius: var(--r-4);
+}
+:is(.app-body.adaptive-workbench, .conversation-workspace, .cw-shell) .banner.is-floating.red {
+  border-left-color: var(--red);
+}
+:is(.app-body.adaptive-workbench, .conversation-workspace, .cw-shell) .banner.is-floating :is(.banner-detail, .icon, .btn) {
+  color: var(--cocoon-text-2, #a9b6c9);
+}
 .convo-wrap.is-empty > .banner.is-floating,
 .convo-wrap[data-reading-minimap="off"] > .banner.is-floating {
   left: var(--sp-10);
@@ -267,6 +312,7 @@
 .convo-scroll:focus,
 .convo-scroll:focus-visible { outline: none; }
 .convo-scroll::-webkit-scrollbar { display: none; }
+
 .convo-doc {
   /* 内容列与 composer 同宽同边线：max-width 补回自身水平 padding（含 minimap 让位），
      使正文净宽等于 --doc-max-w，且中线与 composer 一致（左移补 minimap 后居中）。
@@ -290,7 +336,10 @@
 /* 主阅读列：hook 只给主 .convo-wrap 加标记并写实测值；不重定义 --doc-max-w，
    Hub、子 Agent 检查卡和 BTW 仍使用原来的上限。Perf harness 可复用同一标记/变量。
    Doc 的 containing block 已扣原生 scrollbar；Composer 是兄弟盒，需额外扣一次。
-   两边用相同的净宽与 G / G+rail，窄列和有上限的宽列都能保持左右边线一致。 */
+   两边用相同的净宽与 G / G+rail，窄列和有上限的宽列都能保持左右边线一致。
+   P7 结构重排：居中窄列 → **左对齐全宽文档流** —— 正文列撑满可用宽度
+   （上限 1200px），起点贴 reading gutter，不再 margin auto 居中；像工程文档，
+   不像 IM。 */
 .convo-wrap[data-reading-column] {
   --conversation-width: 768px;
   --reading-gutter: var(--sp-32);
@@ -323,9 +372,10 @@
 .convo-wrap[data-reading-column] > .convo-scroll > .convo-doc,
 .convo-wrap[data-reading-column] > .convo-scroll > .new-content-pill-row {
   width: 100%;
-  max-width: var(--reading-doc-max);
+  max-width: min(var(--reading-doc-max), calc(var(--reading-doc-max) + 432px));
   padding-left: var(--reading-doc-start);
   padding-right: var(--reading-gutter);
+  margin-left: 0;
 }
 .convo-wrap[data-reading-column][data-reading-minimap="off"] > .minimap {
   display: none;
@@ -451,11 +501,12 @@
 .cv-line { height: 11px; }
 .cv-card { height: 34px; border-radius: var(--r-6); }
 .cv-group.cv-user { align-items: flex-end; }
-/* 用户消息是实底 accent 气泡；骨架跟着走 accent 色阶，淡入时右侧不会从灰块
-   突变成紫块。放在 base.css 的 .skeleton 之后覆盖它的灰色渐变与圆角。 */
+/* 用户消息现在是纸片 + 角标：骨架仍走 accent 色阶（淡入时右侧不会从灰块
+   突变成琥珀块），形状改近方角跟纸片一致。放在 base.css 的 .skeleton 之后
+   覆盖它的灰色渐变与圆角。 */
 .cv-bubble {
   height: 34px;
-  border-radius: var(--r-10) var(--r-10) var(--r-4) var(--r-10);
+  border-radius: var(--r-4);
   background: linear-gradient(90deg, var(--accent-soft) 25%, var(--accent-softer) 50%, var(--accent-soft) 75%);
   background-size: 200% 100%;
 }
@@ -475,7 +526,11 @@
 .cv-note[data-on="true"] { opacity: 1; }
 
 /* ---------- 文档式对话流 ---------- */
-.ev { margin-bottom: var(--sp-20); }
+.ev {
+  position: relative;
+  padding-left: 0;
+  margin-bottom: var(--sp-24);
+}
 .ev-head {
   display: flex;
   align-items: center;
@@ -497,12 +552,11 @@
   display: inline-flex; align-items: center; justify-content: center;
   font-size: calc(10px * var(--text-font-scale)); font-weight: var(--fw-bold);
 }
-.role-badge.u { background: var(--surface-3); color: var(--text-2); }
-.role-badge.a { background: var(--accent-soft); color: var(--accent); }
+/* 蓝图 HUD：U/A 徽章改刻章方块 —— U 中性强墨线，A 琥珀。 */
+.role-badge.u { background: var(--surface-3); color: var(--text-2); border: 1px solid var(--border-strong); border-radius: var(--r-4); }
+.role-badge.a { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-border); border-radius: var(--r-4); }
 
-/* 用户消息：聊天气泡（右对齐 + accent 实底 + 右下小角指向发送者）
-   参照 Claude / Cursor 等 agent 客户端的惯例：用户消息用气泡，
-   assistant 保持文档式正文。 */
+/* 用户消息：右对齐软底气泡；assistant 保持文档式正文。 */
 .ev-user {
   display: flex;
   flex-direction: column;
@@ -510,10 +564,13 @@
 }
 .ev-user .ev-head { justify-content: flex-end; }
 .ev-user .ev-body {
-  background: var(--accent);
-  color: var(--text-on-accent);
-  border-radius: var(--r-10) var(--r-10) var(--r-4) var(--r-10);
-  padding: var(--sp-10) var(--sp-14);
+  position: relative;
+  background: var(--accent-soft);
+  color: var(--text);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-8);
+  border-bottom-right-radius: var(--r-4);
+  padding: var(--sp-12) var(--sp-16);
   max-width: 78%;
   font-size: var(--fs-14);
   line-height: 1.7;
@@ -525,33 +582,12 @@
 }
 .ev-user .ev-body p:first-child { margin-top: 0; }
 .ev-user .ev-body p:last-child { margin-bottom: 0; }
-/* 全局 ::selection 是半透明 accent，叠在实底气泡上等于没高亮。改成白色罩。 */
-.ev-user .ev-body::selection,
-.ev-user .ev-body *::selection {
-  background: color-mix(in srgb, var(--text-on-accent) 38%, transparent);
-  color: var(--text-on-accent);
-}
-/* 气泡内的代码 chip：accent 色调在实底上会糊，改半透明跟随气泡文字色 */
+/* 纸片底色统一后，::selection 沿用全局半透明 accent，无需再开白罩。 */
 .ev-user .ev-body .chip-code {
-  background: color-mix(in srgb, var(--text-on-accent) 16%, transparent);
-  color: var(--text-on-accent);
+  background: var(--code-chip-bg);
+  color: var(--code-chip-text);
 }
-/* Light theme keeps the main accent language but uses a pale lilac bubble so
-   user content remains readable without the dark filled treatment. Dark theme
-   intentionally keeps the original high-contrast accent bubble unchanged. */
-:root[data-theme="light"] .ev-user .ev-body {
-  background: #eee9ff;
-  color: var(--text);
-}
-:root[data-theme="light"] .ev-user .ev-body::selection,
-:root[data-theme="light"] .ev-user .ev-body *::selection {
-  background: color-mix(in srgb, var(--accent) 24%, transparent);
-  color: var(--text);
-}
-:root[data-theme="light"] .ev-user .ev-body .chip-code {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--text);
-}
+/* 双主题共用同一软底配方；浅色/暗色不再各写一套。 */
 .ev-user .ev-refs { justify-content: flex-end; }
 .ev-refs { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin-top: var(--sp-8); }
 
@@ -762,23 +798,29 @@
 }
 .turn-diff-file-stats { margin-left: auto; }
 
-/* 对话末尾计划入口：与 turn-diff 同宽同圆角，两行文案 + 右侧 chevron */
+/* 对话末尾计划入口：与 turn-diff 同宽，两行文案 + 右侧 chevron。 */
 .plan-created {
   display: flex;
   align-items: center;
-  gap: var(--sp-10);
+  gap: var(--sp-12);
   width: 100%;
   margin: 0;
-  padding: var(--sp-10) var(--sp-12);
+  padding: var(--sp-14) var(--sp-16);
   border: 1px solid var(--border);
   border-radius: var(--r-8);
   background: var(--surface);
+  box-shadow: var(--shadow-1);
   color: inherit;
   text-align: left;
   cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
-.plan-created:hover { background: var(--surface-hover); }
-.plan-created:focus-visible { outline: 1.5px solid var(--accent-border); outline-offset: 1px; }
+.plan-created:hover { border-color: var(--accent-border); box-shadow: var(--shadow-2); }
+.plan-created:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plan-created-title {
+  font-family: var(--font-ui);
+  letter-spacing: 0;
+}
 .plan-created-copy {
   display: flex;
   flex-direction: column;
@@ -1481,14 +1523,14 @@
   color: var(--text-3);
 }
 .tc-st {
-  width: 18px; height: 18px; border-radius: 5px; flex: none;
+  width: 18px; height: 18px; border-radius: var(--r-4); flex: none;
   display: inline-flex; align-items: center; justify-content: center;
 }
 .tc-st .icon { width: 11px; height: 11px; }
 .tc-st .spinner { width: 11px; height: 11px; border-width: 1.4px; }
 .tc-st.done { background: var(--green-soft); color: var(--green); }
-.tc-st.running { background: var(--blue-soft); color: var(--blue); }
-.tc-st.running .spinner { border-top-color: var(--blue); }
+.tc-st.running { background: var(--accent-2-soft); color: var(--accent-2); }
+.tc-st.running .spinner { border-top-color: var(--accent-2); }
 .tc-st.error { background: var(--red-soft); color: var(--red); }
 .tc-st.pending, .tc-st.aborted { background: var(--surface-2); color: var(--text-3); }
 .tc-dur { flex: none; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); font-variant-numeric: tabular-nums; }
@@ -1809,30 +1851,35 @@
 
 /* ---------- 审批卡片 ---------- */
 .approval-card {
-  border: 1px solid color-mix(in srgb, var(--amber) 38%, transparent);
+  border: 1px solid var(--border);
   border-radius: var(--r-10);
   background: var(--surface);
+  box-shadow: var(--shadow-2);
   overflow: hidden;
 }
 .approval-head {
   display: flex; align-items: center; gap: var(--sp-8);
-  padding: var(--sp-10) var(--sp-14);
+  padding: var(--sp-12) var(--sp-16);
   background: var(--amber-soft);
   color: var(--amber);
+  font-family: var(--font-ui);
   font-weight: var(--fw-semibold); font-size: var(--fs-12);
+  letter-spacing: 0;
 }
 .approval-head .chip { margin-left: 0; }
-.approval-body { padding: var(--sp-12) var(--sp-14); font-size: var(--fs-12); color: var(--text-2); }
+.approval-body { padding: var(--sp-14) var(--sp-16); font-size: var(--fs-12); color: var(--text-2); line-height: var(--lh-normal); }
 .approval-body .cmd {
   font-family: var(--font-mono);
   background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: var(--r-6);
-  padding: var(--sp-8) var(--sp-10);
+  padding: var(--sp-10) var(--sp-12);
   margin: var(--sp-8) 0;
   font-size: var(--fs-12);
   color: var(--text);
   display: flex; align-items: center; gap: var(--sp-8);
+  position: relative;
+  overflow: hidden;
 }
 .approval-foot {
   display: flex; align-items: center; gap: var(--sp-8);
@@ -3324,26 +3371,29 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   box-shadow: none;
 }
 .composer {
-  max-width: var(--doc-max-w);
-  margin: 0 auto;
+  max-width: min(calc(var(--doc-max-w) + 432px), calc(100% - var(--minimap-w) - 24px));
+  margin: 0;
+  align-self: flex-start;
   position: relative; /* 「回到最新」按钮的定位上下文（右上角悬浮） */
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   border-radius: var(--r-10);
   background: var(--surface);
+  box-shadow: var(--shadow-2);
   /* opacity：Deck 激活时变暗让位，平滑过渡 */
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), opacity var(--dur) var(--ease);
 }
-/* 聚焦特效 = 外发光（比小输入框稍强）：柔光环 + 弥散光晕，边框不变色。
-   菜单开着时也保持光晕：点 checkbox 的 <label> 会在 mousedown 时让加号失焦、
-   要到 click 才聚焦 input，中间一帧 :focus-within 为假，box-shadow 过渡看起来像整卡闪一下。 */
+/* 聚焦 = 主色描边 + 一圈极淡光环；不再画扫描线。 */
+.composer::before { content: none; }
+.composer:hover { border-color: var(--border-strong); }
 .composer:focus-within,
 .composer:has(.approval-menu),
 .composer:has(.cmp-menu) {
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-softer),
-              0 0 18px 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-softer), var(--shadow-2);
 }
-.composer.running { border-color: var(--blue); }
+.composer.running { border-color: var(--accent); }
+.composer.running:not(:focus-within) { box-shadow: 0 0 0 3px var(--accent-softer), var(--shadow-2); }
 .composer-ctx {
   display: flex; flex-wrap: wrap; gap: var(--sp-6);
   padding: var(--sp-8) var(--sp-12) 0;
@@ -4387,18 +4437,19 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   margin: var(--sp-4) var(--sp-8) 0;
 }
 .send-btn {
-  width: 30px; height: 30px;
-  border-radius: var(--r-8);
+  width: 34px; height: 34px;
+  border-radius: var(--r-full);
   background: var(--accent);
   color: var(--text-on-accent);
   display: inline-flex; align-items: center; justify-content: center;
   flex: none;
+  box-shadow: var(--shadow-1);
   transition: background var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease),
     transform var(--dur-tactile) var(--ease-out);
 }
 .send-btn:hover { background: var(--accent-hover); }
-.send-btn:active:not(:disabled) { transform: translateY(1px); }
+.send-btn:active:not(:disabled) { transform: scale(0.96); }
 .send-btn.abort {
   background: var(--red);
   color: #ffffff;
@@ -4409,6 +4460,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .send-btn.abort:disabled {
   background: var(--surface-3);
   color: var(--text-faint);
+  box-shadow: none;
   cursor: not-allowed;
   transform: none;
 }
@@ -4772,7 +4824,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .startup-notice-actions { display: flex; gap: var(--sp-8); flex: none; }
 @media (max-width: 640px) {
   .create-project-backdrop { align-items: flex-end; padding: var(--sp-8); }
-  .create-project-modal { width: 100%; border-radius: 18px; }
+  .create-project-modal { width: 100%; border-radius: var(--r-10); }
   .create-project-head,
   .create-project-body,
   .create-project-foot { padding-left: var(--sp-16); padding-right: var(--sp-16); }
@@ -4786,14 +4838,19 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
    条目正文直接落在外层卡片上，无内层灰底。右侧 编辑 / 立刻发送或插入纠偏 / 删除
    仅在悬停或 :focus-within 时显示。 */
 .queue-strip {
-  max-width: var(--doc-max-w);
-  margin: 0 auto var(--sp-8);
+  max-width: min(calc(var(--doc-max-w) + 432px), 100%);
+  margin: 0 0 var(--sp-8);
   display: flex; flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: var(--r-8);
+  border-radius: var(--r-6);
   background: var(--surface);
   padding: var(--sp-8) var(--sp-12);
   font-size: var(--fs-12);
+}
+/* 队列条 = 台账：头行说明 + 条目行。 */
+.queue-strip .qs-head {
+  font-family: var(--font-ui);
+  letter-spacing: 0;
 }
 /* 头行外套一层 row：右侧可以放宿主动作位（「回到最新」按钮），按钮不再是
    composer 上方的悬浮层压在栏身上。无动作位时布局与旧版头行逐像素一致。 */
@@ -4948,13 +5005,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-8);
-  box-shadow:
-    0 6px 20px rgba(15, 17, 26, 0.07),
-    0 1px 4px rgba(15, 17, 26, 0.05);
-}
-:root[data-theme="dark"] .composer-tray:has(> .queue-strip) {
-  border-color: var(--border-strong);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), 0 1px 4px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-2);
 }
 .composer-tray > .queue-strip {
   max-width: none;
@@ -5023,8 +5074,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   background: var(--surface-hover);
 }
 .composer-tray .qs-list > .qs-item.editing {
-  background: var(--accent-softer);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--accent-soft);
 }
 .composer-tray .qs-status { right: var(--sp-6); }
 .composer-tray .runtime-queue .qs-status { right: auto; }
@@ -6339,41 +6389,20 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   align-items: center;
   justify-content: center;
   padding: 32px 24px;
-  background: rgba(15, 15, 25, 0.28);
+  background: rgba(11, 13, 18, 0.32);
+  backdrop-filter: blur(2px);
   animation: var(--motion-fade);
 }
-:root[data-theme="dark"] .cmdk-backdrop { background: rgba(0, 0, 0, 0.45); }
+:root[data-theme="dark"] .cmdk-backdrop { background: rgba(0, 0, 0, 0.5); }
 .cmdk-shell {
-  --cmdk-radius: 28px;
-  --cmdk-ring: conic-gradient(
-    from 125deg,
-    var(--blue),
-    var(--accent),
-    color-mix(in srgb, var(--accent) 55%, var(--red)),
-    var(--blue),
-    var(--accent),
-    color-mix(in srgb, var(--accent) 55%, var(--red)),
-    var(--blue),
-    var(--accent),
-    color-mix(in srgb, var(--accent) 55%, var(--red)),
-    var(--blue)
-  );
+  --cmdk-radius: var(--r-10);
   position: relative;
   width: min(680px, calc(100vw - 40px));
   height: min(680px, calc(100vh - 48px));
   flex: none;
   animation: var(--motion-sheet);
 }
-.cmdk-glow {
-  position: absolute;
-  inset: -12px;
-  border-radius: calc(var(--cmdk-radius) + 12px);
-  background: var(--cmdk-ring);
-  filter: blur(22px);
-  opacity: 0.38;
-  z-index: 0;
-  pointer-events: none;
-}
+.cmdk-glow { display: none; }
 .cmdk {
   position: relative;
   z-index: 1;
@@ -6381,25 +6410,18 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   height: 100%;
   display: flex;
   flex-direction: column;
-  border: 1.5px solid transparent;
+  border: 1px solid var(--border);
   border-radius: var(--cmdk-radius);
   overflow: hidden;
-  background:
-    linear-gradient(var(--surface), var(--surface)) padding-box,
-    var(--cmdk-ring) border-box;
-  box-shadow: 0 18px 48px color-mix(in srgb, var(--text) 16%, transparent);
+  background: var(--surface);
+  box-shadow: var(--shadow-modal);
 }
 .cmdk-input {
+  position: relative;
   display: flex; align-items: center; gap: var(--sp-10);
-  padding: 14px 18px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--border);
   flex: none;
-  transition: box-shadow var(--dur-fast) var(--ease);
-}
-/* 聚焦特效 = 外发光；输入框本身无边框，光晕画在整条搜索行上 */
-.cmdk-input:focus-within {
-  box-shadow: 0 0 0 3px var(--accent-softer),
-              0 0 14px 1px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .cmdk-input input {
   flex: 1; border: none; outline: none; background: transparent;
@@ -6420,6 +6442,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   font-size: var(--fs-11);
   font-weight: var(--fw-medium);
   color: var(--text-faint);
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .cmdk-item {
   display: flex;
@@ -6650,7 +6675,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: flex;
   flex-direction: column;
   padding-right: var(--sp-16);
-  background: radial-gradient(620px 340px at 50% 16%, rgba(124, 92, 240, 0.06), transparent 72%);
+  background: radial-gradient(620px 340px at 50% 16%, var(--accent-softer), transparent 72%);
 }
 /* 欢迎区在整块工作区里垂直居中（与 ui_reference/ver1 一致）。写 auto 而不是
    justify-content: center：内容比可视区高时 auto 边距归零，从顶部开始滚动，
@@ -6675,15 +6700,12 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .convo-wrap[data-reading-column].is-empty .ce-pi { max-width: 100%; }
 
 .convo-empty {
-  --pi-line: rgba(124, 92, 240, 0.35);
-  --pi-line-soft: rgba(124, 92, 240, 0.2);
-  --pi-sat: #8b5cf6;
-  --ce-l0: #efecf7;
-  --ce-l1: #ddd2f4;
-  --ce-l2: #b8a2ea;
-  --ce-l3: #8f6bda;
-  --ce-l4: #6a3fc4;
-
+  /* Activity colours: one accent ramp, no grid or blueprint line art. */
+  --ce-l0: var(--accent-softer);
+  --ce-l1: var(--accent-soft);
+  --ce-l2: color-mix(in srgb, var(--accent) 24%, var(--surface));
+  --ce-l3: color-mix(in srgb, var(--accent) 45%, var(--surface));
+  --ce-l4: var(--accent);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -6714,13 +6736,18 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   align-items: center;
 }
 .ce-pi {
-  width: min(360px, 70vw);
-  height: auto;
+  width: 72px;
+  height: 72px;
+  box-sizing: border-box;
+  padding: 16px;
   display: block;
-  overflow: visible;
-  margin-bottom: -168px;
-  -webkit-mask-image: linear-gradient(to bottom, #000 42%, rgb(0 0 0 / 10%) 66%);
-  mask-image: linear-gradient(to bottom, #000 42%, rgb(0 0 0 / 10%) 66%);
+  overflow: hidden;
+  margin-bottom: var(--sp-20);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-10);
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 .ce-pi-glyph {
   fill: none;
@@ -6729,9 +6756,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   stroke-linejoin: miter;
   stroke-miterlimit: 2;
   stroke-linecap: square;
-  /* 静态 0.94 ≈ 原 8s 呼吸的平均亮度。无限 opacity 动画会常驻一个合成层、
-     让合成器每帧唤醒；图案本身还有 .ce-anim 的入场，识别度不依赖持续呼吸。 */
-  opacity: 0.94;
+  opacity: 1;
 }
 .ce-greet, .ce-sub { position: relative; }
 
@@ -6880,7 +6905,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .ce-hc:hover {
   transform: scale(1.4);
   z-index: 5;
-  box-shadow: 0 0 0 1px rgba(124, 92, 240, 0.55), 0 2px 10px rgba(124, 92, 240, 0.4);
+  box-shadow: 0 0 0 1px var(--accent-border);
 }
 .ce-heat-legend {
   grid-column: 2;
@@ -6970,23 +6995,23 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .ce-meta-sep { width: 1px; height: 10px; background: var(--border-strong); }
 
 :root[data-theme="dark"] .convo-empty {
-  --pi-line: rgba(139, 108, 246, 0.5);
-  --pi-line-soft: rgba(139, 108, 246, 0.3);
-  --ce-l0: rgba(139, 108, 246, 0.1);
-  --ce-l1: #3a2a6b;
-  --ce-l2: #58409e;
-  --ce-l3: #7e5ccf;
-  --ce-l4: #a78bf0;
+  --pi-line: color-mix(in srgb, var(--accent) 50%, transparent);
+  --pi-line-soft: color-mix(in srgb, var(--accent) 30%, transparent);
+  --ce-l0: color-mix(in srgb, var(--accent) 10%, transparent);
+  --ce-l1: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  --ce-l2: color-mix(in srgb, var(--accent) 40%, var(--surface));
+  --ce-l3: var(--accent);
+  --ce-l4: var(--accent);
 }
 :root[data-theme="dark"] .convo-wrap.is-empty .convo-scroll {
-  background: radial-gradient(620px 340px at 50% 16%, rgba(124, 92, 240, 0.1), transparent 72%);
+  background: radial-gradient(620px 340px at 50% 16%, var(--accent-soft), transparent 72%);
 }
-:root[data-theme="dark"] .ce-hc[data-l="3"] { box-shadow: 0 0 5px rgba(126, 92, 207, 0.35); }
-:root[data-theme="dark"] .ce-hc[data-l="4"] { box-shadow: 0 0 7px rgba(167, 139, 240, 0.55); }
+:root[data-theme="dark"] .ce-hc[data-l="3"] { box-shadow: 0 0 5px var(--glow); }
+:root[data-theme="dark"] .ce-hc[data-l="4"] { box-shadow: 0 0 7px var(--glow); }
 :root[data-theme="dark"] .ce-hc:hover {
-  box-shadow: 0 0 0 1px rgba(167, 139, 240, 0.7), 0 2px 12px rgba(167, 139, 240, 0.5);
+  box-shadow: 0 0 0 1px var(--accent-border), 0 2px 12px var(--glow);
 }
-:root[data-theme="dark"] .ce-heat-pi { color: #a78bf0; }
+:root[data-theme="dark"] .ce-heat-pi { color: var(--accent); }
 
 @media (max-width: 640px) {
   .ce-heat-board { grid-template-columns: max-content; }

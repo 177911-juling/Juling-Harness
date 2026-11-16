@@ -963,7 +963,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
               ref={ompMenuRef}
               className="menu title-menu-popover omp-menu"
               role="menu"
-              aria-label="OMP 状态与环境"
+              aria-label="Juling 状态与环境"
               style={{
                 position: "fixed",
                 left: ompMenuPos.left,

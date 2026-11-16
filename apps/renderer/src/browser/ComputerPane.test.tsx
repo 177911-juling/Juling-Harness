@@ -132,7 +132,7 @@ it("does not issue Computer Use commands to a Runtime without that capability", 
 
 it("shows native target enumeration errors instead of an ordinary empty target state", async () => {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
-  vi.stubGlobal("ompHarnessChrome", { readComputerCapture: vi.fn() });
+  vi.stubGlobal("julingHarnessChrome", { readComputerCapture: vi.fn() });
   const reason = "Failed to enumerate native windows: desktop session is unavailable.";
   const nativeStatus: HarnessComputerStatus = {
     enabled: true, available: true, backend: "win32",

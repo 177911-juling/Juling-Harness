@@ -398,8 +398,8 @@ export function EvaluationPage({
         return;
       }
       const result = await invoke("evaluations.export", { id: record.id, format });
-      if (!executionTarget.id && globalThis.ompHarnessChrome?.exportArtifact) {
-        const saved = await globalThis.ompHarnessChrome.exportArtifact({
+      if (!executionTarget.id && globalThis.julingHarnessChrome?.exportArtifact) {
+        const saved = await globalThis.julingHarnessChrome.exportArtifact({
           artifactId: result.artifactId,
         });
         if (!saved.ok) throw new Error(saved.message);
@@ -468,7 +468,7 @@ export function EvaluationPage({
         <header className="eval-header">
           <div>
             <div className="eval-eyebrow">
-              OMP {context?.runtimeVersion ?? record?.runtimeVersion ?? ""}
+              Juling {context?.runtimeVersion ?? record?.runtimeVersion ?? ""}
               {preview && marks ? <span className="eval-tag">{t("演示", "Demo")}</span> : null}
             </div>
             <h2>{names[tab]}</h2>
@@ -909,7 +909,7 @@ export function EvaluationPage({
             <details className="eval-advanced">
               <summary>{t("配置与原生详情", "Configuration and native details")}</summary>
               <p className="mono">
-                {record.id} · OMP {record.runtimeVersion ?? "—"}
+                {record.id} · Juling {record.runtimeVersion ?? "—"}
               </p>
               <pre>
                 {JSON.stringify(

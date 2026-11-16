@@ -88,8 +88,31 @@ test("WP-003 installs two versions, activates, and rolls back atomically", async
   await installer.install(await artifact(temporary, "v2"));
   await installer.activate("v1", { selfCheck: passingSelfCheck });
   await installer.activate("v2", { selfCheck: passingSelfCheck });
-  assert.equal((await installer.rollback()).runtimeVersion, "v1");
+  assert.equal((await installer.rollback({ selfCheck: passingSelfCheck })).runtimeVersion, "v1");
   assert.equal(JSON.parse(await readFile(join(temporary, "installed", "current.json"), "utf8")).runtimeVersion, "v1");
+});
+
+test("rollback rejects a corrupt previous entrypoint and preserves current.json byte-for-byte", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-rollback-corrupt-"));
+  try {
+    const root = join(temporary, "installed");
+    const installer = runtimeInstaller(root);
+    await installer.install(await artifact(temporary, "v1"));
+    await installer.install(await artifact(temporary, "v2"));
+    await installer.activate("v1", { selfCheck: passingSelfCheck });
+    await installer.activate("v2", { selfCheck: passingSelfCheck });
+    const pointer = await readFile(join(root, "current.json"));
+    await writeFile(join(root, "versions", "v1", "omp.exe"), "tampered-after-install");
+
+    await assert.rejects(
+      () => installer.rollback({ selfCheck: passingSelfCheck }),
+      /Checksum mismatch for omp\.exe/u,
+    );
+    assert.deepEqual(await readFile(join(root, "current.json")), pointer);
+    assert.deepEqual((await readdir(join(root, "versions"))).sort(), ["v1", "v2"]);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 });
 
 test("activation verifies installed bytes before running any executable", async () => {
@@ -132,7 +155,7 @@ test("same-version reinstall repairs corrupt bytes without losing the rollback p
   assert.equal(await readFile(join(root, "current.json"), "utf8"), pointer);
   await installer.activate("v2", { selfCheck: passingSelfCheck });
   assert.equal((await installer.current())?.previousRuntimeVersion, "v1");
-  assert.equal((await installer.rollback()).runtimeVersion, "v1");
+  assert.equal((await installer.rollback({ selfCheck: passingSelfCheck })).runtimeVersion, "v1");
   assert.deepEqual((await readdir(join(root, "versions"))).sort(), ["v1", "v2"]);
 });
 

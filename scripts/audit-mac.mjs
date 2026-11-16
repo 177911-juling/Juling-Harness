@@ -178,16 +178,18 @@ export async function auditMacOutput(outputDir = defaultMacOutputDirectory(), op
     throw new Error(`The app must ship exactly Runtime ${runtimeVersion}; found ${versionDirs.map((entry) => entry.name).join(", ") || "(none)"}`);
   }
   const runtimeDirectory = join(versionsRoot, runtimeVersion);
-  const omp = requireFile(join(runtimeDirectory, "omp"), "Runtime executable");
   const manifest = JSON.parse(readFileSync(requireFile(join(runtimeDirectory, "runtime-manifest.json"), "Runtime manifest"), "utf8"));
+  // The signed manifest names the executable and `assertRuntimeManifestPlatform`
+  // pins it to the table entry for this platform.
   assertRuntimeManifestPlatform(manifest, MAC_TARGET_PLATFORM, runtimeVersion);
-  assertExecutableTarget(omp, MAC_TARGET_PLATFORM);
-  if ((modeOf(omp) & 0o777) !== 0o755) throw new Error(`${omp} must be mode 0755, found 0${(modeOf(omp) & 0o777).toString(8)}`);
+  const runtimeExecutable = requireFile(join(runtimeDirectory, manifest.entrypoint), "Runtime executable");
+  assertExecutableTarget(runtimeExecutable, MAC_TARGET_PLATFORM);
+  if ((modeOf(runtimeExecutable) & 0o777) !== 0o755) throw new Error(`${runtimeExecutable} must be mode 0755, found 0${(modeOf(runtimeExecutable) & 0o777).toString(8)}`);
   const keysDirectory = join(resources, "runtime-keys");
   assertPublicRuntimeKeys(keysDirectory);
   await verifyRuntime(runtimeDirectory, keysDirectory);
-  exec("/usr/bin/codesign", ["--verify", "--strict", omp]);
-  notes.push(`runtime ${runtimeVersion} ${formatSize(statSync(omp).size)}: signature and checksums verify, own code signature intact`);
+  exec("/usr/bin/codesign", ["--verify", "--strict", runtimeExecutable]);
+  notes.push(`runtime ${runtimeVersion} ${formatSize(statSync(runtimeExecutable).size)}: signature and checksums verify, own code signature intact`);
 
   const keyHits = findPrivateKeyFiles(appPath);
   if (keyHits.length > 0) throw new Error(`Refusing to ship a private signing key in the app:\n${keyHits.join("\n")}`);
@@ -226,8 +228,8 @@ export async function auditMacOutput(outputDir = defaultMacOutputDirectory(), op
     const restoredApp = join(restored, MAC_APP_BUNDLE);
     if (!existsSync(restoredApp)) throw new Error(`The update zip does not contain ${MAC_APP_BUNDLE} at its root`);
     exec("/usr/bin/codesign", ["--verify", "--deep", "--strict", restoredApp]);
-    const restoredOmp = join(restoredApp, "Contents", "Resources", "runtime", "versions", runtimeVersion, "omp");
-    if ((modeOf(restoredOmp) & 0o777) !== 0o755) throw new Error("The update zip lost the Runtime's execute bits");
+    const restoredExecutable = join(restoredApp, "Contents", "Resources", "runtime", "versions", runtimeVersion, manifest.entrypoint);
+    if ((modeOf(restoredExecutable) & 0o777) !== 0o755) throw new Error("The update zip lost the Runtime's execute bits");
   } finally {
     rmSync(restored, { recursive: true, force: true });
   }

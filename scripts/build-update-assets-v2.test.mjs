@@ -15,10 +15,10 @@ const hash = b => createHash("sha256").update(b).digest("hex");
 async function fixture(channel = "stable", runtimeVersion = "18.0.0-harness.1", exeBytes = "signed-runtime") {
   const root = await mkdtemp(join(tmpdir(), "omp-v2-release-")), runtimeDir = join(root, "runtime");
   await mkdir(runtimeDir);
-  const exe = Buffer.from(exeBytes), manifest = Buffer.from(JSON.stringify({ runtimeVersion, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "harness.1", harnessProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: "win32-x64", entrypoint: "omp.exe", channel }));
-  const sums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { "omp.exe": hash(exe), "runtime-manifest.json": hash(manifest) } }));
+  const exe = Buffer.from(exeBytes), manifest = Buffer.from(JSON.stringify({ runtimeVersion, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "harness.1", harnessProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: "win32-x64", entrypoint: "juling.exe", channel }));
+  const sums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { "juling.exe": hash(exe), "runtime-manifest.json": hash(manifest) } }));
   const payload = Buffer.concat([manifest, Buffer.from("\0"), sums]);
-  for (const [name, bytes] of [["omp.exe", exe], ["runtime-manifest.json", manifest], ["checksums.json", sums], ["runtime-signature.json", JSON.stringify({ algorithm: "ed25519", keyId, payloadSha256: hash(payload), signature: sign(null, payload, signingKey).toString("base64url") })]]) await writeFile(join(runtimeDir, name), bytes);
+  for (const [name, bytes] of [["juling.exe", exe], ["runtime-manifest.json", manifest], ["checksums.json", sums], ["runtime-signature.json", JSON.stringify({ algorithm: "ed25519", keyId, payloadSha256: hash(payload), signature: sign(null, payload, signingKey).toString("base64url") })]]) await writeFile(join(runtimeDir, name), bytes);
   const setupPath = join(root, "Juling-Harness-Setup-1.0.0-windows-x64.exe"); await writeFile(setupPath, "setup-fixture");
   return { root, runtimeDir, setupPath, arch: "x64", appVersion: "1.0.0", repo: "owner/repo", keys, signingKey, keyId };
 }
@@ -93,10 +93,10 @@ test("a desktop republish rejects a reused Runtime version with different bytes 
 async function darwinFixture(channel = "stable") {
   const root = await mkdtemp(join(tmpdir(), "omp-v2-release-mac-")), runtimeDir = join(root, "runtime");
   await mkdir(runtimeDir);
-  const exe = Buffer.from("signed-darwin-runtime"), manifest = Buffer.from(JSON.stringify({ runtimeVersion: "18.0.0-harness.1", upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "harness.1", harnessProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: "darwin-arm64", entrypoint: "omp", channel }));
-  const sums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { omp: hash(exe), "runtime-manifest.json": hash(manifest) } }));
+  const exe = Buffer.from("signed-darwin-runtime"), manifest = Buffer.from(JSON.stringify({ runtimeVersion: "18.0.0-harness.1", upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "harness.1", harnessProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: "darwin-arm64", entrypoint: "juling", channel }));
+  const sums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { juling: hash(exe), "runtime-manifest.json": hash(manifest) } }));
   const payload = Buffer.concat([manifest, Buffer.from("\0"), sums]);
-  for (const [name, bytes] of [["omp", exe], ["runtime-manifest.json", manifest], ["checksums.json", sums], ["runtime-signature.json", JSON.stringify({ algorithm: "ed25519", keyId, payloadSha256: hash(payload), signature: sign(null, payload, signingKey).toString("base64url") })]]) await writeFile(join(runtimeDir, name), bytes);
+  for (const [name, bytes] of [["juling", exe], ["runtime-manifest.json", manifest], ["checksums.json", sums], ["runtime-signature.json", JSON.stringify({ algorithm: "ed25519", keyId, payloadSha256: hash(payload), signature: sign(null, payload, signingKey).toString("base64url") })]]) await writeFile(join(runtimeDir, name), bytes);
   const installer = join(root, "outputs", "installer-mac");
   await mkdir(installer, { recursive: true });
   await writeFile(join(installer, "Juling-Harness-1.0.0-macos-arm64.zip"), "app-zip-fixture");

@@ -77,7 +77,7 @@ export const MODEL_PRESETS: ReadonlyArray<ModelPresetGroup> = [
     group: "本地",
     items: [
       { id: "ollama", name: "Ollama", desc: "本地模型服务，自动发现已拉取模型", api: "openai-completions", auth: ["none"], local: true, popular: true, endpoint: "http://localhost:11434/v1", discovery: "ollama" },
-      { id: "lm-harness", name: "LM Harness", desc: "本地 OpenAI 兼容服务", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:1234/v1", discovery: "lm-harness" },
+      { id: "lm-studio", name: "LM Studio", desc: "本地 OpenAI 兼容服务", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:1234/v1", discovery: "lm-studio" },
       { id: "llama.cpp", name: "llama.cpp", desc: "llama-server OpenAI 兼容接口", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:8080/v1", discovery: "llama.cpp" },
     ],
   },
@@ -105,7 +105,7 @@ export const MODEL_API_TYPES: ReadonlyArray<{ id: ModelApiKind | string; label: 
 ];
 
 export const MODEL_AUTH_TYPES: ReadonlyArray<{ id: ModelAuthType; label: string; hint: string }> = [
-  { id: "oauth", label: "OMP Login / OAuth", hint: "用 omp login 写入本机凭据" },
+  { id: "oauth", label: "Juling Login / OAuth", hint: "用 juling login 写入本机凭据" },
   { id: "api-key", label: "API Key", hint: "密钥写入 models.yml" },
   { id: "env", label: "Environment Variable", hint: "从环境变量读取，不写密钥" },
   { id: "command", label: "External Command", hint: "用命令取密，Secret 不落盘" },
@@ -160,11 +160,11 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
       models: [m("auto", "OpenRouter Auto", 200000, 32000, { img: true, reason: true, status: "unavailable" })],
     }),
     provider({
-      id: "lm-harness", name: "LM Harness", source: "runtime", status: "offline",
+      id: "lm-studio", name: "LM Studio", source: "runtime", status: "offline",
       statusDetail: "本地服务未运行", api: "openai-completions",
       endpointUrl: "http://localhost:1234/v1", local: true, enabled: true,
       auth: { type: "none", hasSecret: false },
-      discovery: { type: "lm-harness", timeoutMs: 5000 },
+      discovery: { type: "lm-studio", timeoutMs: 5000 },
       models: [],
     }),
     provider({
@@ -184,7 +184,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     { id: "plan", alias: "@plan", name: "Architect", desc: "规划和架构任务", builtin: true, primary: "anthropic/claude-opus-4.8", thinking: "high", scope: "global" },
     { id: "designer", alias: "@designer", name: "Designer", desc: "设计相关任务", builtin: true, primary: "openrouter/auto", thinking: "medium", scope: "global", issue: { kind: "model-unavailable", detail: "模型不可用" } },
     { id: "commit", alias: "@commit", name: "Commit", desc: "Commit 相关任务", builtin: true, primary: "anthropic/claude-haiku-4.5", scope: "global" },
-    { id: "tiny", alias: "@tiny", name: "Tiny", desc: "标题、记忆等极轻量后台任务", builtin: true, primary: "lm-harness/qwen", thinking: "off", scope: "global", issue: { kind: "provider-down", detail: "本地服务未运行" } },
+    { id: "tiny", alias: "@tiny", name: "Tiny", desc: "标题、记忆等极轻量后台任务", builtin: true, primary: "lm-studio/qwen", thinking: "off", scope: "global", issue: { kind: "provider-down", detail: "本地服务未运行" } },
     { id: "task", alias: "@task", name: "Subtask", desc: "通用子任务", builtin: true, primary: "openai/gpt-5-mini", scope: "global" },
     { id: "advisor", alias: "@advisor", name: "Advisor", desc: "第二模型审查", builtin: true, primary: "openai/gpt-5.2", thinking: "medium", scope: "global" },
     { id: "review", alias: "@review", name: "Review", desc: "自定义审查角色", builtin: false, primary: "anthropic/claude-sonnet-4.5", scope: "project" },
@@ -260,7 +260,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     ],
     generatedModelsYml: "providers:\n  anthropic:\n    api: anthropic-messages\n",
     generatedConfigYml: "modelRoles:\n  default: anthropic/claude-sonnet-4.5\n",
-    runtimeEffectHint: "改动只作用于当前页面，尚未写入本机 OMP 配置。",
+    runtimeEffectHint: "改动只作用于当前页面，尚未写入本机 Juling 配置。",
     loginAvailable: true,
     ompAvailable: true,
     modelRoleStorage: "project",

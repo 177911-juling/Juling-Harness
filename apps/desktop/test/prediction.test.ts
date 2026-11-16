@@ -109,7 +109,7 @@ test("prediction transport isolates windows and imports only a selected private 
       () => manager.attach(sender, { channelId, sessionId: "foreign" }),
       /expired or changed/,
     );
-    await manager.attach(sender, { channelId, sessionId: "main" });
+    await manager.attach(sender, { channelId, sessionId: "main", expiresAt: Date.now() + 15000, protocolVersion: 2 });
     assert.throws(
       () =>
         manager.input(

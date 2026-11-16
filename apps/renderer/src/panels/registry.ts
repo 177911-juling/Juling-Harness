@@ -19,7 +19,7 @@ export const WORKBENCH_PANELS: readonly PanelDefinition[] = [
   { id: "problems", title: "Problems", icon: "alert-c" },
   { id: "tests", title: "Tests", icon: "test" },
   { id: "output", title: "Output", icon: "console" },
-  { id: "logs", title: "OMP Logs", icon: "book" },
+  { id: "logs", title: "Juling Logs", icon: "book" },
   { id: "pvlogs", title: "Preview Logs", icon: "globe" },
   { id: "btw", title: "BTW", icon: "sparkles", initialHeight: 360 },
 ];

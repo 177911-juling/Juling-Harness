@@ -356,7 +356,7 @@ const QUERY_RESPONSES = {
   "timeTravel.storage.get": { ok: true, queryName: "timeTravel.storage.get", result: { snapshots: 0, bytes: 0 } },
   "timeTravel.timeline.read": { ok: true, queryName: "timeTravel.timeline.read", result: { sessionId: SESSION_ID, activeLeafId: null, selectedLeafId: null, branches: [], events: [], points: [] } },
   "timeTravel.restore.preview": { ok: true, queryName: "timeTravel.restore.preview", result: { snapshotId: "snapshot-fixture", revision: "fixture", changes: [] } },
-  "agent.spawn.options.read": { ok: true, queryName: "agent.spawn.options.read", result: { fileEnabled: false, modelSelection: false, maxEffort: "max", models: [] } },
+  "agent.spawn.options.read": { ok: true, queryName: "agent.spawn.options.read", result: { modelSelection: false, maxEffort: "max", models: [] } },
   "session.lease.read": { ok: true, queryName: "session.lease.read", result: { held: [SESSION_ID], unknown: [] } },
   "extensions.links.list": { ok: true, queryName: "extensions.links.list", result: { schemes: [] } },
   "browser.webmcp.list": { ok: true, queryName: "browser.webmcp.list", result: { pageId: "page-fixture", status: "unavailable", tools: [], truncated: false, untrusted: true, invocationAvailable: false, reason: "No connected browser" } },

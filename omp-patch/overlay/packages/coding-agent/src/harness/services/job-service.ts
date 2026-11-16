@@ -267,7 +267,10 @@ export class HarnessJobService {
 			args.callerAgentId !== ownerId &&
 			(args.callerAgentId === undefined || !this.#isAncestorOf(args.callerAgentId, ownerId))
 		) {
-			throw new HarnessJobError("NOT_OWNER", `Agent "${args.callerAgentId ?? ""}" cannot cancel job "${args.jobId}"`);
+			throw new HarnessJobError(
+				"NOT_OWNER",
+				`Agent "${args.callerAgentId ?? ""}" cannot cancel job "${args.jobId}"`,
+			);
 		}
 		const cancelled = this.#jobs.cancel(args.jobId, ownerId === undefined ? undefined : { ownerId });
 		if (!cancelled) {

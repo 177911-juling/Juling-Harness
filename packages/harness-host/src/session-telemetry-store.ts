@@ -145,7 +145,8 @@ export class SessionTelemetryStore {
   /**
    * Drop every trace of one session: clears the pending in-memory record and
    * deletes the persisted `<sha256(sessionId)>.json` (missing file tolerated).
-   * Used when a session is permanently deleted so no telemetry residue stays.
+   * The delete shares the write chain so an older atomic rename cannot recreate
+   * the record after removal. Used when a session is permanently deleted.
    */
   async remove(sessionId: string): Promise<void> {
     if (this.#disposed || sessionId.length === 0) return;
@@ -155,7 +156,9 @@ export class SessionTelemetryStore {
       pending.timer = undefined;
       this.#pending.delete(sessionId);
     }
-    await rm(this.#recordPath(sessionId), { force: true }).catch(() => {});
+    await this.#enqueueWrite(async () => {
+      await rm(this.#recordPath(sessionId), { force: true }).catch(() => {});
+    });
   }
 
   async dispose(): Promise<void> {

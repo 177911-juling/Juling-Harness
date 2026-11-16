@@ -142,7 +142,7 @@ async function main() {
   await shot(page, "roles");
 
   await pageNav(page, "capabilities");
-  await page.getByRole("heading", { name: "能力中心" }).waitFor();
+  await page.locator(".cap-layout").waitFor();
   await waitSettled(page);
   await shot(page, "capabilities");
 

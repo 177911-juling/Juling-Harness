@@ -56,7 +56,7 @@ if (process.platform === "darwin") {
   assertMacToolchain({ rust: true, targetArch: process.arch, bunVersion: run(bun, ["--version"], { env, capture: true }), env });
 }
 
-// Building a vendor tree without the fork applied yields an omp.exe with no
+// Building a vendor tree without the fork applied yields a Runtime binary with no
 // harness-host mode. That only surfaces much later, as an opaque identity probe
 // failure after a full Rust build, so check the cheap precondition first.
 await assertForkApplied();
@@ -76,7 +76,7 @@ const executable = join(
   "packages",
   "coding-agent",
   "dist",
-  process.platform === "win32" ? "omp.exe" : "omp",
+  runtimeEntrypointFor(artifactPlatform),
 );
 if (!existsSync(executable) || !statSync(executable).isFile()) {
   throw new Error(`Expected host executable was not produced: ${executable}`);

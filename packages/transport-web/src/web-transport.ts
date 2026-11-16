@@ -23,8 +23,8 @@ import { WebTransportError } from "./errors.js";
  * no URL/channel names. P2 replaces the object's internals with HTTP and
  * WebSocket; the adapter and the contracts it enforces do not change.
  */
-export interface OmpHarnessWebApi {
-  openContext?(scope: import("@juling-harness/client-contract").ClientContextScope): Promise<OmpHarnessWebApi>;
+export interface JulingHarnessWebApi {
+  openContext?(scope: import("@juling-harness/client-contract").ClientContextScope): Promise<JulingHarnessWebApi>;
   bootstrap(): Promise<ClientBootstrap>;
   query<TName extends QueryName>(
     request: ClientQueryRequest<TName>,
@@ -39,7 +39,7 @@ export interface OmpHarnessWebApi {
 type EventListener = (event: ClientEvent) => void;
 
 /**
- * P0 semantic web transport over an {@link OmpHarnessWebApi}.
+ * P0 semantic web transport over an {@link JulingHarnessWebApi}.
  *
  * Envelopes are forwarded verbatim, with defensive cloning in both
  * directions and fail-closed response checks:
@@ -61,13 +61,13 @@ type EventListener = (event: ClientEvent) => void;
  *   its rejection propagates but the transport stays closed.
  */
 export class WebClientTransport implements ClientTransport {
-  readonly #api: OmpHarnessWebApi;
+  readonly #api: JulingHarnessWebApi;
   #closed = false;
   /** Teardowns of live subscriptions; empty once closed. */
   readonly #subscriptions = new Set<Unsubscribe>();
   #apiClose: Promise<void> | null = null;
 
-  constructor(api: OmpHarnessWebApi) {
+  constructor(api: JulingHarnessWebApi) {
     this.#api = api;
   }
 
@@ -233,7 +233,7 @@ export class WebClientTransport implements ClientTransport {
   }
 }
 
-/** Creates a {@link ClientTransport} over an in-process {@link OmpHarnessWebApi}. */
-export function createWebTransport(api: OmpHarnessWebApi): ClientTransport {
+/** Creates a {@link ClientTransport} over an in-process {@link JulingHarnessWebApi}. */
+export function createWebTransport(api: JulingHarnessWebApi): ClientTransport {
   return new WebClientTransport(api);
 }

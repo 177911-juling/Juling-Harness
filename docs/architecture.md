@@ -1,13 +1,14 @@
 # Architecture
 
-Juling Harness is a desktop console in front of a **patched OMP Runtime**. The
+Juling Harness is a desktop console in front of a **patched Juling Runtime**
+(the `juling` binary built from the pinned `oh-my-pi` tree). The
 GUI does not parse TUI text, ANSI, or key macros. Control goes through a
 typed Harness Bridge.
 
 ```
 Renderer (apps/renderer)
   → @juling-harness/client          HarnessClient + conversation reducer
-  → transport-desktop           preload `window.ompHarness`
+  → transport-desktop           preload `window.julingHarness`
   → apps/desktop                ipc.ts
   → @juling-harness/host-client-api product facade
         ├─ Host-owned: session catalog, archive, models.yml,
@@ -53,9 +54,12 @@ Authoritative lists:
 
 `omp-patch/upstream.json` pins [oh-my-pi](https://github.com/can1357/oh-my-pi).
 Harness-owned code lives in `omp-patch/overlay/`. Edits to upstream files are
-four seam patches. See [`omp-patch/README.md`](../omp-patch/README.md).
+five seam patches. See [`omp-patch/README.md`](../omp-patch/README.md).
 
-`omp.exe` is the patched CLI/Runtime. `Juling Harness.exe` is the Electron app.
+`juling.exe` (`juling` on macOS/Linux) is the patched CLI/Runtime; the fifth
+seam patch rebrands its app name, config directory (`.juling`, with `.omp` kept
+readable for pre-rename installs) and user agent. `Juling Harness.exe` is the
+Electron app.
 
 ## Historical notes
 

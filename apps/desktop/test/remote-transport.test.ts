@@ -72,3 +72,19 @@ test("closing a connected transport waits for its SSH child to exit", async () =
   const transport = await SshRemoteTransport.connect({ connection: { host: "example.invalid" }, shell: "posix", executable: "node", args: [], expectedPlatform: "linux", spawnProcess: (() => child) as unknown as typeof spawn, sshExecutable: "ssh" });
   await transport.close(); assert.equal(released, true); server.close();
 });
+
+test("closing a remote context twice releases the Host facade once", async () => {
+  const f = fixture();
+  let closes = 0;
+  f.transport.hello = { protocolVersion: REMOTE_PROTOCOL_VERSION, platform: "linux", arch: "x64", bundleVersion: "bundle", instanceId: "host", capabilities: ["session.contexts"] };
+  f.server.handle(async method => {
+    if (method === "context.open") return "context-1";
+    if (method === "context.close") closes++;
+    return {};
+  });
+  const context = await f.transport.openContext({ workspaceId: "workspace", sessionId: "session" } as never);
+  await Promise.all([context.close(), context.close()]);
+  assert.equal(closes, 1);
+  await f.transport.close();
+  f.server.close();
+});

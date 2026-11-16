@@ -188,7 +188,7 @@ function formatMcpSourceLabel(label: string | undefined, t: (k: string) => strin
   if (!label) return "";
   if (label === "用户" || label === "User") return t("subagents.scopeUser");
   if (label === "项目" || label === "Project") return t("subagents.scopeProject");
-  if (label === "OMP" || label === "内置") return t("skills.scopeBuiltin");
+  if (label === "Juling" || label === "内置") return t("skills.scopeBuiltin");
   return label;
 }
 
@@ -964,8 +964,7 @@ export function CapabilitiesPage({
     <div className="page-wide">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
         <div>
-          <h1 style={{ fontSize: 18 }}>{t("capabilities.pageTitle")}</h1>
-          <p className="muted small">{tab === "ida" || tab === "resources" ? (zh ? "管理技能、工具、数据库与会话资源。" : "Manage skills, tools, databases and session resources.") : t("capabilities.pageSubtitle")}</p>
+          <p className="page-lead">{tab === "ida" || tab === "resources" ? (zh ? "管理技能、工具、数据库与会话资源。" : "Manage skills, tools, databases and session resources.") : t("capabilities.pageSubtitle")}</p>
           {(preview && marks) || loadError ? (
             <p className="tiny muted">{preview && marks ? t("capabilities.previewSubtitle") : loadError}</p>
           ) : null}

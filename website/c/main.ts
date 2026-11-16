@@ -359,7 +359,7 @@ const STEPS: Step[] = [
 await client.command(${h('"core.prompt"')}, {
   text: "跑一遍 typecheck，把 TS2322 修掉"
 });`,
-    note: "Renderer 只有 HarnessClient。拿不到 Bridge token、进程句柄和 OMP 会话路径。",
+    note: "Renderer 只有 HarnessClient。拿不到 Bridge token、进程句柄和 Juling 会话路径。",
   },
   {
     name: "HarnessClient", pkg: "@juling-harness/client", title: "CommandHandle<\"core.prompt\">",
@@ -375,7 +375,7 @@ await client.command(${h('"core.prompt"')}, {
   },
   {
     name: "Desktop IPC", pkg: "@juling-harness/transport-desktop", title: "DESKTOP_IPC_CHANNELS.command",
-    code: `${k("// preload 暴露的 window.ompHarness")}
+    code: `${k("// preload 暴露的 window.julingHarness")}
 ipc channel:
   ${h('"juling-harness:desktop:command"')}
 

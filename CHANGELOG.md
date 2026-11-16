@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **界面重设计「静默精确 / Quiet Precision」**：整套视觉系统从「蓝图 HUD」切换为单一表面系统 —— 浅色瓷白 / 深色石墨双主题，靛蓝作为唯一交互主色、青绿只表达数据，语义色只表达状态；圆角阶梯 6 / 8 / 10 / 14px，控件统一为 26 / 32 / 38px 三档，正文基准字号提升到 13px，层级改由字重、留白与细线承担；保留极轻投影给菜单、弹窗、卡片与 Composer，不再用网格、四角刻度、双线框或深色舱壁制造技术感。标题栏、原生窗口按钮、导航 rail、侧栏、顶栏、二级页头、状态条使用同一主题表面；工作台对话（消息、工具卡、Plan 入口、队列、空态）、首页 / 历史 / 能力中心 / Agent Hub / 模型配置 / 设置 / 诊断 / 媒体 / 评估 / 统计 / 教程全部跟版；`linework.css` 及其装饰语法退役，动效数值与既有门禁不变。
+- **Runtime 身份统一为 Juling**：`omp.exe` / `omp` 更名为 `juling.exe` / `juling`，Runtime 的 `APP_NAME`、用户代理、帮助与登录提示、进程标题都改为 `juling`；`omp --mode harness-host` 变为 `juling --mode harness-host`。用户配置目录从 `~/.omp` 迁移到 `~/.juling`（首次启动整目录改名，失败则改为复制并继续使用旧目录），项目级 `.juling/` 与 `~/.juling/` 取代 `.omp`；旧的 `~/.omp`、项目 `.omp/`、`OMP_*` / `PI_*` 环境变量与已安装的 `omp.exe`（`runtime-manifest.json.entrypoint` 为准）继续可读，不再写入。上述旧名兼容由 vendor 接缝补丁 `0005-juling-identity.patch` 与 Host 侧发现/迁移逻辑共同保证。安装包新增随包分发的 `third-party-notices.txt`（MIT 全文与版权声明），满足随 Runtime 二进制分发的许可要求。
+- **产品展示品牌统一为 Juling**：对话作者、顶栏状态、工作台文档面板（Juling Logs）、统计面板、审批卡片、各页说明、安装向导、更新发布标题与诊断报告中的产品名由 OMP 改为 Juling / Juling Runtime；上游项目名（oh-my-pi）、`omp` CLI、`~/.omp` 路径、`OMP_*` 环境变量与线协议标识保持不变（CLI、路径与环境变量已由上方 Runtime 身份统一改名取代）。同时补齐 Agent Hub 恢复命令、预览演示项目名与安装完成页中的旧品牌展示。
+- Runtime 升级至 **OMP 18.19.0**，上游固定为 `04cd1a7549a02d62ad1d24826198d52507595683`，Harness patchset 为 `18.19.0-harness.17`；完整接收 18.18.1–18.19.0 修复链，详见 [18.19.0 迁移报告](docs/migrations/omp-18.19.0.md)。Skillshare 已验证来源展示统一为 `Reported Juling`。
+- Agent Hub 跟随上游移除 `taskFile`，任务内容统一通过 inline `assignment` 提交；不再保留私有文件任务校验、审批或恢复 shim。
+- Browser 接入 18.19 的 `insecure`、`app` 字符串、`argv` 与顶层 `target` 参数；托管浏览器保留会话绑定、人工控制和下载生命周期，普通 relay 仍拒绝不安全连接。
+- Ask/Tree 重答改用原生 HTML form；Context 查看器新增 `instruction-files` 分类；Codex 与 Claude 重置券设置按 5h、weekly 及 Fable 窗口拆分，不再提供已删除的总开关。
+
+### Fixed
+
+- 修复浏览器安装演示完成后退回欢迎页或停留死页的问题；勾选运行时进入软件预览，否则离开完成页，文件演示可通过 `appUrl` 指定软件入口。
+- 修复新建、恢复及自动重连时客户端 snapshot 尚未就绪就发送 `core.prompt` 或检查听写状态所产生的 `UNAVAILABLE`；发送现在等待目标会话的实时快照，听写不再使用 stale-connected 状态发命令。
+- 修复隔离 profile 共用全局 Windows authority 命名管道导致 Host 启动失败、界面进入只读不可用状态的问题。
+- 系统 Downloads 目录不可用时，内置浏览器改用当前 profile 的下载目录，不再导致桌面启动失败。
+- 修复开发预览缺少更新快照 IPC handler，并更正版本查询读取的打包应用版本字段。
+- 修复带 `protocolVersion` 的预测通道被桌面 IPC 误拒绝、Composer 显示“Invalid prediction fields”的问题。
+- 修复进行中命令被幂等历史逐出、Worker 异常退出后 resident 容量泄漏、永久删除 artifacts 失败无法重试，以及删除遥测后被旧写重建的问题。
+- 图片附件在 Composer、Host 和 Runtime 使用同一预算；超限在读取与 Base64 编码前返回明确 `INVALID_ARGUMENT`，不再误报连接失败。
+- 修复工作位置切换的旧请求覆盖新状态、发送失败后跨会话草稿覆盖、首页最近活动打开错误会话，以及隐藏文档通知使用过期 active 引用的问题。
+- 排队压缩等待原生压缩完成后重新核验并保留 instructions/options；扩展命令保留 ran/failed/not-found 三态。
+- 远端 Context 绑定 owner WebContents 生命周期；Web session TTL 到期主动关闭上下文和 idle timer；Desktop stop 的在途 heartbeat 不再重启 Resident。
+- session pin 删除在文件锁内执行读取—修改—写回并原子替换；文件归属与 Git 页面偏好存储失败不再破坏页面。
+- Runtime rollback 校验恢复后的身份与可用性；更新索引测试不再绑定过时 404 文案，MCP readiness 测试改为确定性的 deferred query 顺序。
+
+### 破坏性改名：Studio → Harness
+
+- Runtime 线协议名改为 `juling-harness`，帧类型为 `harness.hello/request/receipt/event/snapshot`，CLI 模式为 `--mode harness-host`；Desktop 与 Runtime 两侧由 `scripts/architecture.test.mjs` 的「wire identifiers」用例锁死，任一侧漏改会直接失败。
+- 会话头字段改为 `harnessOrigin: "harness-host"`。改名前的会话带 `studioOrigin: "studio-host"`，Desktop 会话列表与 Runtime 会话分类都会继续识别，历史对话不会消失。
+- 旧签名 Runtime 的 manifest 使用 `studioProtocol` 字段，仍可解析和验签（信任表保留 `omp-studio-release-2026a/b` 作为同一公钥的别名），但会被判定为改名前的产物并提示用 `npm run omp:build:host` 重建；迁移逻辑也不会激活它。Runtime patchset 提升到 `harness.2`。
+
 ## [0.2.0] - 2026-11-13
 
 如果说 `0.1.x` 的 Juling Harness 还算是一个「长得挺规矩的单栏聊天控制台」，那 `0.2.0` 基本就是把承重墙拆了重装了一遍。

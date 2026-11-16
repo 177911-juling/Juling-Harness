@@ -104,9 +104,9 @@ describe("harness real tool approval and ask E2E", () => {
 		return { port, ui: factory(toolCall), toolCall };
 	}
 
-	async function waitForInteraction(port: HarnessRemoteInteractionPort): Promise<void> {
-		for (let attempt = 0; attempt < 100 && !port.pending(); attempt++) await Bun.sleep(10);
-		expect(port.pending()).toBeDefined();
+	async function waitForInput(port: HarnessRemoteInteractionPort): Promise<void> {
+		for (let attempt = 0; attempt < 100 && port.pending()?.request.kind !== "input"; attempt++) await Bun.sleep(10);
+		expect(port.pending()?.request.kind).toBe("input");
 	}
 
 	async function respond(
@@ -184,44 +184,35 @@ describe("harness real tool approval and ask E2E", () => {
 		expect(port.pending()).toBeUndefined();
 	});
 
-	test("Live Ask sends every question in one ask card and returns the chosen labels", async () => {
+	test("Live Ask HTML form returns native select and input answers", async () => {
 		const askTool = new AskTool(session as never);
 		const { port, ui, toolCall } = remoteUi();
 		const result = askTool.execute(
 			"e2e-ask-1",
 			{
-				questions: [
-					{
-						id: "backend",
-						question: "Which backend?",
-						options: [{ label: "SQLite" }, { label: "PostgreSQL" }],
-					},
-					{
-						id: "cache",
-						question: "Cache layer?",
-						header: "缓存",
-						options: [{ label: "Redis" }, { label: "Memory" }],
-					},
-				],
+				html: `<form>
+					<label for="backend">Which backend?</label>
+					<select id="backend" name="backend">
+						<option>SQLite</option>
+						<option>PostgreSQL</option>
+					</select>
+					<label for="cache">Cache layer?</label>
+					<input id="cache" name="cache" type="text" />
+				</form>`,
 			},
 			undefined,
 			undefined,
 			{ hasUI: true, ui, toolCall } as AgentToolContext,
 		);
-		const pending = port.pending();
-		expect(pending?.request).toMatchObject({
-			kind: "ask",
+		expect(port.pending()?.request).toMatchObject({
+			kind: "select",
 			commandId: "harness-tool:e2e-call-1",
-			title: "Agent 提问",
+			title: "Which backend?",
 		});
-		if (pending?.request.kind !== "ask") throw new Error("expected ask");
-		expect(pending.request.questions.map(question => question.id)).toEqual(["backend", "cache"]);
-		await respond(port, "submit", {
-			results: [
-				{ id: "backend", selectedOptions: ["PostgreSQL"] },
-				{ id: "cache", selectedOptions: ["Redis"] },
-			],
-		});
+		await respond(port, "submit", "option:1");
+		await waitForInput(port);
+		expect(port.pending()?.request).toMatchObject({ kind: "input", title: "Cache layer?" });
+		await respond(port, "submit", "Redis");
 		const outcome = await result;
 		expect(textOf(outcome)).toContain("PostgreSQL");
 		expect(textOf(outcome)).toContain("Redis");

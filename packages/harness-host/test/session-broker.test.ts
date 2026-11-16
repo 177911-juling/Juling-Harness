@@ -13,22 +13,26 @@ import {
 function workerFactory(options: { readonly starts?: number; readonly stops?: number } = {}): {
   factory: SessionWorkerFactory;
   workers: Map<string, FakeWorker>;
+  created: FakeWorker[];
 } {
   const workers = new Map<string, FakeWorker>();
+  const created: FakeWorker[] = [];
   const factory: SessionWorkerFactory = {
     create(input) {
       const worker = new FakeWorker(input.sessionId, options);
       workers.set(input.sessionId, worker);
+      created.push(worker);
       return worker;
     },
   };
-  return { factory, workers };
+  return { factory, workers, created };
 }
 
 class FakeWorker implements SessionWorker {
   readonly #sessionId: string;
   readonly #options: { readonly starts?: number; readonly stops?: number };
   readonly #listeners = new Set<(snapshot: SessionWorkerSnapshot) => void>();
+  readonly #exitListeners = new Set<(reason?: string) => void>();
   started = 0;
   stopped = 0;
   private current: SessionWorkerSnapshot | undefined;
@@ -63,6 +67,15 @@ class FakeWorker implements SessionWorker {
   onPublication(listener: (snapshot: SessionWorkerSnapshot) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
+  }
+
+  onExit(listener: (reason?: string) => void): () => void {
+    this.#exitListeners.add(listener);
+    return () => this.#exitListeners.delete(listener);
+  }
+
+  exit(reason?: string): void {
+    for (const listener of this.#exitListeners) listener(reason);
   }
 
   emit(snapshot: SessionWorkerSnapshot): void {
@@ -134,4 +147,20 @@ test("hibernate releases the Worker and lease only after the Worker stops", asyn
   const result = await broker.hibernate("session-a");
   assert.equal(result.residency, "dormant");
   assert.equal(workers.get("session-a")?.stopped, 1);
+});
+
+test("worker exit releases capacity and a duplicate exit cannot dispose its replacement", async () => {
+  const { factory, created } = workerFactory();
+  const broker = new HarnessSessionBroker({ ownerId: "broker-a", workers: factory, maxResidentWorkers: 1 });
+  broker.register({ sessionId: "session-a", workspaceId: "workspace", cwd: "C:/workspace" });
+  await broker.ensureResident("session-a");
+  const first = created[0]!;
+  first.exit("crashed");
+  const restarting = broker.ensureResident("session-a");
+  first.exit("duplicate");
+  const restarted = await restarting;
+  assert.equal(restarted.residency, "online");
+  assert.equal(created.length, 2, "crash recovery creates exactly one replacement");
+  assert.equal(created[1]?.started, 1);
+  assert.equal(broker.list().filter((entry) => entry.residency === "online").length, 1);
 });

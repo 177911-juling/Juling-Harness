@@ -56,7 +56,9 @@ export interface RuntimeSettingsCtl {
 
 const RUNTIME_DEFAULTS: RuntimeSettingsReadModel = {
   "modelRoles.judge": "",
-  "claudeResets.autoRedeem": "unset",
+  "claudeResets.autoRedeem5h": "unset",
+  "claudeResets.autoRedeemWeekly": "unset",
+  "claudeResets.autoRedeemFable": "unset",
   "claudeResets.minBlockedMinutes": 60,
   "claudeResets.keepCredits": 0,
   "claudeResets.salvageHorizonHours": 12,
@@ -89,7 +91,9 @@ export function appSource<K extends keyof AppSettings>(app: AppSettings, key: K)
 
 type RuntimeBooleanKey = "task.enableEffort" | "images.describeForTextModels" | "tools.speculativeExecution.enabled" | "edit.autoRepair.enabled" | "extendedContext" | "compaction.asyncEnabled" | "plan.autosave" | "retry.waitForUsageReset" | "compaction.experimentalContextManagement";
 type RuntimeScalarKey =
-  | "claudeResets.autoRedeem"
+  | "claudeResets.autoRedeem5h"
+  | "claudeResets.autoRedeemWeekly"
+  | "claudeResets.autoRedeemFable"
   | "ttsr.judge"
   | "task.maxEffort"
   | "providers.autoThinkingMaxEffort"
@@ -174,7 +178,7 @@ export function RuntimePlanDirectoryRow({ runtime, demo }: { runtime?: RuntimeSe
   const disabled = !available || runtime?.set === undefined || runtime.pendingKey !== undefined;
   return (
     <SettingRow label={t("settings.runtime.planAutosaveDir")} desc={t("settings.runtime.planAutosaveDirDesc")} source={runtimeSource(available, runtime, "plan.autosaveDir")}>
-      <input className="input" aria-label={t("settings.runtime.planAutosaveDir")} value={draft} disabled={disabled} maxLength={4096} placeholder=".omp/plans/" onChange={event => setDraft(event.target.value)} />
+      <input className="input" aria-label={t("settings.runtime.planAutosaveDir")} value={draft} disabled={disabled} maxLength={4096} placeholder=".juling/plans/" onChange={event => setDraft(event.target.value)} />
       <button type="button" className="btn small outline" disabled={disabled || draft === value} onClick={() => runtime?.set?.("plan.autosaveDir", draft.trim())}>{t("settings.runtime.saveDirectory")}</button>
       <RuntimePending runtime={runtime} />
     </SettingRow>

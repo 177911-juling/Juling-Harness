@@ -541,7 +541,7 @@ export function EvaluationConfig({
                       className="btn small"
                       disabled={
                         !preview &&
-                        (!!executionTarget.id || !globalThis.ompHarnessChrome?.importArtifact)
+                        (!!executionTarget.id || !globalThis.julingHarnessChrome?.importArtifact)
                       }
                       onClick={() => {
                         if (preview) {
@@ -553,7 +553,7 @@ export function EvaluationConfig({
                           );
                           return;
                         }
-                        void globalThis.ompHarnessChrome
+                        void globalThis.julingHarnessChrome
                           ?.importArtifact?.({
                             kind: "image",
                             ...(workspaceId ? { workspaceId } : {}),

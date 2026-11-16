@@ -12,7 +12,7 @@ import { splitChipLabel, type PromptImage } from "./types";
 
 afterEach(() => {
   cleanup();
-  Reflect.deleteProperty(globalThis, "ompHarnessChrome");
+  Reflect.deleteProperty(globalThis, "julingHarnessChrome");
 });
 
 it("restores a background draft without moving focus or the current selection", () => {
@@ -568,13 +568,12 @@ describe("ChipComposer", () => {
     ]);
   });
 
-  it("adds a clipboard image larger than 8MB as a capsule", async () => {
+  it("rejects a clipboard image around 1MB before reading its bytes", async () => {
     const bytes = Uint8Array.of(1, 2, 3, 4);
     const file = new File([bytes], "clip.png", { type: "image/png" });
-    Object.defineProperty(file, "size", { value: 8 * 1024 * 1024 + 1 });
-    Object.defineProperty(file, "arrayBuffer", {
-      value: async () => Uint8Array.from(bytes).buffer,
-    });
+    Object.defineProperty(file, "size", { value: 1024 * 1024 });
+    const readBytes = vi.fn(async () => Uint8Array.from(bytes).buffer);
+    Object.defineProperty(file, "arrayBuffer", { value: readBytes });
     const onError = vi.fn();
     const ref = createRef<ChipComposerHandle>();
     render(<ChipComposer ref={ref} placeholder="msg" onError={onError} />);
@@ -585,12 +584,11 @@ describe("ChipComposer", () => {
       },
     });
     await waitFor(() => {
-      expect(ref.current?.getSnapshot().images).toEqual([
-        { type: "image", mimeType: "image/png", data: btoa(String.fromCharCode(1, 2, 3, 4)) },
-      ]);
+      expect(onError).toHaveBeenCalledWith(expect.stringContaining("附件预算"));
     });
-    expect(ref.current?.getSnapshot().text).toContain("[图1]");
-    expect(onError).not.toHaveBeenCalled();
+    expect(readBytes).not.toHaveBeenCalled();
+    expect(ref.current?.getSnapshot().images).toEqual([]);
+    expect(ref.current?.getSnapshot().text).not.toContain("[图1]");
   });
 
   it("adds a disk image as a path capsule when preview bytes cannot be read", async () => {
@@ -599,7 +597,7 @@ describe("ChipComposer", () => {
       value: () => Promise.reject(new Error("unreadable")),
     });
     Object.assign(globalThis, {
-      ompHarnessChrome: {
+      julingHarnessChrome: {
         getPathForFile: () => "C:/shots/shot.png",
         resolveDroppedPaths: async () => [
           { ok: true, kind: "image" as const, scope: "absolute" as const, path: "C:/shots/shot.png", name: "shot.png" },
@@ -814,7 +812,7 @@ describe("ChipComposer", () => {
   it("copies and saves from the preview context menu through desktop chrome", async () => {
     const copyImage = vi.fn(async (_input: { mime: string; bytes: Uint8Array }) => ({ ok: true as const }));
     const saveImage = vi.fn(async (_input: { mime: string; bytes: Uint8Array; suggestedName: string }) => ({ ok: true as const }));
-    globalThis.ompHarnessChrome = { copyImage, saveImage } as unknown as NonNullable<typeof globalThis.ompHarnessChrome>;
+    globalThis.julingHarnessChrome = { copyImage, saveImage } as unknown as NonNullable<typeof globalThis.julingHarnessChrome>;
 
     const ref = createRef<ChipComposerHandle>();
     render(<ChipComposer ref={ref} placeholder="msg" />);

@@ -14,9 +14,11 @@ html[data-workbench-transition] :is(.cw-sidebar-slot,.cw-conversation-title-row,
 .cw-conversation-title-row.is-windowed>.cw-conversation-title-slot{flex:0 0 auto}
 .cw-tab-strip{display:flex;align-items:center;gap:2px;flex:1 1 0;min-width:0;height:var(--topbar-h);padding:0 4px 0 8px;border-bottom:1px solid var(--border);background:var(--bg)}
 .cw-tabs{display:flex;align-items:center;flex:0 1 auto;min-width:0;gap:3px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}.cw-tabs::-webkit-scrollbar{display:none}
-.cw-tab{display:flex;flex:0 1 auto;align-items:center;min-width:80px;max-width:220px;height:32px;border:1px solid transparent;border-radius:var(--r-6);color:var(--text-3);transition:background-color var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease)}
-.cw-tab:hover{color:var(--text-2);background:var(--surface-hover)}.cw-tab.is-active{min-width:112px;color:var(--text);background:var(--bg-inset);border-color:var(--border-strong)}
-.cw-tab[data-window-tint].is-active{background:color-mix(in srgb,var(--window-tint) 8%,var(--bg-inset));border-color:color-mix(in srgb,var(--window-tint) 45%,var(--border-strong))}
+.cw-tab{display:flex;flex:0 1 auto;align-items:center;min-width:80px;max-width:220px;height:32px;border:1px solid transparent;border-radius:var(--r-4);color:var(--text-3);transition:background-color var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease)}
+.cw-tab:hover{color:var(--text-2);background:var(--surface-hover)}
+/* 活动页签 = 主题色软底 + 主色标题，不再画顶部色条。 */
+.cw-tab.is-active{min-width:112px;color:var(--accent);background:var(--accent-soft);border-color:transparent;box-shadow:none}
+.cw-tab[data-window-tint].is-active{background:color-mix(in srgb,var(--window-tint) 10%,var(--surface));border-color:transparent;box-shadow:none}
 .cw-tab[data-window-tint]>.cw-tab-label>.icon{color:var(--window-tint)}
 .cw-tab-label{display:flex;flex:1 1 auto;align-items:center;gap:var(--sp-6);min-width:0;height:30px;padding:0 2px 0 8px;font-size:var(--fs-12);font-weight:var(--fw-medium);border-radius:var(--r-6);text-align:left}
 .cw-tab-label>.icon{flex:none}.cw-tab-label .session-title-card{margin-right:0}.cw-tab-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.cw-tab.is-minimized .cw-tab-label{opacity:.6}

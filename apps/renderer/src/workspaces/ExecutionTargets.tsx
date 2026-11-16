@@ -57,7 +57,7 @@ export function useTargetMemory<T>(key: string, initial: () => T) {
 }
 
 export function ExecutionTargets({ client, children }: { client: HarnessClient; children(client: HarnessClient, key: string): ReactNode }) {
-  const api = globalThis.ompHarnessRemote;
+  const api = globalThis.julingHarnessRemote;
   const [id, setId] = useState<string | null>(null);
   const [ready, setReady] = useState(!api);
   const [generation, setGeneration] = useState(0);

@@ -124,7 +124,7 @@
   padding: 8px 10px;
   border-radius: 0;
   background: var(--surface-2);
-  box-shadow: 0 1px 0 var(--border);
+  border-bottom: 1px solid var(--border);
   font-size: var(--fs-11);
   font-weight: var(--fw-semibold);
   color: var(--text-2);

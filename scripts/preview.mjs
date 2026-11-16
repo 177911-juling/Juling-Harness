@@ -1,11 +1,14 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, readdir, rm, rename, symlink } from "node:fs/promises";
+import { copyFile, cp, mkdir, readdir, rm, rename, symlink } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import process from "node:process";
 
 import { bundlePreload } from "./preload-bundle.mjs";
 import { startLiveUiPreview } from "./preview-live-ui.mjs";
+import { runtimeEntrypointFor } from "./target-platform.mjs";
 
 const root = process.cwd();
 const previewHost = "127.0.0.1";
@@ -248,7 +251,7 @@ async function stagePreviewRuntime() {
   }
   for (const version of versions) {
     const directory = join(previewRuntimePayload, version.name);
-    for (const required of ["omp.exe", "runtime-manifest.json", "checksums.json", "runtime-signature.json"]) {
+    for (const required of [runtimeEntrypointFor(`win32-${process.arch}`), "runtime-manifest.json", "checksums.json", "runtime-signature.json"]) {
       if (!existsSync(join(directory, required))) {
         throw new Error(`Signed Runtime payload ${version.name} is missing ${required}.`);
       }
@@ -279,7 +282,7 @@ async function preparePreviewElectron() {
   // Desktop Host puts its managed Runtime tree at <previewElectronDir>/runtime.
   // Anything named `runtime` inside the Electron distribution is therefore a
   // leftover from an earlier preview run, and copying it in would resurrect a
-  // stale omp.exe that `rm -rf outputs/preview-electron` cannot reach (it lives
+  // stale Runtime executable that `rm -rf outputs/preview-electron` cannot reach (it lives
   // under the gitignored node_modules). Skip it so seeding installs the freshly
   // built, signed artifact instead.
   await cp(electronDist, previewElectronDir, {
@@ -307,26 +310,44 @@ async function preparePreviewElectron() {
   }
   await stagePreviewRuntime();
 
-  await run(rceditExe, [
-    exePath,
-    "--set-icon",
-    appIcon,
-    "--set-version-string",
-    "ProductName",
-    "Juling Harness",
-    "--set-version-string",
-    "FileDescription",
-    "Juling Harness",
-    "--set-version-string",
-    "InternalName",
-    "Juling Harness",
-    "--set-version-string",
-    "OriginalFilename",
-    "Juling Harness.exe",
-  ]);
+  // rcedit cannot open a path containing non-ASCII characters (the repository
+  // may live under such a directory). Brand a temporary ASCII copy and move it
+  // back, mirroring the same limitation as `bun build --compile`.
+  await brandWindowsExecutable(exePath);
 
   await registerWindowsPreviewShortcut();
   return exePath;
+}
+
+async function brandWindowsExecutable(exePath) {
+  const staging = join(tmpdir(), `juling-preview-brand-${randomBytes(6).toString("hex")}`);
+  const stagedExe = join(staging, "electron.exe");
+  const stagedIcon = join(staging, "icon.ico");
+  await mkdir(staging, { recursive: true });
+  try {
+    await copyFile(exePath, stagedExe);
+    await copyFile(appIcon, stagedIcon);
+    await run(rceditExe, [
+      stagedExe,
+      "--set-icon",
+      stagedIcon,
+      "--set-version-string",
+      "ProductName",
+      "Juling Harness",
+      "--set-version-string",
+      "FileDescription",
+      "Juling Harness",
+      "--set-version-string",
+      "InternalName",
+      "Juling Harness",
+      "--set-version-string",
+      "OriginalFilename",
+      "Juling Harness.exe",
+    ]);
+    await copyFile(stagedExe, exePath);
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
 }
 
 async function main() {
@@ -388,8 +409,8 @@ async function main() {
   const desktop = start(electronExecutable, desktopArgs, {
     env: {
       ...process.env,
-      OMP_APP_USER_MODEL_ID: previewAumid,
-      ...(production ? {} : { OMP_RENDERER_DEV_URL: rendererEntryUrl }),
+      JULING_APP_USER_MODEL_ID: previewAumid,
+      ...(production ? {} : { JULING_RENDERER_DEV_URL: rendererEntryUrl }),
     },
   });
 

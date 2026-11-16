@@ -78,7 +78,7 @@ async function pngBytes(bytes: Uint8Array, mime: ImageMimeType, document: Docume
 export function ImagePreview({ image, onClose, onError, actionsEnabled = true }: ImagePreviewProps) {
   const document = useSurfaceDocument();
   const window = surfaceWindow(document);
-  const chrome = window.ompHarnessChrome;
+  const chrome = window.julingHarnessChrome;
   const hintId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);

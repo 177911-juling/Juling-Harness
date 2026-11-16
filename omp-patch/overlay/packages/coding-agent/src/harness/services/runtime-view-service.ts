@@ -103,8 +103,11 @@ export class HarnessRuntimeViews {
 					if (!useLive || file) trace = await this.#readRecordedShell(operation, file);
 				}
 				if (!trace) return { available: false, reason: "This command has no recorded execution trace." };
+				const source = shellVisualization(trace);
+				// Match the TUI fallback: unrestorable traces retain the plain command and output.
+				if (!source) return { available: true };
 				const presentation = readShellPresentation(
-					shellVisualization(trace),
+					source,
 					operation.preferences ?? defaultShellVizPreferences(),
 					trace,
 				);

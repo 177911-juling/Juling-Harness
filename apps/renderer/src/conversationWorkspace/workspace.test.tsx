@@ -1,9 +1,42 @@
 import { describe, expect, it, vi } from "vitest";
+import type { HarnessClient } from "@juling-harness/client-contract";
 import { ConversationWorkspaceStore, WORKSPACE_STORAGE_KEY } from "./store";
+import { prepareTargetSelection } from "./targetSelection";
 
 const a = { targetId: null, workspaceId: "a", sessionId: "chat-a" };
 const b = { targetId: "ssh-b", workspaceId: "b", sessionId: "chat-b" };
 describe("conversation workspace", () => {
+  it.each(["ready", "bootstrap"] as const)("keeps the later local target when SSH %s resolves late", async stage => {
+    let generation = 0;
+    const opened: Array<{ readonly targetId: string | null; readonly workspaceId?: string }> = [];
+    const ready = Promise.withResolvers<HarnessClient>();
+    const bootstrapped = Promise.withResolvers<{ selected: { workspaceId: string } }>();
+    const remote = {
+      bootstrap: vi.fn(() => stage === "bootstrap"
+        ? bootstrapped.promise
+        : Promise.resolve({ selected: { workspaceId: "workspace-b" } })),
+    } as unknown as HarnessClient;
+    const local = { bootstrap: vi.fn(async () => ({ selected: { workspaceId: "workspace-local" } })) } as unknown as HarnessClient;
+    const readyClient = (id: string | null) => id === null
+      ? Promise.resolve(local)
+      : stage === "ready"
+        ? ready.promise
+        : Promise.resolve(remote);
+    const select = async (id: string | null) => {
+      const current = ++generation;
+      const selection = await prepareTargetSelection(id, readyClient, () => current === generation);
+      if (selection !== undefined) opened.push(selection);
+    };
+    const stale = select("ssh-b");
+    if (stage === "bootstrap") await vi.waitFor(() => expect(remote.bootstrap).toHaveBeenCalledOnce());
+    await select(null);
+    expect(opened).toEqual([{ targetId: null, workspaceId: "workspace-local" }]);
+    if (stage === "ready") ready.resolve(remote);
+    else bootstrapped.resolve({ selected: { workspaceId: "workspace-b" } });
+    await stale;
+    expect(opened).toEqual([{ targetId: null, workspaceId: "workspace-local" }]);
+  });
+
   it("mounts only referenced documents while keeping identities for draft restoration", () => {
     const store = new ConversationWorkspaceStore(null);
     const first = store.open(a);

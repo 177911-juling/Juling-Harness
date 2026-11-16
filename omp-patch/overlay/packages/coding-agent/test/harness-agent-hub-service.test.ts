@@ -978,7 +978,7 @@ describe("WP-050/051/053 HarnessAgentHubService", () => {
 	});
 });
 
-test("per-call selections and task files reach native policy without losing assignment whitespace", async () => {
+test("per-call selections and inline instructions reach native policy without losing assignment whitespace", async () => {
 	const { service, spawner } = makeHub();
 	try {
 		const assignment = "\nSummarize the docs.  \n\n| file | status |\n";
@@ -989,15 +989,15 @@ test("per-call selections and task files reach native policy without losing assi
 			callerAgentId: "Main",
 		});
 		expect(spawner.requests()[0]).toMatchObject({ model: ["mock/exact:high"], assignment });
+		const followUpAssignment = "Review the summary.";
 		await service.spawn({
 			definition: "researcher",
-			taskFile: "local://assignment.md",
+			assignment: followUpAssignment,
 			effort: "hi",
 			callerAgentId: "Main",
 		});
 		expect(spawner.requests()).toHaveLength(2);
-		expect(spawner.requests()[1]).toMatchObject({ taskFile: "local://assignment.md", effort: "hi" });
-		expect(spawner.requests()[1]!.assignment).toBeUndefined();
+		expect(spawner.requests()[1]).toMatchObject({ assignment: followUpAssignment, effort: "hi" });
 	} finally {
 		service.dispose();
 	}

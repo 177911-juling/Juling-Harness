@@ -55,7 +55,7 @@ function ServerRow({ server, paneId, zh, props, preview, authAvailable, onComple
     : { ready: "Tools ready", pending: "Connecting / loading", failed: "Startup failed", disconnected: "Disconnected" };
   const hasTools = !!server.toolInfo?.length;
   const source = server.source;
-  const sourceLabel = source ? [source.providerName, source.level === "project" ? (zh ? "项目" : "Project") : source.level === "user" ? (zh ? "用户" : "User") : (zh ? "内置" : "Native")].join(" · ") : "";
+  const sourceLabel = source ? [source.providerName === "OMP" ? "Juling" : source.providerName, source.level === "project" ? (zh ? "项目" : "Project") : source.level === "user" ? (zh ? "用户" : "User") : (zh ? "内置" : "Native")].join(" · ") : "";
   const toolsId = `${paneId}-tools`;
   return (
     <article className={`runtime-mcp-server state-${server.state}${open && hasTools ? " expanded" : ""}`} aria-label={server.name}>

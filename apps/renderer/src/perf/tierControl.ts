@@ -30,7 +30,7 @@ export interface MachinePerfSnapshot {
   readonly probedAt?: string;
 }
 
-/** The read-only surface the preload exposes as `window.ompHarnessPerf`. */
+/** The read-only surface the preload exposes as `window.julingHarnessPerf`. */
 export interface TierControlSource {
   readonly cached: MachinePerfSnapshot | null;
   probe(): Promise<MachinePerfSnapshot>;
@@ -90,7 +90,7 @@ export class TierState {
 export interface TierControlEnvironment {
   /** Usually `document.documentElement`; a detached element in tests. */
   readonly root: Element;
-  /** `window.ompHarnessPerf`; absent in a browser or a harness without the shell. */
+  /** `window.julingHarnessPerf`; absent in a browser or a harness without the shell. */
   readonly source: TierControlSource | undefined;
   /** User or OS "reduce motion" preference, read on every apply. */
   motionOff(): boolean;

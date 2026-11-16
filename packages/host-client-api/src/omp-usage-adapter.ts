@@ -1,11 +1,12 @@
 /**
  * Homepage token-usage adapter.
  *
- * Syncs via the official `omp stats --summary` CLI (throttled), then reads
- * aggregates from ~/.omp/stats.db. Paths, session files and folders never
- * leave this module. Opening the native dashboard spawns a hidden
- * `omp stats` (not used as the `usage.get` sync mechanism). On Windows the
- * child is not detached — Node's `detached: true` would create a console.
+ * Syncs via the official `juling stats --summary` CLI (throttled), then reads
+ * aggregates from ~/.juling/stats.db (falling back to the pre-rebrand
+ * ~/.omp/stats.db). Paths, session files and folders never leave this module.
+ * Opening the native dashboard spawns a hidden `juling stats` (not used as the
+ * `usage.get` sync mechanism). On Windows the child is not detached — Node's
+ * `detached: true` would create a console.
  */
 
 import { execFile, spawn } from "node:child_process";
@@ -16,7 +17,7 @@ import { promisify } from "node:util";
 
 import type { ConfigWriteResult, StatsDashboardReadModel, TokenUsageReadModel } from "@juling-harness/client-contract";
 
-import { getStatsDbPath } from "./omp-discovery/paths.js";
+import { getStatsDbPathsForRead } from "./omp-discovery/paths.js";
 import { sanitizeDisplayText } from "./read-models.js";
 import type { HostUsageService } from "./services.js";
 
@@ -44,13 +45,13 @@ const DASHBOARD_POLL_MS = 250;
 const OPEN_OK: ConfigWriteResult = {
   applied: true,
   runtimeEffect: "immediate",
-  message: "正在打开 OMP Stats 仪表盘。",
+  message: "正在打开 Juling Stats 仪表盘。",
 };
 
 const OPENED_OK: ConfigWriteResult = {
   applied: true,
   runtimeEffect: "immediate",
-  message: "已在浏览器打开 OMP Stats 仪表盘。",
+  message: "已在浏览器打开 Juling Stats 仪表盘。",
 };
 
 export interface OmpUsageAdapterOptions {
@@ -123,25 +124,34 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 export async function defaultLocateOmp(): Promise<string | undefined> {
-  const exeName = process.platform === "win32" ? "omp.exe" : "omp";
-  const extraDirs = [join(homedir(), ".omp", "bin"), join(homedir(), ".local", "bin")];
+  // Canonical `juling` first; pre-rebrand `omp` binaries stay usable.
+  const exeNames = process.platform === "win32" ? ["juling.exe", "omp.exe"] : ["juling", "omp"];
+  const extraDirs = [
+    join(homedir(), ".juling", "bin"),
+    join(homedir(), ".omp", "bin"),
+    join(homedir(), ".local", "bin"),
+  ];
   const dirs = [...(process.env.PATH ?? "").split(delimiter), ...extraDirs];
-  for (const dir of dirs) {
-    if (!dir) continue;
-    const candidate = join(dir, exeName);
-    if (await fileExists(candidate)) return candidate;
+  for (const exeName of exeNames) {
+    for (const dir of dirs) {
+      if (!dir) continue;
+      const candidate = join(dir, exeName);
+      if (await fileExists(candidate)) return candidate;
+    }
   }
   const whereBin =
     process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "where.exe") : "which";
-  try {
-    const { stdout } = await execFileAsync(whereBin, [exeName], { timeout: 8_000, windowsHide: true });
-    const first = stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line.length > 0);
-    if (first && (await fileExists(first))) return first;
-  } catch {
-    /* PATH walk already failed */
+  for (const exeName of exeNames) {
+    try {
+      const { stdout } = await execFileAsync(whereBin, [exeName], { timeout: 8_000, windowsHide: true });
+      const first = stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0);
+      if (first && (await fileExists(first))) return first;
+    } catch {
+      /* PATH walk already failed */
+    }
   }
   return undefined;
 }
@@ -149,17 +159,21 @@ export async function defaultLocateOmp(): Promise<string | undefined> {
 /**
  * Start the native dashboard server.
  *
- * `open` decides whether `omp stats` may also launch the default browser. The
- * statistics page frames this dashboard, so an embedded start must not hand
+ * `open` decides whether `juling stats` may also launch the default browser.
+ * The statistics page frames this dashboard, so an embedded start must not hand
  * the same panel to Edge/Chrome; the explicit 「在浏览器打开」 fallback still
  * must. The switch is an env var rather than a flag because an older Runtime
- * rejects unknown flags outright and would never start the server.
+ * rejects unknown flags outright and would never start the server. Both the
+ * canonical and pre-rebrand variable are set: runtimes that predate the
+ * rebrand only read `OMP_STATS_NO_OPEN`.
  */
 function defaultSpawnDashboard(exe: string, options?: { readonly open?: boolean }): void {
   const child = spawn(exe, ["stats"], {
     stdio: "ignore",
     windowsHide: true,
-    ...(options?.open === true ? {} : { env: { ...process.env, OMP_STATS_NO_OPEN: "1" } }),
+    ...(options?.open === true
+      ? {}
+      : { env: { ...process.env, JULING_STATS_NO_OPEN: "1", OMP_STATS_NO_OPEN: "1" } }),
     // On Windows, `detached: true` allocates a new console window.
     ...(process.platform === "win32" ? {} : { detached: true }),
   });
@@ -307,7 +321,7 @@ async function readUsageDb(dbPath: string, nowMs: number): Promise<TokenUsageRea
 
 export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): HostUsageService {
   const home = options.home ?? homedir();
-  const statsDbPath = options.statsDbPath ?? getStatsDbPath(home);
+  const statsDbPaths = options.statsDbPath ? [options.statsDbPath] : getStatsDbPathsForRead(home);
   const locateOmp = options.locateOmp ?? defaultLocateOmp;
   const exec =
     options.exec ??
@@ -346,7 +360,7 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
       try {
         const exe = await locateOmp();
         if (exe === undefined) {
-          return { reason: "未找到 OMP Runtime，无法启动本机统计面板。" };
+          return { reason: "未找到 Juling Runtime，无法启动本机统计面板。" };
         }
         spawnDashboard(exe);
         const deadline = now() + startTimeoutMs;
@@ -389,7 +403,7 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
     if (exe === undefined) {
       // Same `exe`-classified message as before the reorder: not finding the
       // Runtime still surfaces as a sync error, never as a generic read failure.
-      return { syncError: "未找到 omp。安装 OMP 或将其加入 PATH 后即可同步用量。" };
+      return { syncError: "未找到 juling。安装 Juling 或将其加入 PATH 后即可同步用量。" };
     }
     // Re-check after the await: a concurrent caller may have started or finished
     // the sync while the locator was resolving. Keeping this check after the
@@ -419,7 +433,11 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
     async get(): Promise<TokenUsageReadModel> {
       const generatedAt = isoNow(now());
       const sync = await syncOnce();
-      const model = await readUsageDb(statsDbPath, now());
+      let model: TokenUsageReadModel | undefined;
+      for (const statsDbPath of statsDbPaths) {
+        model = await readUsageDb(statsDbPath, now());
+        if (model !== undefined) break;
+      }
       if (model !== undefined) {
         if (sync.syncError !== undefined && model.days.length === 0) {
           return { ...model, unavailableReason: sync.syncError };
@@ -429,10 +447,11 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
       if (sync.syncError !== undefined) {
         return emptyModel(generatedAt, sync.syncError);
       }
-      if (await fileExists(statsDbPath)) {
+      const statsDbExists = (await Promise.all(statsDbPaths.map((path) => fileExists(path)))).some(Boolean);
+      if (statsDbExists) {
         return emptyModel(generatedAt, "无法读取用量库。");
       }
-      return emptyModel(generatedAt, "尚未同步到用量数据。可点击「打开 OMP Stats」生成统计库。");
+      return emptyModel(generatedAt, "尚未同步到用量数据。可点击「打开 Juling Stats」生成统计库。");
     },
 
     async dashboard(): Promise<StatsDashboardReadModel> {
@@ -443,7 +462,7 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
     async openDashboard(): Promise<ConfigWriteResult> {
       const exe = await locateOmp();
       if (exe === undefined) {
-        throw { code: "UNAVAILABLE", message: "未找到 omp。安装 OMP 或将其加入 PATH 后再打开 Stats。" };
+        throw { code: "UNAVAILABLE", message: "未找到 juling。安装 Juling 或将其加入 PATH 后再打开 Stats。" };
       }
       try {
         const live = await probeDashboard();
@@ -451,11 +470,11 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
           await openUrl(DASHBOARD_URL);
           return OPENED_OK;
         }
-        // An explicit request to see the panel in a browser keeps `omp stats`
+        // An explicit request to see the panel in a browser keeps `juling stats`
         // opening one; only the embedded start suppresses it.
         spawnDashboard(exe, { open: true });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "打开 OMP Stats 失败";
+        const message = error instanceof Error ? error.message : "打开 Juling Stats 失败";
         throw { code: "UNAVAILABLE", message };
       }
       return OPEN_OK;

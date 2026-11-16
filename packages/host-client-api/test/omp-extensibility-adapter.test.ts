@@ -36,10 +36,10 @@ describe("createOmpExtensibilityService", () => {
   test("reads user, project, managed skills and prefers the project winner", async () => {
     const home = await mkdtemp(join(tmpdir(), "omp-ext-skills-"));
     const cwd = join(home, "project");
-    const agent = join(home, ".omp", "agent");
+    const agent = join(home, ".juling", "agent");
     try {
       await writeSkill(
-        join(cwd, ".omp", "skills"),
+        join(cwd, ".juling", "skills"),
         "shared",
         "---\nname: shared\ndescription: project copy\n---\n",
       );
@@ -66,7 +66,7 @@ describe("createOmpExtensibilityService", () => {
         ["commit-msg", "oss-audit", "shared"],
       );
       const shared = result.skills.find((skill) => skill.name === "shared");
-      assert.equal(shared?.sourceLabel, "OMP");
+      assert.equal(shared?.sourceLabel, "Juling");
       assert.equal(shared?.scope, "workspace");
       assert.equal(shared?.desc, "project copy");
       // enabled: false skills stay listed as disabled inventory
@@ -86,11 +86,11 @@ describe("createOmpExtensibilityService", () => {
   test("lists plugins from package.json, lock, and project overrides", async () => {
     const home = await mkdtemp(join(tmpdir(), "omp-ext-plugins-"));
     const cwd = join(home, "project");
-    const pluginsDir = join(home, ".omp", "plugins");
+    const pluginsDir = join(home, ".juling", "plugins");
     const pkgDir = join(pluginsDir, "node_modules", "demo-plugin");
     try {
       await mkdir(pkgDir, { recursive: true });
-      await mkdir(join(cwd, ".omp"), { recursive: true });
+      await mkdir(join(cwd, ".juling"), { recursive: true });
       await writeFile(
         join(pluginsDir, "package.json"),
         JSON.stringify({
@@ -123,7 +123,7 @@ describe("createOmpExtensibilityService", () => {
         "utf8",
       );
       await writeFile(
-        join(cwd, ".omp", "plugin-overrides.json"),
+        join(cwd, ".juling", "plugin-overrides.json"),
         JSON.stringify({ disabled: ["demo-plugin"] }),
         "utf8",
       );
@@ -150,11 +150,11 @@ describe("createOmpExtensibilityService", () => {
   test("lists packages without omp/pi as error with a path-free err", async () => {
     const home = await mkdtemp(join(tmpdir(), "omp-ext-noomp-"));
     const cwd = join(home, "project");
-    const pluginsDir = join(home, ".omp", "plugins");
+    const pluginsDir = join(home, ".juling", "plugins");
     const pkgDir = join(pluginsDir, "node_modules", "plain-pkg");
     try {
       await mkdir(pkgDir, { recursive: true });
-      await mkdir(join(cwd, ".omp"), { recursive: true });
+      await mkdir(join(cwd, ".juling"), { recursive: true });
       await writeFile(
         join(pluginsDir, "package.json"),
         JSON.stringify({
@@ -181,13 +181,62 @@ describe("createOmpExtensibilityService", () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+
+  test("legacy .omp skills and plugins stay readable but never become write targets", async () => {
+    const home = await mkdtemp(join(tmpdir(), "omp-ext-legacy-"));
+    const cwd = join(home, "project");
+    const legacyPlugins = join(home, ".omp", "plugins");
+    const pkgDir = join(legacyPlugins, "node_modules", "legacy-plugin");
+    const legacyLock = JSON.stringify({ plugins: { "legacy-plugin": { version: "1.0.0", enabled: true } }, settings: {} });
+    try {
+      // Legacy user/project skills; a canonical user skill shadows the same name.
+      await writeSkill(
+        join(home, ".omp", "agent", "skills"),
+        "legacy-only",
+        "---\nname: legacy-only\ndescription: legacy user\n---\n",
+      );
+      await writeSkill(
+        join(cwd, ".omp", "skills"),
+        "legacy-project",
+        "---\nname: legacy-project\ndescription: legacy project\n---\n",
+      );
+      await writeSkill(
+        join(home, ".juling", "agent", "skills"),
+        "legacy-only",
+        "---\nname: legacy-only\ndescription: canonical user\n---\n",
+      );
+
+      await mkdir(pkgDir, { recursive: true });
+      await writeFile(
+        join(legacyPlugins, "package.json"),
+        JSON.stringify({ name: "omp-plugins", private: true, dependencies: { "legacy-plugin": "^1.0.0" } }),
+        "utf8",
+      );
+      await writeFile(join(legacyPlugins, "omp-plugins.lock.json"), legacyLock, "utf8");
+      await writeFile(
+        join(pkgDir, "package.json"),
+        JSON.stringify({ name: "legacy-plugin", version: "1.0.0", omp: { tools: "dist/tools.ts" } }),
+        "utf8",
+      );
+
+      const service = createOmpExtensibilityService({ home, cwd, now: () => NOW });
+      const result = await service.get();
+      assert.equal(result.skills.find((skill) => skill.name === "legacy-only")?.desc, "canonical user");
+      assert.equal(result.skills.find((skill) => skill.name === "legacy-project")?.scope, "workspace");
+      assert.ok(result.plugins.some((plugin) => plugin.name === "legacy-plugin"));
+      // Reading the legacy tree never rewrites it.
+      assert.equal(await readFile(join(legacyPlugins, "omp-plugins.lock.json"), "utf8"), legacyLock);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("plugins.setEnabled (whole-package toggle)", () => {
   test("marketplace toggle writes installed_plugins.json and plugins.get reflects it", async () => {
     const home = await mkdtemp(join(tmpdir(), "omp-set-mkt-"));
     const cwd = join(home, "project");
-    const pluginsDir = join(home, ".omp", "plugins");
+    const pluginsDir = join(home, ".juling", "plugins");
     const installPath = join(home, "mkt-install");
     try {
       await mkdir(installPath, { recursive: true });
@@ -231,11 +280,11 @@ describe("plugins.setEnabled (whole-package toggle)", () => {
   test("npm toggle writes omp-plugins.lock.json enabled: false", async () => {
     const home = await mkdtemp(join(tmpdir(), "omp-set-npm-"));
     const cwd = join(home, "project");
-    const pluginsDir = join(home, ".omp", "plugins");
+    const pluginsDir = join(home, ".juling", "plugins");
     const pkgDir = join(pluginsDir, "node_modules", "demo-plugin");
     try {
       await mkdir(pkgDir, { recursive: true });
-      await mkdir(join(cwd, ".omp"), { recursive: true });
+      await mkdir(join(cwd, ".juling"), { recursive: true });
       await writeFile(
         join(pluginsDir, "package.json"),
         JSON.stringify({
@@ -280,11 +329,11 @@ describe("plugins.setEnabled (whole-package toggle)", () => {
   test("project-scoped lock-only toggle also writes plugin-overrides.json disabled", async () => {
     const home = await mkdtemp(join(tmpdir(), "omp-set-lockonly-"));
     const cwd = join(home, "project");
-    const projectPlugins = join(cwd, ".omp", "plugins");
+    const projectPlugins = join(cwd, ".juling", "plugins");
     const pkgDir = join(projectPlugins, "node_modules", "lock-only");
     try {
       await mkdir(pkgDir, { recursive: true });
-      await mkdir(join(cwd, ".omp"), { recursive: true });
+      await mkdir(join(cwd, ".juling"), { recursive: true });
       await writeFile(
         join(projectPlugins, "package.json"),
         JSON.stringify({ name: "omp-plugins", private: true, dependencies: {} }),
@@ -304,7 +353,7 @@ describe("plugins.setEnabled (whole-package toggle)", () => {
       const service = createOmpExtensibilityService({ home, cwd, now: () => NOW });
       await service.setEnabled({ name: "lock-only", enabled: false });
 
-      const overrides = JSON.parse(await readFile(join(cwd, ".omp", "plugin-overrides.json"), "utf8")) as {
+      const overrides = JSON.parse(await readFile(join(cwd, ".juling", "plugin-overrides.json"), "utf8")) as {
         disabled?: string[];
       };
       assert.deepEqual(overrides.disabled, ["lock-only"]);
@@ -316,7 +365,7 @@ describe("plugins.setEnabled (whole-package toggle)", () => {
 
       // Re-enabling removes the name from the disabled array.
       await service.setEnabled({ name: "lock-only", enabled: true });
-      const reenabled = JSON.parse(await readFile(join(cwd, ".omp", "plugin-overrides.json"), "utf8")) as {
+      const reenabled = JSON.parse(await readFile(join(cwd, ".juling", "plugin-overrides.json"), "utf8")) as {
         disabled?: string[];
       };
       assert.deepEqual(reenabled.disabled, []);
@@ -329,8 +378,8 @@ describe("plugins.setEnabled (whole-package toggle)", () => {
   test("user and project toggles of the same plugin do not interfere", async () => {
     const home = await mkdtemp(join(tmpdir(), "omp-set-dual-"));
     const cwd = join(home, "project");
-    const userPlugins = join(home, ".omp", "plugins");
-    const projectPlugins = join(cwd, ".omp", "plugins");
+    const userPlugins = join(home, ".juling", "plugins");
+    const projectPlugins = join(cwd, ".juling", "plugins");
     try {
       for (const [pluginsDir, version] of [[userPlugins, "1.0.0"], [projectPlugins, "2.0.0"]] as const) {
         const pkgDir = join(pluginsDir, "node_modules", "dual");
@@ -371,7 +420,7 @@ describe("plugins.setEnabled (whole-package toggle)", () => {
         plugins: Record<string, { enabled?: boolean }>;
       };
       assert.equal(projectLock2.plugins.dual?.enabled, false);
-      const overrides = JSON.parse(await readFile(join(cwd, ".omp", "plugin-overrides.json"), "utf8")) as {
+      const overrides = JSON.parse(await readFile(join(cwd, ".juling", "plugin-overrides.json"), "utf8")) as {
         disabled?: string[];
       };
       assert.deepEqual(overrides.disabled, ["dual"]);
@@ -399,7 +448,7 @@ describe("plugins.setEnabled (whole-package toggle)", () => {
   test("deps-only npm plugin gets a lock entry on disable", async () => {
     const home = await mkdtemp(join(tmpdir(), "omp-set-deps-"));
     const cwd = join(home, "project");
-    const pluginsDir = join(home, ".omp", "plugins");
+    const pluginsDir = join(home, ".juling", "plugins");
     const pkgDir = join(pluginsDir, "node_modules", "deps-only");
     try {
       await mkdir(pkgDir, { recursive: true });
@@ -432,7 +481,7 @@ describe("plugins.setEnabled (whole-package toggle)", () => {
     const home = await mkdtemp(join(tmpdir(), "omp-set-err-"));
     const cwd = join(home, "project");
     try {
-      await mkdir(join(cwd, ".omp"), { recursive: true });
+      await mkdir(join(cwd, ".juling"), { recursive: true });
       const service = createOmpExtensibilityService({ home, cwd, now: () => NOW });
 
       await assert.rejects(
@@ -465,7 +514,7 @@ describe("skills.setEnabled (whole-skill toggle)", () => {
     const cwd = join(home, "project");
     try {
       await writeSkill(
-        join(cwd, ".omp", "skills"),
+        join(cwd, ".juling", "skills"),
         "upstream",
         "---\nname: upstream\ndescription: sync flow\n---\nbody\n",
       );
@@ -478,7 +527,7 @@ describe("skills.setEnabled (whole-skill toggle)", () => {
       assert.equal(result.applied, true);
       assert.equal(result.runtimeEffect, "new-session");
 
-      const content = await readFile(join(cwd, ".omp", "skills", "upstream", "SKILL.md"), "utf8");
+      const content = await readFile(join(cwd, ".juling", "skills", "upstream", "SKILL.md"), "utf8");
       assert.match(content, /^enabled: false$/m);
 
       const after = await service.get();
@@ -489,7 +538,7 @@ describe("skills.setEnabled (whole-skill toggle)", () => {
 
       // Re-enabling overwrites the line and the list reflects it.
       await service.setSkillEnabled({ name: "upstream", enabled: true });
-      const reenabled = await readFile(join(cwd, ".omp", "skills", "upstream", "SKILL.md"), "utf8");
+      const reenabled = await readFile(join(cwd, ".juling", "skills", "upstream", "SKILL.md"), "utf8");
       assert.match(reenabled, /^enabled: true$/m);
       assert.equal((await service.get()).skills.find((skill) => skill.name === "upstream")?.enabled, true);
     } finally {
@@ -502,7 +551,7 @@ describe("skills.setEnabled (whole-skill toggle)", () => {
     const cwd = join(home, "project");
     try {
       await writeSkill(
-        join(cwd, ".omp", "skills"),
+        join(cwd, ".juling", "skills"),
         "off",
         "---\nname: off\ndescription: disabled skill\nhide: true\nenabled: false\n---\nbody\n",
       );
@@ -511,7 +560,7 @@ describe("skills.setEnabled (whole-skill toggle)", () => {
       assert.equal((await service.get()).skills.find((skill) => skill.name === "off")?.enabled, false);
 
       await service.setSkillEnabled({ name: "off", enabled: true });
-      const content = await readFile(join(cwd, ".omp", "skills", "off", "SKILL.md"), "utf8");
+      const content = await readFile(join(cwd, ".juling", "skills", "off", "SKILL.md"), "utf8");
       assert.match(content, /^enabled: true$/m);
       assert.match(content, /^hide: true$/m, "unrelated frontmatter keys must be preserved");
       assert.equal((await service.get()).skills.find((skill) => skill.name === "off")?.enabled, true);
@@ -526,13 +575,13 @@ describe("skills.setEnabled (whole-skill toggle)", () => {
     try {
       // A user-scope skill with no project shadow: explicit scope works.
       await writeSkill(
-        join(home, ".omp", "agent", "skills"),
+        join(home, ".juling", "agent", "skills"),
         "global-only",
         "---\nname: global-only\ndescription: user copy\n---\n",
       );
       const service = createOmpExtensibilityService({ home, cwd, now: () => NOW });
       await service.setSkillEnabled({ name: "global-only", enabled: false, scope: "user" });
-      const userContent = await readFile(join(home, ".omp", "agent", "skills", "global-only", "SKILL.md"), "utf8");
+      const userContent = await readFile(join(home, ".juling", "agent", "skills", "global-only", "SKILL.md"), "utf8");
       assert.match(userContent, /^enabled: false$/m);
       assert.equal((await service.get()).skills.find((skill) => skill.name === "global-only")?.enabled, false);
       await assert.rejects(
@@ -543,12 +592,12 @@ describe("skills.setEnabled (whole-skill toggle)", () => {
       // Same name in user and project: the project winner is targeted by
       // default; the shadowed user record is not reachable by scope.
       await writeSkill(
-        join(cwd, ".omp", "skills"),
+        join(cwd, ".juling", "skills"),
         "shared",
         "---\nname: shared\ndescription: project copy\n---\n",
       );
       await writeSkill(
-        join(home, ".omp", "agent", "skills"),
+        join(home, ".juling", "agent", "skills"),
         "shared",
         "---\nname: shared\ndescription: user copy\n---\n",
       );
@@ -557,9 +606,9 @@ describe("skills.setEnabled (whole-skill toggle)", () => {
         (error: unknown) => (error as { code?: string }).code === "INVALID_ARGUMENT",
       );
       await service.setSkillEnabled({ name: "shared", enabled: false });
-      const projectContent = await readFile(join(cwd, ".omp", "skills", "shared", "SKILL.md"), "utf8");
+      const projectContent = await readFile(join(cwd, ".juling", "skills", "shared", "SKILL.md"), "utf8");
       assert.match(projectContent, /^enabled: false$/m);
-      const userContent2 = await readFile(join(home, ".omp", "agent", "skills", "shared", "SKILL.md"), "utf8");
+      const userContent2 = await readFile(join(home, ".juling", "agent", "skills", "shared", "SKILL.md"), "utf8");
       assert.doesNotMatch(userContent2, /^enabled:/m, "user copy must stay untouched");
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -571,7 +620,7 @@ describe("skills.setEnabled (whole-skill toggle)", () => {
     const cwd = join(home, "project");
     try {
       await writeSkill(
-        join(home, ".omp", "agent", "managed-skills"),
+        join(home, ".juling", "agent", "managed-skills"),
         "oss-audit",
         "---\nname: oss-audit\ndescription: audit\n---\n",
       );
@@ -607,12 +656,12 @@ describe("skills.reveal / skills.revealRoot", () => {
     const opened: string[] = [];
     try {
       await writeSkill(
-        join(cwd, ".omp", "skills"),
+        join(cwd, ".juling", "skills"),
         "shared",
         "---\nname: shared\ndescription: project copy\n---\n",
       );
       await writeSkill(
-        join(home, ".omp", "agent", "skills"),
+        join(home, ".juling", "agent", "skills"),
         "shared",
         "---\nname: shared\ndescription: user copy\n---\n",
       );
@@ -626,7 +675,7 @@ describe("skills.reveal / skills.revealRoot", () => {
       });
       const result = await service.revealSkill({ name: "shared" });
       assert.equal(result.applied, true);
-      assert.deepEqual(opened, [join(cwd, ".omp", "skills", "shared")]);
+      assert.deepEqual(opened, [join(cwd, ".juling", "skills", "shared")]);
 
       await assert.rejects(
         async () => service.revealSkill({ name: "ghost" }),
@@ -664,7 +713,7 @@ describe("skills.reveal / skills.revealRoot", () => {
       });
       const result = await service.revealSkillRoot({ scope: "user" });
       assert.equal(result.applied, true);
-      const expected = join(home, ".omp", "agent", "skills");
+      const expected = join(home, ".juling", "agent", "skills");
       assert.deepEqual(opened, [expected]);
       await access(expected);
     } finally {

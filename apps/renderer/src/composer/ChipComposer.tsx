@@ -26,7 +26,7 @@ import type { ComposerChip, ComposerSnapshot, MentionCandidate, PromptImage } fr
 import type { PredictionResult } from "@juling-harness/harness-protocol";
 import { emptySnapshot, newChipId } from "./types";
 import { snapshotFromDoc, snapshotIsEmpty, displayDocFromSerializedText } from "./serialize";
-import { fileToPromptImage, imagePreviewUrl, isImageFile } from "./ingest";
+import { ImageAttachmentBudgetError, fileToPromptImage, imagePreviewUrl, isImageFile } from "./ingest";
 import {
   chipRemoveTarget,
   createChipElement,
@@ -157,7 +157,7 @@ async function resolveOsPaths(
   files: File[],
 ): Promise<Map<File, { kind: "file" | "dir" | "image"; path: string; name: string }>> {
   const out = new Map<File, { kind: "file" | "dir" | "image"; path: string; name: string }>();
-  const chrome = window.ompHarnessChrome;
+  const chrome = window.julingHarnessChrome;
   if (chrome?.getPathForFile === undefined || chrome.resolveDroppedPaths === undefined) return out;
   const pairs: Array<{ file: File; path: string }> = [];
   for (const file of files) {
@@ -419,7 +419,10 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       // Main resolved the real kind by stat, so a folder named `foo.png` never
       // reaches the image branch; extension sniffing is only the fallback.
       if (meta ? meta.kind === "image" : isImageFile(file)) {
-        const image = await fileToPromptImage(file).catch(() => null);
+        const image = await fileToPromptImage(file).catch(error => {
+          if (error instanceof ImageAttachmentBudgetError) throw error;
+          return null;
+        });
         if (!current()) return false;
         // Disk-backed images travel as @path. Preview bytes are optional: a
         // read failure must not drop the capsule. SVG is the exception: @path

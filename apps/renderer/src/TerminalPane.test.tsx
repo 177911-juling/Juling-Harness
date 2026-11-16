@@ -33,7 +33,7 @@ it("an explicit create on first mount does not also auto-create a shell", async 
     write: vi.fn().mockResolvedValue(undefined), resize: vi.fn().mockResolvedValue(undefined), dispose: vi.fn().mockResolvedValue(undefined),
     onData: vi.fn(() => () => {}), onExit: vi.fn(() => () => {}),
   };
-  vi.stubGlobal("ompHarnessTerminal", api);
+  vi.stubGlobal("julingHarnessTerminal", api);
   function ExplicitCreate() {
     const attach = useCallback((handle: import("./TerminalPane").TerminalPaneHandle | null) => { handle?.create(); }, []);
     return <TerminalSessionsProvider><TerminalPane ref={attach} visible /></TerminalSessionsProvider>;
@@ -52,7 +52,7 @@ it("fits automatic resize without taking focus away from the composer", async ()
     write: vi.fn().mockResolvedValue(undefined), resize: vi.fn().mockResolvedValue(undefined), dispose: vi.fn().mockResolvedValue(undefined),
     onData: vi.fn(() => () => {}), onExit: vi.fn(() => () => {}),
   };
-  vi.stubGlobal("ompHarnessTerminal", api);
+  vi.stubGlobal("julingHarnessTerminal", api);
   render(<><input aria-label="Composer" /><Harness visible /></>);
   await waitFor(() => expect(mocks.terminals).toHaveLength(1));
   await waitFor(() => expect(mocks.terminals[0]!.focus).toHaveBeenCalled());
@@ -77,7 +77,7 @@ it("updates live and hidden terminal fonts without recreating the shell or steal
     write: vi.fn().mockResolvedValue(undefined), resize: vi.fn().mockResolvedValue(undefined), dispose: vi.fn().mockResolvedValue(undefined),
     onData: vi.fn(listener => { onData = listener; return () => {}; }), onExit: vi.fn(() => () => {}),
   };
-  vi.stubGlobal("ompHarnessTerminal", api);
+  vi.stubGlobal("julingHarnessTerminal", api);
   const view = render(<Harness visible />);
   await waitFor(() => expect(mocks.terminals).toHaveLength(1));
   act(() => onData({ id: "shell-1", data: "retained shell output" }));
@@ -108,7 +108,7 @@ it("shows a truncation notice instead of dropping a large background backlog sil
     ack: vi.fn(),
     onData: vi.fn((listener: typeof emit) => { emit = listener; return () => {}; }), onExit: vi.fn(() => () => {}),
   };
-  vi.stubGlobal("ompHarnessTerminal", api);
+  vi.stubGlobal("julingHarnessTerminal", api);
 
   // Create the terminal with no pane rendered at all, so its output has nowhere
   // to go but the bounded backlog (the reviewed defect: this used to be acked
@@ -143,7 +143,7 @@ it("selects a command terminal created outside the pane and keeps the existing s
     write: vi.fn().mockResolvedValue(undefined), resize: vi.fn().mockResolvedValue(undefined), dispose: vi.fn().mockResolvedValue(undefined),
     onData: vi.fn(() => () => {}), onExit: vi.fn(() => () => {}),
   };
-  vi.stubGlobal("ompHarnessTerminal", api);
+  vi.stubGlobal("julingHarnessTerminal", api);
   let store!: ReturnType<typeof useTerminalSessions>["store"];
   function Probe() { store = useTerminalSessions().store; return null; }
   const view = render(<TerminalSessionsProvider><Probe /><TerminalPane workspaceId="work" sessionId="session" conversationId="chat" visible /></TerminalSessionsProvider>);

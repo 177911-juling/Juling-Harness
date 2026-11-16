@@ -191,7 +191,6 @@ export interface HarnessAgentSpawnRequest {
 	model?: string[];
 	definition: string;
 	assignment?: string;
-	taskFile?: string;
 	solutionSpace?: string;
 	context?: string;
 	async?: boolean;
@@ -217,7 +216,11 @@ export interface HarnessAgentSpawnerPort {
 
 /** Raw page from the native incremental transcript reader (offsets are internal). */
 export interface HarnessTranscriptReaderPort {
-	read(args: { agentId: string; offset: number; limit: number }): Promise<{ messages: HarnessMessage[]; eof: boolean }>;
+	read(args: {
+		agentId: string;
+		offset: number;
+		limit: number;
+	}): Promise<{ messages: HarnessMessage[]; eof: boolean }>;
 }
 
 export type HarnessDestructiveAction = { kind: "release"; agentId: string; generation: number; risk: "destructive" };
@@ -505,7 +508,6 @@ export class HarnessAgentHubService {
 		model?: string[];
 		definition: string;
 		assignment?: string;
-		taskFile?: string;
 		solutionSpace?: string;
 		context?: string;
 		async?: boolean;
@@ -517,8 +519,7 @@ export class HarnessAgentHubService {
 			throw new HarnessAgentHubError("INVALID_ARGUMENT", "Select one exact per-call model");
 		const definition = args.definition.trim();
 		const assignment = args.assignment;
-		if (!!assignment?.trim() === !!args.taskFile)
-			throw new HarnessAgentHubError("INVALID_ARGUMENT", "Provide inline instructions or a task file");
+		if (!assignment?.trim()) throw new HarnessAgentHubError("INVALID_ARGUMENT", "Provide inline instructions");
 		if (
 			args.solutionSpace !== undefined &&
 			(!args.solutionSpace.trim() || args.solutionSpace.length > MAX_MESSAGE_TEXT)
@@ -543,7 +544,7 @@ export class HarnessAgentHubService {
 		try {
 			receipt = await this.#spawner.spawn({
 				definition,
-				...(assignment ? { assignment } : { taskFile: args.taskFile }),
+				assignment,
 				...(args.model ? { model: args.model } : {}),
 				...(args.solutionSpace !== undefined ? { solutionSpace: args.solutionSpace } : {}),
 				...(args.context !== undefined ? { context: args.context } : {}),

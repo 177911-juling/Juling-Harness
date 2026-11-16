@@ -1054,7 +1054,7 @@ function WebSearchBody({ tool }: { tool: ToolView }) {
   const answer = jsonString(data?.answer) ?? jsonString(response.answer) ?? jsonString(fields.answer) ?? jsonString(fields.output);
   const provider = jsonString(data?.provider) ?? jsonString(response.provider) ?? jsonString(fields.provider);
   const openExternal = (event: MouseEvent<HTMLAnchorElement>, url: string) => {
-    const chrome = (globalThis as { ompHarnessChrome?: { openUrl?: (args: { url: string }) => unknown } }).ompHarnessChrome;
+    const chrome = (globalThis as { julingHarnessChrome?: { openUrl?: (args: { url: string }) => unknown } }).julingHarnessChrome;
     if (chrome?.openUrl === undefined) return;
     event.preventDefault(); chrome.openUrl({ url });
   };

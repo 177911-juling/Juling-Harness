@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import type { ClientBootstrap, HomeReadModel, SessionHistoryReadModel, HarnessClient, TokenUsageReadModel, WorkspaceListReadModel } from "@juling-harness/client-contract";
+import type { ClientBootstrap, HomeReadModel, SessionHistoryEntry, SessionHistoryReadModel, HarnessClient, TokenUsageReadModel, WorkspaceListReadModel } from "@juling-harness/client-contract";
 import type { OperatorStateSnapshot } from "@juling-harness/harness-protocol";
 import { Icon } from "./icons";
 import { usePreviewMode } from "./preview/PreviewContext";
@@ -856,6 +856,7 @@ export function HomePage({
   client,
   onPickFolder,
   onOpenWorkspace,
+  onSelectThread,
   onRoute,
 }: {
   runtime?: ClientBootstrap["runtime"];
@@ -866,6 +867,7 @@ export function HomePage({
   client?: HarnessClient;
   onPickFolder?: () => void;
   onOpenWorkspace?: (workspaceId: string) => void;
+  onSelectThread?: (entry: SessionHistoryEntry) => void;
   onRoute: (route: PageRoute) => void;
 }) {
   const { t, resolvedLanguage } = useI18n();
@@ -1025,7 +1027,7 @@ export function HomePage({
             <span className="tiny muted">{entry.time}</span>
           </button>
         )) : activities.length ? activities.map((entry) => (
-          <button key={entry.historyId} className="activity-row" type="button" onClick={() => onRoute("workbench")}>
+          <button key={entry.historyId} className="activity-row" type="button" onClick={() => { onSelectThread?.(entry); onRoute("workbench"); }}>
             <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
             <span className="ellipsis">{t("home.sessionEntry", { title: entry.title ?? t("conversation.untitledSession") })}</span>
             <span className="spacer" />

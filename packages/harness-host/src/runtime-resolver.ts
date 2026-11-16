@@ -342,7 +342,7 @@ export function createPathLocator(options: {
   const exists = options.exists;
   return {
     async locate(platform) {
-      const name = executableName ?? (platform === "win32" ? "omp.exe" : "omp");
+      const name = executableName ?? (platform === "win32" ? "juling.exe" : "juling");
       for (const directory of pathEnv.split(platform === "win32" ? ";" : ":")) {
         if (directory.length === 0) continue;
         const candidate = join(directory, name);
@@ -410,6 +410,16 @@ export async function resolveRuntime(
     const expectedPlatform = `${platform}-${arch}`;
     if (installationManifest.platform !== expectedPlatform) {
       return rejectedResolution("managed", `installation platform ${installationManifest.platform} does not match ${expectedPlatform}`);
+    }
+    // Runtimes signed before the Harness rename speak the old wire protocol
+    // (`omp-studio`, `studio.*` frames) and the old CLI mode. The adapter here
+    // cannot translate frames, so report the artifact as outdated instead of
+    // letting it fail as a malformed hello.
+    if (installationManifest.patchsetVersion.startsWith("studio.")) {
+      return rejectedResolution(
+        "managed",
+        "installed Runtime predates the Harness rename; rebuild it with `npm run omp:build:host`",
+      );
     }
     if (!overlapsProtocolRange(installationManifest.harnessProtocol, supportedProtocolVersions)) {
       return rejectedResolution("managed", "installation protocol range is not supported by this Host");
@@ -816,7 +826,7 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
       try {
         child = (options.spawnProcess ?? spawn)(
           context.executablePath,
-          // cwd === HOME triggers OMP's automatic move to the shared temp root
+          // cwd === HOME triggers the Runtime's automatic move to the shared temp root
           // unless the launch directory is also explicit in its CLI arguments.
           buildProcessProbeArgs([...(options.args ?? []), "--cwd", workspace], bootstrap),
           {
@@ -825,23 +835,29 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
             ...process.env,
             ...options.env,
             // A compatibility probe must not leave empty/project-keyed
-            // session directories in the user's real OMP profile. Keep every
+            // session directories in the user's real profile. Keep every
             // probe artifact under the scratch workspace removed below.
-            OMP_AGENT_DIR: join(workspace, ".omp-agent"),
+            JULING_AGENT_DIR: join(workspace, ".juling-agent"),
+            JULING_CODING_AGENT_DIR: join(workspace, ".juling-agent"),
+            JULING_CONFIG_DIR: ".juling",
+            JULING_PROFILE: "",
             // ...and it must not *read* the operator's profile either. The
             // Runtime folds every command it can discover into the manifest it
             // reports, and `classifyManaged` compares that manifest's hash with
             // a value frozen and signed at packaging time; a probe that sees
             // one machine's skills, plugins, MCP prompts or user-level slash
             // commands therefore produces evidence that cannot match any other
-            // machine's. `OMP_AGENT_DIR` alone does not do this: it is this
-            // repo's own convention (see `defaultOmpAgentDir`), while the
-            // vendored Runtime resolves its profile from `PI_CODING_AGENT_DIR`,
-            // `PI_CONFIG_DIR` and `OMP_PROFILE`/`PI_PROFILE` — and everything
-            // under `~/.claude`, `~/.codex` and `~/.gemini` is reached through
-            // `os.homedir()`, which only HOME/USERPROFILE can move.
-            PI_CODING_AGENT_DIR: join(workspace, ".omp-agent"),
-            PI_CONFIG_DIR: ".omp",
+            // machine's. The `JULING_*` names above are this repo's own
+            // convention (see `defaultOmpAgentDir`); a Runtime built from this
+            // vendor tree still resolves its profile from the legacy
+            // `OMP_AGENT_DIR`, `PI_CODING_AGENT_DIR`, `PI_CONFIG_DIR` and
+            // `OMP_PROFILE`/`PI_PROFILE` names, so both spellings are pinned to
+            // the scratch tree — and everything under `~/.claude`, `~/.codex`
+            // and `~/.gemini` is reached through `os.homedir()`, which only
+            // HOME/USERPROFILE can move.
+            OMP_AGENT_DIR: join(workspace, ".juling-agent"),
+            PI_CODING_AGENT_DIR: join(workspace, ".juling-agent"),
+            PI_CONFIG_DIR: ".juling",
             PI_CONFIG_FILES: "",
             OMP_PROFILE: "",
             PI_PROFILE: "",

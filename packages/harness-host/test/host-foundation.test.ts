@@ -47,6 +47,7 @@ import {
   HarnessHostError,
   HarnessBridgeClient,
   HarnessBridgeHandshakeError,
+  HarnessBridgeRequestError,
   HarnessHostRuntimeActor,
   HarnessRuntimeSessionController,
   classifyOperation,
@@ -349,6 +350,45 @@ test("流式 delta 不再触发 projection 发布：N 个 delta → 0 次发布"
   } finally {
     unsubscribe();
     controller.dispose();
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("WP-013 rejects oversized prompt images locally without disconnecting the Bridge", async () => {
+  const token = "bridge-token-image-budget";
+  let received = 0;
+  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    onRequest() { received += 1; },
+  });
+  const client = new HarnessBridgeClient({ endpoint: bridge.endpoint, token });
+  try {
+    await client.connect();
+    await client.requestSnapshot();
+    const images = [{
+      type: "image" as const,
+      mimeType: "image/png" as const,
+      data: "A".repeat(4 * Math.ceil((1024 * 1024) / 3)),
+    }];
+    const operations: HarnessRequest["operation"][] = [
+      { kind: "core.prompt", text: "inspect", images },
+      { kind: "core.steer", text: "inspect", images },
+      { kind: "core.followUp", text: "inspect", images },
+    ];
+    for (const [index, operation] of operations.entries()) {
+      await assert.rejects(
+        () => client.invoke(request(operation, `oversized-image-${index}`)),
+        (error: unknown) => {
+          assert.equal(error instanceof HarnessBridgeRequestError && error.code, "INVALID_ARGUMENT");
+          assert.ok(error instanceof Error);
+          assert.match(error.message, /image attachments/);
+          return true;
+        },
+      );
+    }
+    assert.equal(received, 0);
+    assert.equal(client.state, "ready");
+  } finally {
     client.close();
     await bridge.close();
   }

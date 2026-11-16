@@ -1,6 +1,5 @@
 import { cfgAsyncEnabled } from "../tools/settings";
 import { cfgTaskIsolationMerge } from "../task/settings";
-import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
 import { cfgBtwInject } from "../modes/settings";
 import { sendHarnessBtwInjection } from "./services/btw-injection";
 import {
@@ -863,34 +862,15 @@ export function createHarnessHostRuntime(
 				const task = await TaskTool.create(spawningSession);
 				const parameters = {
 					agent: request.definition,
-					...(request.taskFile ? { taskFile: request.taskFile } : { task: request.assignment }),
-					solutionSpace: request.solutionSpace ?? request.assignment ?? request.taskFile,
+					task: request.assignment,
+					solutionSpace: request.solutionSpace ?? request.assignment,
 					...(request.model ? { model: request.model[0] } : {}),
 					...(request.context === undefined ? {} : { context: request.context }),
 					...(request.effort === undefined ? {} : { effort: request.effort as TaskEffort }),
 					...(request.isolation === undefined ? {} : { isolated: true }),
 				};
-				if (request.taskFile && !session.extensionRunner)
-					throw new Error("Task files require the native approval host");
 				const toolCallId = crypto.randomUUID();
-				const context = spawningSession.getToolContext?.();
-				const result =
-					request.taskFile && session.extensionRunner
-						? await new ExtensionToolWrapper(
-								{
-									name: task.name,
-									label: task.label,
-									description: task.description,
-									parameters: task.parameters,
-									approval: task.approval,
-									bindApprovalTargets: task.bindApprovalTargets,
-									approvalRestrictionPaths: task.approvalRestrictionPaths,
-									formatApprovalDetails: task.formatApprovalDetails,
-									execute: task.execute.bind(task),
-								},
-								session.extensionRunner,
-							).execute(toolCallId, parameters, undefined, undefined, context)
-						: await task.execute(toolCallId, parameters);
+				const result = await task.execute(toolCallId, parameters);
 				const first = result.details?.progress?.[0] ?? result.details?.results?.[0];
 				if (!first?.id)
 					throw new Error(
@@ -1182,7 +1162,10 @@ interface HarnessMainWorkerSupervisor {
 function createHarnessMainWorkerSupervisor(
 	slot: HarnessSessionSlot,
 	runtime: HarnessHostRuntime,
-	options: Pick<HarnessHostModeDependencies, "recreateSession" | "workerIdleSleepMs" | "workerIdleRecycleMs" | "nowMs">,
+	options: Pick<
+		HarnessHostModeDependencies,
+		"recreateSession" | "workerIdleSleepMs" | "workerIdleRecycleMs" | "nowMs"
+	>,
 ): HarnessMainWorkerSupervisor {
 	const sleepMs = options.workerIdleSleepMs ?? 3 * 60_000;
 	const recycleMs = options.workerIdleRecycleMs ?? 5 * 60_000;

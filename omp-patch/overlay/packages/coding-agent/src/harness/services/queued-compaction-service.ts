@@ -90,10 +90,8 @@ export class HarnessQueuedCompactionService {
 		const current = () => this.#request === request && continuesConversation(this.session.sessionManager, request);
 		try {
 			if (!(await waitForCompactionYield(this.session, current, this.#submissions))) return;
-			if (this.session.isCompacting) {
-				while (this.#request === request && this.session.isCompacting) await Bun.sleep(10);
-				return;
-			}
+			while (current() && this.session.isCompacting) await Bun.sleep(10);
+			if (!current()) return;
 			request.state = "running";
 			await this.session.compact(request.instructions, request.options);
 		} catch (error) {

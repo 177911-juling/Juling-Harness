@@ -44,7 +44,7 @@ describe("initial workbench health", () => {
 
   it("the real ErrorBoundary reports failure without acknowledging a crashing workbench", () => {
     const reportPayloadHealth = vi.fn(async () => true);
-    vi.stubGlobal("ompHarnessChrome", { reportPayloadHealth });
+    vi.stubGlobal("julingHarnessChrome", { reportPayloadHealth });
     vi.spyOn(console, "error").mockImplementation(() => {});
     function Crash(): never { throw new Error("new snapshot cannot render"); }
     const view = render(<ErrorBoundary><WorkbenchHealth /><Crash /></ErrorBoundary>);

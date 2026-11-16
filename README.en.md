@@ -5,7 +5,7 @@
 <h1 align="center">Juling Harness</h1>
 
 <p align="center">
-  <strong>Desktop console for OMP Runtime</strong><br>
+  <strong>Desktop console for Juling Runtime</strong><br>
   Typed Harness Bridge · Electron workbench · Windows / macOS
 </p>
 
@@ -60,7 +60,7 @@ The home page has Token charts you can switch by year / month / week / day, plus
 
 ### 3. Unified provider management
 
-The model-config page keeps Anthropic, OpenAI, OpenRouter, local LM Harness, and friends in one list — toggles, endpoints, and `modelProviderOrder` on the same screen. The Roles tab assigns models and thinking to `@default` / `@plan` / `@task`.
+The model-config page keeps Anthropic, OpenAI, OpenRouter, local LM Studio, and friends in one list — toggles, endpoints, and `modelProviderOrder` on the same screen. The Roles tab assigns models and thinking to `@default` / `@plan` / `@task`.
 
 <p align="center">
   <img src="docs/images/models.png" alt="Model config: unified provider list" width="432">
@@ -97,7 +97,7 @@ The right-hand Git panel stages, diffs, and commits next to the conversation. Fe
 - **Sessions and projects** — local workspace registry, history, archive. The renderer sees opaque ids, never native absolute paths.
 - **Agent Hub / Skills / models** — inventory and config go through the Host. Surfaces without a read model stay disabled instead of filling with fake data.
 - **Desktop capabilities** — Git, file tree, terminal PTY, notifications, open-in-browser. The control plane stays semantic commands, not glued-together shell.
-- **Managed Runtime** — pinned oh-my-pi submodule + overlay + four seam patches; `omp --mode harness-host`. Artifacts are Ed25519-verified.
+- **Managed Runtime** — pinned oh-my-pi submodule + overlay + four seam patches; `juling --mode harness-host`. Artifacts are Ed25519-verified.
 
 ## Quick start
 
@@ -123,7 +123,7 @@ npm run omp:build:host
 npm run preview
 ```
 
-Models and login use OMP’s `models.yml` / `omp login`. This repository does not ship provider secrets.
+Models and login use the Juling Runtime’s `models.yml` / `juling login`. This repository does not ship provider secrets.
 
 ## Layout
 
@@ -146,7 +146,7 @@ When changing a product surface, jump from [doc/feature-index.md](doc/feature-in
 ```
 Renderer → HarnessClient → Desktop IPC → Host facade
                                     ├─ local: session catalog / Git / workspace
-                                    └─ Bridge → omp --mode harness-host
+                                    └─ Bridge → juling --mode harness-host
 ```
 
 Invariants (see [docs/architecture.md](docs/architecture.md)):

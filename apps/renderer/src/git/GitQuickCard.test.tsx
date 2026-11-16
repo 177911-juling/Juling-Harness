@@ -8,7 +8,7 @@ import { GitQuickCard } from "./GitQuickCard";
 import { GitWorkbench, type GitOpenIntent } from "./GitWorkbench";
 import { GitWorkspaceProvider, useGitWorkspace } from "./GitWorkspaceContext";
 
-afterEach(() => { cleanup(); window.history.replaceState({}, "", "/"); localStorage.clear(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState({}, "", "/"); localStorage.clear(); });
 
 it("shares preview staging and commit drafts with the full view and adds a PR reference without Host writes", async () => {
   window.history.replaceState({}, "", "/?preview=1&marks=off");
@@ -253,4 +253,36 @@ it("does not clear the next workspace draft when an earlier commit finishes", as
   fireEvent.change(message(), { target: { value: "same draft" } });
   await act(async () => { finish({ requestId: "request-1" }); await Promise.resolve(); await Promise.resolve(); });
   expect(message().value).toBe("same draft");
+});
+
+function StorageSurfaces() {
+  const client = { query: vi.fn(), command: vi.fn() } as unknown as HarnessClient;
+  return <I18nProvider forcedLanguage="en"><PreviewModeProvider><GitWorkspaceProvider client={client}>
+    <GitQuickCard client={client} visible worktrees={null} onOpen={vi.fn()} onReference={vi.fn()} onCommitReference={vi.fn()} />
+    <GitWorkbench client={client} visible worktrees={null} onReference={vi.fn()} />
+  </GitWorkspaceProvider></PreviewModeProvider></I18nProvider>;
+}
+
+it("keeps both Git surfaces switchable when preference storage is blocked", () => {
+  window.history.replaceState({}, "", "/?preview=1&marks=off");
+  vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new DOMException("blocked", "SecurityError"); });
+  render(<StorageSurfaces />);
+  for (const tab of screen.getAllByRole("tab", { name: "Changes" })) expect(tab.getAttribute("aria-selected")).toBe("true");
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("blocked", "SecurityError"); });
+  for (const tab of screen.getAllByRole("tab", { name: "History" })) fireEvent.click(tab);
+  for (const tab of screen.getAllByRole("tab", { name: "History" })) expect(tab.getAttribute("aria-selected")).toBe("true");
+  fireEvent.click(screen.getByRole("tab", { name: "History graph" }));
+  expect(screen.getByRole("tab", { name: "History graph" }).getAttribute("aria-selected")).toBe("true");
+  for (const tab of screen.getAllByRole("tab", { name: "Issues" })) fireEvent.click(tab);
+  for (const tab of screen.getAllByRole("tab", { name: "Issues" })) expect(tab.getAttribute("aria-selected")).toBe("true");
+});
+
+it("uses safe defaults for corrupt stored Git preferences", () => {
+  window.history.replaceState({}, "", "/?preview=1&marks=off");
+  localStorage.setItem("omp.git.view:preview", "unknown");
+  localStorage.setItem("omp.git.view:preview:history-layout", "unknown");
+  render(<StorageSurfaces />);
+  for (const tab of screen.getAllByRole("tab", { name: "Changes" })) expect(tab.getAttribute("aria-selected")).toBe("true");
+  fireEvent.click(screen.getAllByRole("tab", { name: "History" })[0]!);
+  expect(screen.getByRole("tab", { name: "List view" }).getAttribute("aria-selected")).toBe("true");
 });

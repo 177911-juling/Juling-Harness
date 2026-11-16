@@ -31,7 +31,7 @@ if (PLATFORM !== TARGET) throw new Error(`Artifact platform ${PLATFORM} does not
 function assertArtifactTarget(directory, manifest, runtimeVersion) {
   if (TARGET.startsWith("win32-")) {
     assertRuntimeManifestTarget(manifest, TARGET_ARCH, runtimeVersion);
-    assertPeArchitecture(join(directory, "omp.exe"), TARGET_ARCH);
+    assertPeArchitecture(join(directory, runtimeEntrypointFor(TARGET)), TARGET_ARCH);
     return;
   }
   assertRuntimeManifestPlatform(manifest, TARGET, runtimeVersion);

@@ -52,6 +52,41 @@ describe("omp-discovery scope alignment", () => {
     }
   });
 
+  test("canonical .juling trees shadow legacy .omp trees at the same scope", async () => {
+    const home = await mkdtemp(join(tmpdir(), "omp-disc-juling-"));
+    const cwd = join(home, "project");
+    try {
+      await writeSkill(join(cwd, ".juling", "skills"), "shared", "---\nname: shared\ndescription: canonical project\n---\n");
+      await writeSkill(join(cwd, ".omp", "skills"), "shared", "---\nname: shared\ndescription: legacy project\n---\n");
+      await writeSkill(join(cwd, ".omp", "skills"), "legacy-only", "---\nname: legacy-only\ndescription: legacy project only\n---\n");
+      await writeSkill(join(home, ".juling", "agent", "skills"), "user-canonical", "---\nname: user-canonical\ndescription: canonical user\n---\n");
+      await writeSkill(join(home, ".omp", "agent", "skills"), "user-legacy", "---\nname: user-legacy\ndescription: legacy user\n---\n");
+
+      const { skills } = await discoverAll({ home, cwd });
+      assert.deepEqual(skills.map((skill) => skill.name).sort(), [
+        "legacy-only",
+        "shared",
+        "user-canonical",
+        "user-legacy",
+      ]);
+      assert.equal(skills.find((skill) => skill.name === "shared")?.description, "canonical project");
+      const legacyOnly = skills.find((skill) => skill.name === "legacy-only");
+      assert.equal(legacyOnly?.scope, "workspace");
+      assert.equal(legacyOnly?.description, "legacy project only");
+
+      // Plugin roots: the canonical project install wins over the legacy copy.
+      await installOmpPlugin(join(cwd, ".juling", "plugins"), "dual-plugin", "2.0.0", { tools: "dist/tools.ts" });
+      await installOmpPlugin(join(cwd, ".omp", "plugins"), "dual-plugin", "1.0.0", { tools: "dist/tools.ts" });
+      const { roots } = await listOmpPluginRoots(home, cwd);
+      const dual = roots.filter((root) => root.name === "dual-plugin");
+      assert.equal(dual.length, 1);
+      assert.equal(dual[0]?.version, "2.0.0");
+      assert.equal(dual[0]?.scope, "project");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   test("scans opencode user (~/.config/opencode) and project (.opencode) skills", async () => {
     const { home, cwd } = await makeEnv();
     try {
@@ -266,10 +301,10 @@ describe("omp-discovery scope alignment", () => {
 
       const service = createOmpExtensibilityService({ home, cwd, now: () => NOW });
       const result = await service.get();
-      assert.equal(result.skills.find((skill) => skill.name === "a")?.sourceLabel, "OMP");
+      assert.equal(result.skills.find((skill) => skill.name === "a")?.sourceLabel, "Juling");
       assert.equal(result.skills.find((skill) => skill.name === "b")?.sourceLabel, "插件");
       const c = result.skills.find((skill) => skill.name === "c");
-      assert.equal(c?.sourceLabel, "OMP");
+      assert.equal(c?.sourceLabel, "Juling");
       assert.equal(c?.scope, "global");
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -343,7 +378,7 @@ describe("omp-discovery scope alignment", () => {
       const matches = result.skills.filter((entry) => entry.name === "clash");
       assert.equal(matches.length, 1);
       assert.equal(matches[0]?.enabled, true);
-      assert.equal(matches[0]?.sourceLabel, "OMP");
+      assert.equal(matches[0]?.sourceLabel, "Juling");
     } finally {
       await rm(home, { recursive: true, force: true });
     }

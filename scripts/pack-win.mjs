@@ -5,7 +5,7 @@
  *
  * Steps: optional host rebuild → workspace build → sandboxed preload →
  * public Runtime key copy → electron-builder → fail-closed audit of the
- * unpacked tree and the Setup exe (no private key, renderer, omp.exe).
+ * unpacked tree and the Setup exe (no private key, renderer, Runtime CLI).
  *
  * Flags:
  *   --skip-host   reuse packages/runtime-installer/dist/artifacts (still

@@ -41,9 +41,9 @@ export class SessionArchiveServiceError extends Error {
 }
 
 export interface SessionArchiveServiceOptions {
-  /** OMP's sessions root. Defaults to `<agentDir>/sessions` (`OMP_AGENT_DIR` honored). */
+  /** Runtime sessions root. Defaults to `<agentDir>/sessions` (`JULING_AGENT_DIR`, then legacy `OMP_AGENT_DIR`, then `PI_CODING_AGENT_DIR`). */
   readonly sessionsRoot?: string;
-  /** OMP's cold-archive root. Defaults to `<agentDir>/archive/sessions`, mirroring `omp gc`. */
+  /** Runtime cold-archive root. Defaults to `<agentDir>/archive/sessions`, mirroring `juling gc`. */
   readonly archiveRoot?: string;
   readonly allowedCwd: string;
   readonly maxSessionBytes?: number;

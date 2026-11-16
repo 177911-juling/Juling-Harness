@@ -55,7 +55,7 @@ export class DesktopPrediction {
     },
   ) {}
   async attach(sender: TerminalSender, value: unknown): Promise<void> {
-    const input = object(value, ["channelId", "sessionId", "expiresAt"]),
+    const input = object(value, ["channelId", "sessionId", "expiresAt", "protocolVersion"]),
       channelId = id(input.channelId);
     if (
       typeof input.sessionId !== "string" ||

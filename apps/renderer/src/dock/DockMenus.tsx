@@ -385,7 +385,7 @@ export function WindowPinButton({ mode: selected, workspaceAvailable, onChange }
   return <DockPopupButton className="dock-pin-button" label={t("dockPin.title")} icon="pin">{close => <>
     <div className="menu-label">{t("dockPin.title")}</div>
     {choices.map(mode => {
-      const disabled = mode === "workspace" ? !workspaceAvailable : (mode === "window" || mode === "topmost") && !globalThis.ompHarnessChrome?.prepareFloatWindow;
+      const disabled = mode === "workspace" ? !workspaceAvailable : (mode === "window" || mode === "topmost") && !globalThis.julingHarnessChrome?.prepareFloatWindow;
       const reason = disabled ? t(mode === "workspace" ? "dockPin.workspaceRequired" : "dockPin.desktopRequired") : undefined;
       return <button key={mode} type="button" className="menu-item" role="menuitemradio" aria-checked={selected === mode} disabled={disabled} data-tip={reason}
         onClick={() => { close(); if (native && mode !== "window" && mode !== "topmost" && !revealMainWindow(mode === "none")) return; onChange(mode); }}>

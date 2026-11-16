@@ -411,8 +411,9 @@ body.dock-modal-active .dock-menu-popover { z-index: 87; }
   box-shadow: var(--window-focus-shadow), var(--window-shadow);
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
+/* Active window: a tinted hairline and one soft ring, no corner ticks. */
 .dock-float.is-active-window {
-  --window-focus-shadow: 0 0 0 1px color-mix(in srgb, var(--window-tint) 55%, transparent), 0 0 18px color-mix(in srgb, var(--window-tint) 16%, transparent);
+  --window-focus-shadow: 0 0 0 2px color-mix(in srgb, var(--window-tint) 18%, transparent), 0 20px 52px rgb(0 0 0 / 20%);
   border-color: var(--window-tint);
 }
 .dock-float:focus-visible { outline-color: var(--window-tint); }

@@ -1,5 +1,7 @@
-import { lstat, open, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { lstat, mkdir, open, readdir, rename, rm, unlink, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type { Dirent } from "node:fs";
 
 import { readGunzipPrefix } from "./gzip-file.js";
@@ -33,14 +35,16 @@ export class SessionDeleteServiceError extends Error {
 }
 
 export interface SessionDeleteServiceOptions {
-  /** OMP's sessions root. Defaults to `<agentDir>/sessions` (`OMP_AGENT_DIR` honored). */
+  /** Runtime sessions root. Defaults to `<agentDir>/sessions` (`JULING_AGENT_DIR`, then legacy `OMP_AGENT_DIR`, then `PI_CODING_AGENT_DIR`). */
   readonly sessionsRoot?: string;
-  /** OMP's cold-archive root. Defaults to `<agentDir>/archive/sessions`, mirroring `omp gc`. */
+  /** Runtime cold-archive root. Defaults to `<agentDir>/archive/sessions`, mirroring `juling gc`. */
   readonly archiveRoot?: string;
   readonly allowedCwd: string;
   readonly maxScanFiles?: number;
   /** Rejects deletion while the session is resident in a Runtime. */
   readonly isResident?: (sessionId: string) => boolean | Promise<boolean>;
+  /** Injectable artifacts removal used by the retry-after-failure regression test. */
+  readonly removeArtifacts?: (path: string) => Promise<void>;
 }
 
 export interface SessionDeleteResult {
@@ -69,6 +73,7 @@ export class HarnessSessionDeleteService {
   readonly #allowedCwd: string;
   readonly #maxScanFiles: number;
   readonly #isResident: ((sessionId: string) => boolean | Promise<boolean>) | undefined;
+  readonly #removeArtifacts: (path: string) => Promise<void>;
 
   constructor(options: SessionDeleteServiceOptions) {
     if (options.allowedCwd.length === 0) throw new TypeError("allowedCwd is required");
@@ -77,6 +82,7 @@ export class HarnessSessionDeleteService {
     this.#allowedCwd = resolve(options.allowedCwd);
     this.#maxScanFiles = options.maxScanFiles ?? DEFAULT_MAX_SCAN_FILES;
     this.#isResident = options.isResident;
+    this.#removeArtifacts = options.removeArtifacts ?? ((path) => rm(path, { recursive: true, force: true }));
     if (!Number.isSafeInteger(this.#maxScanFiles) || this.#maxScanFiles <= 0) {
       throw new TypeError("maxScanFiles must be positive");
     }
@@ -97,6 +103,10 @@ export class HarnessSessionDeleteService {
     }
     const located = active ?? archived;
     if (located === undefined) {
+      // A previous delete may already have removed the transcript before an
+      // artifacts failure. OMP's `<timestamp>_<sessionId>` layout still gives
+      // us an unambiguous residue path, so the same request can converge.
+      if (await this.#removeArtifactResidue(sessionId)) return { sessionId, deleted: true };
       throw new SessionDeleteServiceError(
         "SESSION_NOT_FOUND",
         "Session is not available in the sessions or archive trees",
@@ -142,6 +152,21 @@ export class HarnessSessionDeleteService {
     return match;
   }
 
+  async #removeArtifactResidue(sessionId: string): Promise<boolean> {
+    const artifacts = [
+      ...await listArtifactDirectories(this.#sessionsRoot, sessionId, this.#maxScanFiles),
+      ...await listArtifactDirectories(this.#archiveRoot, sessionId, this.#maxScanFiles),
+    ];
+    for (const path of artifacts) {
+      try {
+        await this.#removeArtifacts(path);
+      } catch (error) {
+        throw new SessionDeleteServiceError("IO_ERROR", `Failed to remove artifacts directory ${path}: ${errorMessage(error)}`);
+      }
+    }
+    return artifacts.length > 0;
+  }
+
   /**
    * Delete the transcript then its artifacts directory. The session file is
    * the primary object; a failing artifacts cleanup is surfaced so the
@@ -166,7 +191,7 @@ export class HarnessSessionDeleteService {
     }
     const artifactsDir = artifactsPathFor(sessionPath);
     try {
-      await rm(artifactsDir, { recursive: true, force: true });
+      await this.#removeArtifacts(artifactsDir);
     } catch (error) {
       throw new SessionDeleteServiceError(
         "IO_ERROR",
@@ -191,31 +216,121 @@ function artifactsPathFor(sessionPath: string): string {
 export async function removeSessionPin(sessionId: string, agentDir: string): Promise<void> {
   if (sessionId.length === 0) return;
   const pinPath = join(agentDir, SESSION_PINS_FILENAME);
-  let metadata;
-  try {
-    metadata = await lstat(pinPath);
-  } catch {
-    return;
-  }
-  if (!metadata.isFile() || metadata.size > SESSION_PINS_MAX_BYTES) return;
-  let parsed: unknown;
-  try {
-    const handle = await open(pinPath, "r");
+  await mkdir(agentDir, { recursive: true });
+  await withFileLock(pinPath, async () => {
+    let metadata;
     try {
-      const buffer = Buffer.alloc(metadata.size);
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-      parsed = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
-    } finally {
-      await handle.close();
+      metadata = await lstat(pinPath);
+    } catch {
+      return;
     }
-  } catch {
-    return;
+    if (!metadata.isFile() || metadata.size > SESSION_PINS_MAX_BYTES) return;
+    let parsed: unknown;
+    try {
+      const handle = await open(pinPath, "r");
+      try {
+        const buffer = Buffer.alloc(metadata.size);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        parsed = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      return;
+    }
+    if (!Array.isArray(parsed) || parsed.length > SESSION_PINS_MAX_ENTRIES) return;
+    if (parsed.some((value) => typeof value !== "string" || value.length === 0 || value.length > SESSION_PIN_ID_MAX_CHARS)) return;
+    const next = parsed.filter((value) => value !== sessionId);
+    if (next.length === parsed.length) return;
+
+    // Mirror OMP session-pins: unique staging file plus atomic replacement,
+    // with the complete read-modify-write held under the shared file lock.
+    const temporary = `${pinPath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, JSON.stringify(next, null, "\t"), { encoding: "utf8", flag: "wx", mode: 0o600 });
+      await replaceFileAtomically(temporary, pinPath);
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => {});
+      throw error;
+    }
+  });
+}
+
+async function withFileLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+  const lockPath = `${filePath}.lock`;
+  let handle: FileHandle | undefined;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      handle = await open(lockPath, "wx", 0o600);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (attempt === 49) throw new Error(`Failed to acquire lock for ${filePath}`);
+      await delay(100);
+    }
   }
-  if (!Array.isArray(parsed) || parsed.length > SESSION_PINS_MAX_ENTRIES) return;
-  if (parsed.some((value) => typeof value !== "string" || value.length === 0 || value.length > SESSION_PIN_ID_MAX_CHARS)) return;
-  const next = parsed.filter((value) => value !== sessionId);
-  if (next.length === parsed.length) return;
-  await writeFile(pinPath, `${JSON.stringify(next, null, "\t")}`, { encoding: "utf8" });
+  try {
+    return await operation();
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await rm(lockPath, { force: true }).catch(() => undefined);
+  }
+}
+
+/** Publish staged pins without exposing a truncated destination on failure. */
+async function replaceFileAtomically(temporary: string, target: string): Promise<void> {
+  try {
+    await rename(temporary, target);
+    return;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "EPERM" && code !== "EEXIST") throw error;
+  }
+  const backup = `${target}.${process.pid}.${randomUUID()}.bak`;
+  try {
+    await rename(target, backup);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      await rename(temporary, target);
+      return;
+    }
+    throw error;
+  }
+  try {
+    await rename(temporary, target);
+  } catch (error) {
+    await rename(backup, target).catch(() => undefined);
+    throw error;
+  }
+  await rm(backup, { force: true }).catch(() => undefined);
+}
+
+async function listArtifactDirectories(root: string, sessionId: string, limit: number): Promise<string[]> {
+  let projects: Dirent<string>[];
+  try {
+    projects = await readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const matches: string[] = [];
+  for (const project of projects) {
+    if (project.isSymbolicLink() || !project.isDirectory()) continue;
+    const projectPath = join(root, project.name);
+    let entries: Dirent<string>[];
+    try {
+      entries = await readdir(projectPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || !entry.name.endsWith(`_${sessionId}`)) continue;
+      if (matches.length >= limit) {
+        throw new SessionDeleteServiceError("IO_ERROR", "Session scan exceeds the configured file limit");
+      }
+      matches.push(join(projectPath, entry.name));
+    }
+  }
+  return matches.sort();
 }
 
 async function listFilesWithSuffix(root: string, suffix: string, limit: number): Promise<string[]> {

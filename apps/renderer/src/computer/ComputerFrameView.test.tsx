@@ -7,7 +7,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it("releases temporary observation pixels at expiry without capturing a replacement", async () => {
   vi.useFakeTimers();
   const read = vi.fn(async () => ({ ok: true, data: new ArrayBuffer(8), width: 1280, height: 800, mimeType: "image/png" }));
-  vi.stubGlobal("ompHarnessChrome", { readComputerFrame: read });
+  vi.stubGlobal("julingHarnessChrome", { readComputerFrame: read });
   const revoke = vi.fn();
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:temporary-frame") });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revoke });

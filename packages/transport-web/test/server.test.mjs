@@ -102,6 +102,97 @@ test('revoking a browser session releases a context that is still opening', asyn
   assert.equal(closed, 1);
 });
 
+test('TTL expiry releases contexts and subscriptions exactly once', async t => {
+  let now = 0, closed = 0, released = 0;
+  let context;
+  const adapter = new LoopbackWebAdapter({
+    host: { ...host(), openContext: async () => {
+      context = {
+        ...host(),
+        subscribe: () => { let active = true; return () => { if (active) { active = false; released++; } }; },
+        close: async () => { closed++; },
+      };
+      return context;
+    } },
+    origins: ['http://localhost'], pairingCode: '1234', sessionTtlMs: 10, now: () => now,
+  });
+  const server = createLoopbackHttpServer(adapter);
+  t.after(() => server.close());
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const pair = await fetch(`${url}/api/v1/pair`, { method: 'POST', headers: { Origin: 'http://localhost', 'content-type': 'application/json' }, body: '{"code":"1234"}' });
+  const cookie = pair.headers.get('set-cookie').split(';')[0];
+  const csrf = (await pair.json()).csrf;
+  const headers = { Origin: 'http://localhost', Cookie: cookie, 'X-Harness-CSRF': csrf, 'content-type': 'application/json' };
+  const opened = await fetch(`${url}/api/v1/context/open`, { method: 'POST', headers, body: '{"workspaceId":"workspace"}' });
+  assert.equal(opened.status, 200);
+  const { contextId } = await opened.json();
+  const unsubscribe = context.subscribe({ scope: 'all' }, () => {});
+  const originalClose = context.close;
+  context.close = async () => { unsubscribe(); await originalClose(); };
+  const authenticated = adapter.authenticateWebSocket({ url: `/api/v1/events?contextId=${contextId}`, headers: { origin: 'http://localhost', cookie } });
+  assert.equal(authenticated.session.contexts.size, 1);
+
+  now = 10;
+  const expired = await fetch(`${url}/api/v1/bootstrap`, { headers: { Origin: 'http://localhost', Cookie: cookie } });
+  assert.equal(expired.status, 401);
+  assert.equal(closed, 1);
+  assert.equal(released, 1);
+  assert.equal(authenticated.session.contexts.size, 0);
+  assert.equal(adapter.authenticateWebSocket({ url: `/api/v1/events?contextId=${contextId}`, headers: { origin: 'http://localhost', cookie } }), undefined);
+
+  assert.equal((await fetch(`${url}/api/v1/bootstrap`, { headers: { Origin: 'http://localhost', Cookie: cookie } })).status, 401);
+  assert.equal((await fetch(`${url}/api/v1/session/revoke`, { method: 'POST', headers, body: '{}' })).status, 401);
+  assert.equal(closed, 1);
+  assert.equal(released, 1);
+});
+
+test('TTL expiry closes an idle session without another request', async t => {
+  const closed = Promise.withResolvers();
+  const adapter = new LoopbackWebAdapter({
+    host: { ...host(), openContext: async () => ({ ...host(), close: async () => { closed.resolve(); } }) },
+    origins: ['http://localhost'], pairingCode: '1234', sessionTtlMs: 50,
+  });
+  const server = createLoopbackHttpServer(adapter);
+  t.after(() => server.close());
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const pair = await fetch(`${url}/api/v1/pair`, { method: 'POST', headers: { Origin: 'http://localhost', 'content-type': 'application/json' }, body: '{"code":"1234"}' });
+  const cookie = pair.headers.get('set-cookie').split(';')[0];
+  const csrf = (await pair.json()).csrf;
+  const opened = await fetch(`${url}/api/v1/context/open`, { method: 'POST', headers: { Origin: 'http://localhost', Cookie: cookie, 'X-Harness-CSRF': csrf, 'content-type': 'application/json' }, body: '{"workspaceId":"workspace"}' });
+  assert.equal(opened.status, 200);
+  await opened.json();
+  const watchdog = setTimeout(() => closed.reject(new Error('idle session was not closed')), 1_000);
+  try { await closed.promise; } finally { clearTimeout(watchdog); }
+});
+
+test('TTL expiry closes a context that finishes opening afterwards', async t => {
+  let now = 0, closed = 0;
+  const opening = Promise.withResolvers();
+  const requested = Promise.withResolvers();
+  const adapter = new LoopbackWebAdapter({
+    host: { ...host(), openContext: async () => { requested.resolve(); return opening.promise; } },
+    origins: ['http://localhost'], pairingCode: '1234', sessionTtlMs: 10, now: () => now,
+  });
+  const server = createLoopbackHttpServer(adapter);
+  t.after(() => server.close());
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const pair = await fetch(`${url}/api/v1/pair`, { method: 'POST', headers: { Origin: 'http://localhost', 'content-type': 'application/json' }, body: '{"code":"1234"}' });
+  const cookie = pair.headers.get('set-cookie').split(';')[0];
+  const csrf = (await pair.json()).csrf;
+  const headers = { Origin: 'http://localhost', Cookie: cookie, 'X-Harness-CSRF': csrf, 'content-type': 'application/json' };
+  const pending = fetch(`${url}/api/v1/context/open`, { method: 'POST', headers, body: '{"workspaceId":"workspace"}' });
+  await requested.promise;
+
+  now = 10;
+  assert.equal((await fetch(`${url}/api/v1/bootstrap`, { headers: { Origin: 'http://localhost', Cookie: cookie } })).status, 401);
+  opening.resolve({ ...host(), close: async () => { closed++; } });
+  assert.equal((await pending).status, 401);
+  assert.equal(closed, 1);
+});
+
 test('a WebSocket reconnect to a closed context is refused without throwing from the upgrade handler', async t => {
   const adapter = new LoopbackWebAdapter({ host: host(), origins: ['http://localhost'], pairingCode: '1234' });
   const server = createLoopbackHttpServer(adapter);

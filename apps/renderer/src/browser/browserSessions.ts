@@ -183,7 +183,7 @@ export class BrowserHub {
 const hubs = new WeakMap<object, BrowserHub>();
 let previewBackend: BrowserBackend | undefined;
 /** Real panes share the desktop API's hub; preview panes share one in-memory demo browser. */
-export function browserHub(preview: boolean, api = globalThis.ompHarnessChrome?.managedBrowser): BrowserHub | null {
+export function browserHub(preview: boolean, api = globalThis.julingHarnessChrome?.managedBrowser): BrowserHub | null {
   const backend = preview ? previewBackend ??= createPreviewBrowserBackend() : api;
   if (!backend) return null;
   let hub = hubs.get(backend);

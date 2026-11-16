@@ -53,11 +53,11 @@ export function listExternalEditorCommands(options: ResolveExternalEditorOptions
 
   if (platform === "win32") {
     const families: ReadonlyArray<{ id: ExternalEditorId; label: string; segments: readonly string[]; root: string | undefined }> = [
-      { id: "vscode", label: "Visual Harness Code", segments: ["Programs", "Microsoft VS Code", "Code.exe"], root: env.LOCALAPPDATA },
-      { id: "vscode", label: "Visual Harness Code - Insiders", segments: ["Programs", "Microsoft VS Code Insiders", "Code - Insiders.exe"], root: env.LOCALAPPDATA },
-      { id: "vscode", label: "Visual Harness Code", segments: ["Microsoft VS Code", "Code.exe"], root: env.ProgramFiles },
-      { id: "vscode", label: "Visual Harness Code", segments: ["Microsoft VS Code", "Code.exe"], root: env["ProgramFiles(x86)"] },
-      { id: "vscode", label: "Visual Harness Code - Insiders", segments: ["Microsoft VS Code Insiders", "Code - Insiders.exe"], root: env.ProgramFiles },
+      { id: "vscode", label: "Visual Studio Code", segments: ["Programs", "Microsoft VS Code", "Code.exe"], root: env.LOCALAPPDATA },
+      { id: "vscode", label: "Visual Studio Code - Insiders", segments: ["Programs", "Microsoft VS Code Insiders", "Code - Insiders.exe"], root: env.LOCALAPPDATA },
+      { id: "vscode", label: "Visual Studio Code", segments: ["Microsoft VS Code", "Code.exe"], root: env.ProgramFiles },
+      { id: "vscode", label: "Visual Studio Code", segments: ["Microsoft VS Code", "Code.exe"], root: env["ProgramFiles(x86)"] },
+      { id: "vscode", label: "Visual Studio Code - Insiders", segments: ["Microsoft VS Code Insiders", "Code - Insiders.exe"], root: env.ProgramFiles },
       { id: "cursor", label: "Cursor", segments: ["Programs", "Cursor", "Cursor.exe"], root: env.LOCALAPPDATA },
       { id: "windsurf", label: "Windsurf", segments: ["Programs", "Windsurf", "Windsurf.exe"], root: env.LOCALAPPDATA },
     ];
@@ -77,8 +77,8 @@ export function listExternalEditorCommands(options: ResolveExternalEditorOptions
     // Homebrew cask or "Install 'code' command in PATH" put on the login PATH.
     const home = options.homedir ?? osHomedir();
     const bundles: ReadonlyArray<{ id: ExternalEditorId; label: string; app: string; cli: string }> = [
-      { id: "vscode", label: "Visual Harness Code", app: "Visual Harness Code.app", cli: "code" },
-      { id: "vscode", label: "Visual Harness Code - Insiders", app: "Visual Harness Code - Insiders.app", cli: "code-insiders" },
+      { id: "vscode", label: "Visual Studio Code", app: "Visual Studio Code.app", cli: "code" },
+      { id: "vscode", label: "Visual Studio Code - Insiders", app: "Visual Studio Code - Insiders.app", cli: "code-insiders" },
       { id: "cursor", label: "Cursor", app: "Cursor.app", cli: "cursor" },
       { id: "windsurf", label: "Windsurf", app: "Windsurf.app", cli: "windsurf" },
     ];
@@ -99,7 +99,7 @@ export function listExternalEditorCommands(options: ResolveExternalEditorOptions
   // Linux: rely on PATH. `launchExternalEditor` maps ENOENT to a readable
   // message naming the target editor.
   return [
-    asCommand("vscode", "Visual Harness Code", "code"),
+    asCommand("vscode", "Visual Studio Code", "code"),
     asCommand("cursor", "Cursor", "cursor"),
     asCommand("windsurf", "Windsurf", "windsurf"),
   ];
@@ -183,7 +183,7 @@ export function createExternalEditorOpener(options: CreateExternalEditorOpenerOp
   return async (cwd: string): Promise<void> => {
     const command = resolveExternalEditorCommand(options);
     if (command === undefined) {
-      throw new Error("未找到外部编辑器，请安装 Visual Harness Code / Cursor / Windsurf");
+      throw new Error("未找到外部编辑器，请安装 Visual Studio Code / Cursor / Windsurf");
     }
     await launchExternalEditor(command, cwd, options);
   };

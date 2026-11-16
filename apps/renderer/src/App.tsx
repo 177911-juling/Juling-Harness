@@ -109,11 +109,15 @@ function TargetApp({ client: inputClient }: { readonly client: HarnessClient }) 
   const selectHistory = useCallback((entry: SessionHistoryEntry) => { if (navigate("workbench")) setSelectedHistoryId(entry.historyId); }, [setSelectedHistoryId, navigate]);
   const newThread = useCallback(() => setSelectedHistoryId(null), [setSelectedHistoryId]);
   const modelLoader = useMemo(() => createShellModelLoader(client), [client]);
+  // Host subscriptions outlive foreground/background transitions; notification gating must not capture them.
+  const notificationContext = useRef({ active: mdi?.active, demo: mdi?.store.demo });
+  notificationContext.current = { active: mdi?.active, demo: mdi?.store.demo };
 
   useEffect(() => {
     let cancelled = false;
     const offEvent = client.subscribe({ scope: "all" }, (event) => {
-      if (!mdi?.store.demo || mdi.active) notifyFromEvent(event, t);
+      const { active, demo } = notificationContext.current;
+      if (!demo || active) notifyFromEvent(event, t);
       if (!cancelled && shouldRecordShellEvent(event)) dispatch({ type: "event", event });
     });
     let lastShell: ClientState | undefined;

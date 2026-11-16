@@ -17,7 +17,7 @@ import {
 } from "@juling-harness/harness-protocol";
 
 import { GzipFileError, readGunzipCapped, readGunzipPrefix } from "./gzip-file.js";
-import { defaultOmpArchiveRoot } from "./session-catalog.js";
+import { defaultOmpArchiveRoot, defaultOmpSessionsRoot } from "./session-catalog.js";
 import { sameWorkspacePath } from "./workspace-path.js";
 import { SharedRead } from "./shared-read.js";
 
@@ -1054,11 +1054,6 @@ export class HarnessSessionArchiveReader {
     this.#index.building = build;
     await build;
   }
-}
-
-function defaultOmpSessionsRoot(environment: NodeJS.ProcessEnv = process.env): string {
-  const agentDirectory = environment.OMP_AGENT_DIR;
-  return resolve(agentDirectory === undefined || agentDirectory.length === 0 ? join(homedir(), ".omp", "agent") : agentDirectory, "sessions");
 }
 
 async function listSessionFiles(roots: { sessions: string; archive: string }, limit: number): Promise<string[]> {

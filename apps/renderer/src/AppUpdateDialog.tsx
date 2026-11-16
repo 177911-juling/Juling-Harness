@@ -163,7 +163,7 @@ export function AppUpdateDialog({
   const openGithub = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     const url = update.htmlUrl ?? "https://github.com/177911-juling/juling-harness/releases";
-    const openUrl = globalThis.ompHarnessChrome?.openUrl;
+    const openUrl = globalThis.julingHarnessChrome?.openUrl;
     if (openUrl !== undefined) {
       void openUrl({ url });
       return;

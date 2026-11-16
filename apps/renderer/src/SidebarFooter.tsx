@@ -65,7 +65,7 @@ export function SidebarFooter({
           <button
             type="button"
             className={`sb-user${hasUpdate ? " has-update" : ""}`}
-            aria-label={`${profile.displayName} · ${hasUpdate ? `${updateLabel} · ` : ""}OMP 状态与环境菜单`}
+            aria-label={`${profile.displayName} · ${hasUpdate ? `${updateLabel} · ` : ""}Juling 状态与环境菜单`}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={(event) => onToggleMenu(event.currentTarget)}

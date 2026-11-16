@@ -124,7 +124,7 @@ describe("subagent hover preview", () => {
   it.each(["leave", "escape", "scroll", "window blur", "focus blur"])("closes immediately on %s and releases the visible child lease", async reason => {
     const host = clientFixture();
     const report = vi.fn(async () => {});
-    vi.stubGlobal("ompHarnessChrome", { setConversationViewState: report });
+    vi.stubGlobal("julingHarnessChrome", { setConversationViewState: report });
     conversationViewLeases.setEpoch(Number(epoch));
     const base = activeSubagentConversationEngineCount();
     render(<Surface client={host.client} />);

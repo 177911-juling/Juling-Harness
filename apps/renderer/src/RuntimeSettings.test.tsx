@@ -92,7 +92,7 @@ describe("Runtime settings seam", () => {
     expect((screen.getByRole("combobox", { name: "意外停止检测" }) as HTMLButtonElement).disabled).toBe(true);
     openTab("模型与服务");
     expect((screen.getByRole("textbox", { name: "判断模型" }) as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByRole("combobox", { name: "Claude 重置券" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Claude 5 小时重置券" }) as HTMLButtonElement).disabled).toBe(true);
 
     openTab("上下文与记忆");
     expect((screen.getByRole("switch", { name: "扩展上下文" }) as HTMLButtonElement).disabled).toBe(true);
@@ -164,7 +164,7 @@ describe("Runtime settings seam", () => {
     expect((screen.getByRole("combobox", { name: "意外停止检测" }) as HTMLButtonElement).textContent).toBe("机械检测");
     expect(screen.queryByRole("combobox", { name: "意外停止模型" })).toBeNull();
     openTab("模型与服务");
-    expect((screen.getByRole("combobox", { name: "Claude 重置券" }) as HTMLButtonElement).textContent).toBe("首次使用前询问");
+    expect((screen.getByRole("combobox", { name: "Claude 5 小时重置券" }) as HTMLButtonElement).textContent).toBe("首次使用前询问");
     expect((screen.getByRole("spinbutton", { name: "MCP 启动等待（毫秒）" }) as HTMLInputElement).value).toBe("250");
 
     openTab("上下文与记忆");

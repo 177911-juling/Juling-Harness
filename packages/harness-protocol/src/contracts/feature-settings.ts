@@ -8,7 +8,6 @@ export const FEATURE_SETTING_KEYS = [
   "display.shellVisualization",
   "title.refreshAfterPrompts",
   "display.advisorCollapsedLines",
-  "task.file",
   "task.perCallModel",
   "task.perCallModelAllow",
   "task.workerThreads",

@@ -14,6 +14,8 @@ import {
 	type DecodedHarnessFrame,
 	encodeHarnessFrame,
 	HarnessFrameDecoder,
+	MAX_IMAGE_ATTACHMENT_BASE64_CHARS,
+	parseHarnessRequest,
 	type HarnessHelloResponse,
 	type HarnessSnapshotResponse,
 } from "@oh-my-pi/pi-coding-agent/harness/bridge-protocol";
@@ -308,6 +310,22 @@ function sendHello(socket: net.Socket, challenge: string, versions = [1]): void 
 }
 
 describe("WP-011 Harness Bridge runtime server", () => {
+	test("prompt operations reject Base64 images that cannot fit the control-frame budget", () => {
+		const images = [
+			{ type: "image", mimeType: "image/png", data: "A".repeat(MAX_IMAGE_ATTACHMENT_BASE64_CHARS + 1) },
+		];
+		for (const kind of ["core.prompt", "core.steer", "core.followUp"]) {
+			expect(() =>
+				parseHarnessRequest({
+					type: "harness.request",
+					requestId: `oversized-${kind}`,
+					runtimeEpoch: 7,
+					operation: { kind, text: "inspect", images },
+				}),
+			).toThrow("Image attachment exceeds the Base64 and control-frame budget");
+		}
+	});
+
 	test("Computer query and increment use private envelopes without command receipts or Harness event sequence", async () => {
 		const fixture = await bridgeFixture();
 		const runtime = fakeRuntime();

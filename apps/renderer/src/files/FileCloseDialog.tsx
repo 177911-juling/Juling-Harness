@@ -14,7 +14,7 @@ export function FileCloseDialog() {
   const [, update] = useState(0), [saving, setSaving] = useState(false), [error, setError] = useState("");
   useEffect(() => { const changed = () => update(value => value + 1); listeners.add(changed); return () => { listeners.delete(changed); }; }, []);
   useEffect(() => {
-    const api = globalThis.ompHarnessChrome?.files;
+    const api = globalThis.julingHarnessChrome?.files;
     if (!api) return;
     const report = () => { void api.setDirty(dirtyFileDocuments().length); };
     report(); const off = subscribeDirtyFiles(report);

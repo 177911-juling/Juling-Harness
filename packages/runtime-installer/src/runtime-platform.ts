@@ -1,12 +1,21 @@
 /**
  * Runtime platform table. The entrypoint follows the artifact's platform
  * (the manifest `platform`), never the machine doing the work, so a Windows
- * artifact handled on macOS keeps `omp.exe`. `scripts/target-platform.mjs`
+ * artifact handled on macOS keeps `juling.exe`. `scripts/target-platform.mjs`
  * mirrors this table and a metadata test keeps the two identical.
  */
-export const RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "omp.exe", darwin: "omp", linux: "omp" } as const);
+export const RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "juling.exe", darwin: "juling", linux: "juling" } as const);
 export type RuntimeOs = keyof typeof RUNTIME_ENTRYPOINTS;
 export type RuntimeEntrypoint = (typeof RUNTIME_ENTRYPOINTS)[RuntimeOs];
+
+/**
+ * Entrypoint names written by releases before the product rename. Artifacts
+ * and archives signed back then stay installable: a manifest's `entrypoint`
+ * remains the source of truth, so these names are accepted but never produced.
+ */
+export const LEGACY_RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "omp.exe", darwin: "omp", linux: "omp" } as const);
+export type LegacyRuntimeEntrypoint = (typeof LEGACY_RUNTIME_ENTRYPOINTS)[RuntimeOs];
+export type AnyRuntimeEntrypoint = RuntimeEntrypoint | LegacyRuntimeEntrypoint;
 
 /** Platforms with signed update catalogs. */
 export const UPDATE_PLATFORMS = Object.freeze(["win32-x64", "win32-arm64", "darwin-arm64"] as const);
@@ -23,6 +32,11 @@ export function runtimeOsOf(platform: string): RuntimeOs {
 
 export function runtimeEntrypointFor(platform: string): RuntimeEntrypoint {
   return RUNTIME_ENTRYPOINTS[runtimeOsOf(platform)];
+}
+
+/** Pre-rename entrypoint for a platform; accepted by readers of signed artifacts. */
+export function runtimeLegacyEntrypointFor(platform: string): LegacyRuntimeEntrypoint {
+  return LEGACY_RUNTIME_ENTRYPOINTS[runtimeOsOf(platform)];
 }
 
 export function isUpdatePlatform(platform: string): platform is UpdatePlatform {

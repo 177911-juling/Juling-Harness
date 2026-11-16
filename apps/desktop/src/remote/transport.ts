@@ -153,12 +153,19 @@ export class SshRemoteTransport implements ClientTransport {
       if (envelope.contextId === contextId && envelope.event) for (const listener of listeners) listener(envelope.event);
     });
     await this.peer.request("subscribe", { contextId, input: { scope: "all" } });
+    let closed = false;
     return {
       bootstrap: () => this.peer.request("bootstrap", { contextId }),
       query: input => this.peer.request("query", { contextId, input }),
       command: input => this.peer.request("command", { contextId, input }),
       subscribe: (scope, listener) => { const filtered = (event: ClientEvent) => { if (eventMatchesScope(event, scope)) listener(event); }; listeners.add(filtered); return () => { listeners.delete(filtered); }; },
-      close: async () => { off(); listeners.clear(); if (!this.#closed) await this.peer.request("context.close", { contextId }); },
+      close: async () => {
+        if (closed) return;
+        closed = true;
+        off();
+        listeners.clear();
+        if (!this.#closed) await this.peer.request("context.close", { contextId });
+      },
     };
   }
   query<T extends QueryName>(request: ClientQueryRequest<T>): Promise<ClientQueryResponse<T>> { return this.peer.request("query", request); }

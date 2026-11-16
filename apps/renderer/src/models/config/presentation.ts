@@ -37,7 +37,7 @@ export function formatRoleDesc(role: { id: string; desc: string; builtin?: boole
 }
 
 const PROVIDER_STATUS_DETAIL_KEYS: Record<string, string> = {
-  "OMP 已解析到可用模型": "modelConfig.statusOmpResolved",
+  "Juling 已解析到可用模型": "modelConfig.statusOmpResolved",
   "已从 models.yml 读取": "modelConfig.statusReadFromModelsYml",
   "已在 disabledProviders 中禁用": "modelConfig.statusDisabledInConfig",
   "已禁用": "modelConfig.statusDisabled",

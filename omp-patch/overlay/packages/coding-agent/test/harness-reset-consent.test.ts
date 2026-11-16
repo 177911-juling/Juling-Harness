@@ -1,4 +1,4 @@
-import { cfgClaudeResetsAutoRedeem } from "../src/session/settings";
+import { cfgClaudeResetsAutoRedeemWeekly } from "../src/session/settings";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { ResetCreditAccountStatus, ResetCreditTarget, UsageReport } from "@oh-my-pi/pi-ai";
@@ -182,7 +182,7 @@ describe("Harness Claude reset consent", () => {
 
 			"claudeResets.salvageHorizonHours": 12,
 		});
-		cfgClaudeResetsAutoRedeem.set(settings, options.autoRedeem ?? "yes");
+		cfgClaudeResetsAutoRedeemWeekly.set(settings, options.autoRedeem ?? "yes");
 		settings.setModelRole("default", `${model.provider}/${model.id}`);
 		const sessionManager = SessionManager.inMemory();
 		managers.push(sessionManager);
@@ -216,7 +216,7 @@ describe("Harness Claude reset consent", () => {
 			await coordinator.sweepPromise;
 			expect(handler).toHaveBeenCalledTimes(1);
 			expect(targets).toHaveLength(choice === "Yes" ? 1 : 0);
-			expect(cfgClaudeResetsAutoRedeem.get(session.settings)).toBe(
+			expect(cfgClaudeResetsAutoRedeemWeekly.get(session.settings)).toBe(
 				choice === "Yes" ? "yes" : choice === "No" ? "no" : "unset",
 			);
 		});
@@ -235,6 +235,6 @@ describe("Harness Claude reset consent", () => {
 		await coordinator.sweepPromise;
 		expect(handler).toHaveBeenCalledTimes(1);
 		expect(targets).toHaveLength(0);
-		expect(cfgClaudeResetsAutoRedeem.get(session.settings)).toBe("unset");
+		expect(cfgClaudeResetsAutoRedeemWeekly.get(session.settings)).toBe("unset");
 	});
 });

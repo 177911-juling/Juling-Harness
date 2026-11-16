@@ -333,7 +333,10 @@ export class HarnessBtwService {
 					} else if (this.#lastSaved) await this.#store.retry(this.#lastSaved);
 					this.#saveError = undefined;
 				} catch {
-					throw new HarnessBtwError("COMMAND_BLOCKED", "BTW history could not be saved; copy the answer and retry");
+					throw new HarnessBtwError(
+						"COMMAND_BLOCKED",
+						"BTW history could not be saved; copy the answer and retry",
+					);
 				}
 			}
 		};

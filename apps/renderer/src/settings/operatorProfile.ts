@@ -37,6 +37,12 @@ export const DEFAULT_OPERATOR_PROFILE: OperatorProfile = {
 };
 
 export const OPERATOR_PROFILE_STORAGE_KEY = "omp.operatorProfile";
+/**
+ * The pre-rename default display name. A stored profile that still carries it
+ * was never edited by the user, so it follows the new default instead of
+ * keeping the old product name on the sidebar.
+ */
+const LEGACY_DEFAULT_DISPLAY_NAME = "Studio";
 export const DISPLAY_NAME_MAX = 32;
 export const AVATAR_INPUT_MAX_BYTES = 8 * 1024 * 1024;
 export const AVATAR_PIXEL_SIZE = 192;
@@ -52,8 +58,8 @@ export function normalizeDisplayName(value: string): string {
 
 export function avatarInitial(name: string): string {
   const trimmed = name.trim();
-  if (!trimmed) return "S";
-  return Array.from(trimmed)[0]!.toLocaleUpperCase();
+  const source = trimmed.length > 0 ? trimmed : DEFAULT_OPERATOR_PROFILE.displayName;
+  return Array.from(source)[0]!.toLocaleUpperCase();
 }
 
 export function parseOperatorProfile(raw: string | null): Pick<OperatorProfile, "displayName"> {
@@ -63,7 +69,9 @@ export function parseOperatorProfile(raw: string | null): Pick<OperatorProfile, 
     const displayName = typeof value.displayName === "string"
       ? normalizeDisplayName(value.displayName)
       : DEFAULT_OPERATOR_PROFILE.displayName;
-    return { displayName };
+    // `normalizeDisplayName` maps an empty name back to the current default, so
+    // the only legacy value left is the old literal default itself.
+    return { displayName: displayName === LEGACY_DEFAULT_DISPLAY_NAME ? DEFAULT_OPERATOR_PROFILE.displayName : displayName };
   } catch {
     return { displayName: DEFAULT_OPERATOR_PROFILE.displayName };
   }
@@ -135,7 +143,7 @@ type AvatarDisk = {
 };
 
 function diskFromChrome(): AvatarDisk | undefined {
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (chrome?.saveAvatar === undefined || chrome.loadAvatar === undefined || chrome.clearAvatar === undefined) {
     return undefined;
   }

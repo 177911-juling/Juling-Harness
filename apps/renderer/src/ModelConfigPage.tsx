@@ -1452,7 +1452,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                 <p className="sec-desc">{t("modelConfig.modelsSectionDesc", { prefix: editor.id || "provider-id" })}</p>
                 <div className="mc-models-bar">
                   <div className="seg" role="tablist" aria-label={t("modelConfig.modelsSourceAria")}>
-                    <button type="button" role="tab" aria-selected={modelsTab === "catalog"} className={modelsTab === "catalog" ? "active" : undefined} onClick={() => setModelsTab("catalog")}>OMP Catalog</button>
+                    <button type="button" role="tab" aria-selected={modelsTab === "catalog"} className={modelsTab === "catalog" ? "active" : undefined} onClick={() => setModelsTab("catalog")}>Juling Catalog</button>
                     {editor.discoveryType ? (
                       <button type="button" role="tab" aria-selected={modelsTab === "discovery"} className={modelsTab === "discovery" ? "active" : undefined} onClick={() => setModelsTab("discovery")}>Runtime Discovery</button>
                     ) : null}

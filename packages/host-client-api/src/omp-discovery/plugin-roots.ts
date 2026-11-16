@@ -7,9 +7,9 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, getPluginsDir } from "./paths.js";
+import { getAgentDirsForRead, getPluginsDirsForRead, getProjectConfigDirsForRead } from "./paths.js";
 import { parseManifest } from "./plugin-manifest.js";
-import { resolveActiveProjectRegistryPath } from "./helpers.js";
+import { resolveActiveProjectRegistryPaths } from "./helpers.js";
 import type { DiscoveryWarning, PluginManifestView } from "./types.js";
 
 export interface OmpPluginRoot {
@@ -131,59 +131,66 @@ async function collectPluginsAtRoot(
 }
 
 /**
- * List every OMP plugin root: the user plugins dir plus the project plugins
- * dir anchored at the nearest `.omp/` / `.git/` above cwd. Project entries
- * shadow user entries with the same package name.
+ * List every OMP plugin root: the user plugins dir (`~/.juling/plugins`, then
+ * legacy `~/.omp/plugins`) plus the project plugins dir anchored at the
+ * nearest `.juling/` / `.omp/` / `.git/` above cwd. Higher-priority entries
+ * shadow lower-priority ones with the same package name.
  */
 export async function listOmpPluginRoots(home: string, cwd: string): Promise<{
   roots: OmpPluginRoot[];
   warnings: DiscoveryWarning[];
 }> {
   const warnings: DiscoveryWarning[] = [];
-  const userRoot = getPluginsDir(home);
+  const pluginsDirs = getPluginsDirsForRead(home);
 
-  // Names present in the user marketplace registry keep the npm/link
+  // Names present in the user marketplace registries keep the npm/link
   // classification of dependencies that are also marketplace installs.
   const marketplaceNames = new Set<string>();
-  const installed = asRecord(await readJson(path.join(userRoot, "installed_plugins.json")));
-  const installedPlugins = installed ? asRecord(installed.plugins) : undefined;
-  if (installedPlugins) {
+  for (const pluginsDir of pluginsDirs) {
+    const installed = asRecord(await readJson(path.join(pluginsDir, "installed_plugins.json")));
+    const installedPlugins = installed ? asRecord(installed.plugins) : undefined;
+    if (!installedPlugins) continue;
     for (const id of Object.keys(installedPlugins)) {
       const atIndex = id.lastIndexOf("@");
       marketplaceNames.add(atIndex > 0 ? id.slice(0, atIndex) : id);
     }
   }
 
-  // Project overrides still come from <cwd>/.omp/plugin-overrides.json.
+  // Project overrides come from `<cwd>/.juling/plugin-overrides.json` first,
+  // then the pre-rebrand `<cwd>/.omp/plugin-overrides.json`.
   const disabled = new Set<string>();
-  const overrides = asRecord(await readJson(path.join(cwd, ".omp", "plugin-overrides.json")));
-  if (overrides && Array.isArray(overrides.disabled)) {
+  for (const configDir of getProjectConfigDirsForRead(cwd)) {
+    const overrides = asRecord(await readJson(path.join(configDir, "plugin-overrides.json")));
+    if (!overrides || !Array.isArray(overrides.disabled)) continue;
     for (const name of overrides.disabled) {
       if (typeof name === "string") disabled.add(name);
     }
   }
 
-  const roots = await collectPluginsAtRoot(userRoot, "user", disabled, marketplaceNames, warnings);
-
-  const projectRegistryPath = await resolveActiveProjectRegistryPath(cwd);
-  if (projectRegistryPath) {
-    const projectRoot = path.dirname(projectRegistryPath);
-    if (projectRoot !== userRoot) {
-      const projectPlugins = await collectPluginsAtRoot(
-        projectRoot,
-        "project",
-        disabled,
-        marketplaceNames,
-        warnings
-      );
-      // Project entries shadow user entries with the same package name.
-      const merged = new Map<string, OmpPluginRoot>();
-      for (const plugin of roots) merged.set(plugin.name, plugin);
-      for (const plugin of projectPlugins) merged.set(plugin.name, plugin);
-      return { roots: [...merged.values()], warnings };
+  // Highest priority first: project roots (canonical, then legacy) shadow user
+  // roots (canonical, then legacy); first-seen name wins.
+  const merged = new Map<string, OmpPluginRoot>();
+  const projectPluginsDirs = (await resolveActiveProjectRegistryPaths(cwd)).map((registryPath) =>
+    path.dirname(registryPath)
+  );
+  const candidates: Array<{ dir: string; scope: "user" | "project" }> = [
+    ...projectPluginsDirs.map((dir) => ({ dir, scope: "project" as const })),
+    ...pluginsDirs.map((dir) => ({ dir, scope: "user" as const })),
+  ];
+  for (const candidate of candidates) {
+    const roots = await collectPluginsAtRoot(
+      candidate.dir,
+      candidate.scope,
+      disabled,
+      marketplaceNames,
+      warnings
+    );
+    for (const root of roots) {
+      if (merged.has(root.name)) continue;
+      merged.set(root.name, root);
     }
   }
-  return { roots, warnings };
+  return { roots: [...merged.values()], warnings };
 }
 
 async function readSettingsExtensions(settingsPath: string): Promise<string[]> {
@@ -193,16 +200,23 @@ async function readSettingsExtensions(settingsPath: string): Promise<string[]> {
 }
 
 /**
- * Resolve extension directories declared in `<cwd>/.omp/settings.json`
- * (project) and `getAgentDir(home)/settings.json` (user). `~` is expanded
- * against home; relative paths resolve against cwd; only existing
- * directories are returned. Project entries come first, first-seen wins.
+ * Resolve extension directories declared in `<cwd>/.juling/settings.json`
+ * (project, then legacy `<cwd>/.omp/settings.json`) and
+ * `getAgentDir(home)/settings.json` (user, canonical then legacy `~/.omp/agent`).
+ * `~` is expanded against home; relative paths resolve against cwd; only
+ * existing directories are returned. Project entries come first, first-seen wins.
  */
 export async function listSettingsExtensionRoots(home: string, cwd: string): Promise<SettingsExtensionRoot[]> {
-  const [projectExtensions, userExtensions] = await Promise.all([
-    readSettingsExtensions(path.join(cwd, ".omp", "settings.json")),
-    readSettingsExtensions(path.join(getAgentDir(home), "settings.json")),
+  const [projectSettings, userSettings] = await Promise.all([
+    Promise.all(
+      getProjectConfigDirsForRead(cwd).map((dir) => readSettingsExtensions(path.join(dir, "settings.json")))
+    ),
+    Promise.all(
+      getAgentDirsForRead(home).map((dir) => readSettingsExtensions(path.join(dir, "settings.json")))
+    ),
   ]);
+  const projectExtensions = projectSettings.flat();
+  const userExtensions = userSettings.flat();
 
   const seen = new Set<string>();
   const roots: SettingsExtensionRoot[] = [];

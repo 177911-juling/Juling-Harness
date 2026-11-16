@@ -87,7 +87,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
-  border-radius: var(--r-8);
+  border-radius: var(--r-4);
   background: var(--surface-2);
   font-size: var(--fs-12);
 }
@@ -673,9 +673,9 @@
   min-width: 140px;
   padding: 6px;
   border: 1px solid var(--border);
-  border-radius: var(--r-8);
+  border-radius: var(--r-4);
   background: var(--surface);
-  box-shadow: var(--shadow-lg);
+  box-shadow: none;
   z-index: 12;
 }
 .eval-review-title {
@@ -861,11 +861,11 @@
   gap: 8px;
   padding: 10px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--r-8);
+  border-radius: var(--r-4);
   background: var(--surface);
   color: var(--text-2);
   font: 500 12px var(--font-ui);
-  box-shadow: var(--shadow-lg);
+  box-shadow: none;
   cursor: pointer;
 }
 .eval-background-entry.waiting {

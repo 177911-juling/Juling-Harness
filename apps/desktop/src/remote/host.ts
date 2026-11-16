@@ -70,7 +70,7 @@ export async function createRemoteHost(options: RemoteHostOptions): Promise<Remo
   const port: PlatformPort = {
     platform,
     appDataDirectory: async () => stateDirectory,
-    runtimeExecutableName: () => platform === "win32" ? "omp.exe" : "omp",
+    runtimeExecutableName: () => platform === "win32" ? "juling.exe" : "juling",
     createPrivateEndpoint: async () => privateEndpoint(platform === "win32" ? "named-pipe" : "unix-socket", randomUUID()),
     createProcessContainment: () => ({ attach: unavailable, requestStop: unavailable, forceStop: unavailable, release: unavailable }),
     revealPath: unavailable,

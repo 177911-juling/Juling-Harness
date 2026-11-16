@@ -367,7 +367,7 @@
       </div>`;
     } else {
       body = `<div class="auth-box">
-        <div class="auth-status" style="margin-bottom:0">${icon('check', 'sm')}<span>无需认证 — 适用于 Ollama、LM Harness、llama.cpp 等本地服务</span></div>
+        <div class="auth-status" style="margin-bottom:0">${icon('check', 'sm')}<span>无需认证 — 适用于 Ollama、LM Studio、llama.cpp 等本地服务</span></div>
       </div>`;
     }
     return `<div class="mp-sec">

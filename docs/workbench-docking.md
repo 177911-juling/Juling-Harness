@@ -142,7 +142,7 @@ Agent 标签显示名称与状态点，悬停查看名称、状态和实际模�
 
 每个连接目标、项目和会话独立保存布局。新会话默认使用项目默认预设，未设置则使用应用默认，再回退到内置默认。
 
-内置默认布局的左栏只有 Explorer，右侧栏为空且隐藏，底栏完全隐藏，保留 Terminal、Problems、Tests、Output、OMP Logs 和 Preview Logs，当前标签仍为 OMP Logs。已有会话继续恢复保存的布局；选择“恢复出厂布局”可应用这套默认配置。
+内置默认布局的左栏只有 Explorer，右侧栏为空且隐藏，底栏完全隐藏，保留 Terminal、Problems、Tests、Output、Juling Logs 和 Preview Logs，当前标签仍为 Juling Logs。已有会话继续恢复保存的布局；选择“恢复出厂布局”可应用这套默认配置。
 
 “设置 → 外观与布局 → 工作台布局”提供：
 
@@ -165,7 +165,7 @@ Agent 标签显示名称与状态点，悬停查看名称、状态和实际模�
 
 | 形态 | 适用 | 说明 |
 |---|---|---|
-| `.dock-doc` | Output、OMP Logs | 标题栏（masthead）+ 自己的滚动区；账本行、sticky 列头都在滚动区内。卡片模式（`data-dock-auto-height`）下改为按内容高度，列表最高 220px。见 `apps/renderer/src/panels/panels.css`。 |
+| `.dock-doc` | Output、Juling Logs | 标题栏（masthead）+ 自己的滚动区；账本行、sticky 列头都在滚动区内。卡片模式（`data-dock-auto-height`）下改为按内容高度，列表最高 220px。见 `apps/renderer/src/panels/panels.css`。 |
 | `.dock-pad` | Problems、Tests、Preview Logs | 保留各自的行／提示条结构，只补回页边距；滚动交给宿主。 |
 | 自己的 `height: 100%` 根 | Terminal、Browser、Computer、Files、Git | 画布／终端填满面板，页边距与滚动都由模块内部负责。 |
 

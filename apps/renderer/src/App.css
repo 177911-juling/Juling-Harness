@@ -33,13 +33,26 @@
   padding: 0 10px;
   padding-left: max(10px, env(titlebar-area-x, 0px));
   padding-right: max(10px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
-  background: var(--bg);
+  background: var(--bg-inset);
   color: var(--text-2);
+  border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
   user-select: none;
   overflow: visible;
   position: relative;
   z-index: var(--z-menu);
+}
+.app-titlebar :is(.title-menu-btn, .icon-btn) {
+  color: var(--text-3);
+}
+.app-titlebar .title-menu-btn:hover,
+.app-titlebar .title-menu.open .title-menu-btn {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.app-titlebar .preview-switch {
+  color: var(--text-3);
+  border-color: var(--border);
 }
 
 .app-titlebar .icon-btn,
@@ -173,6 +186,7 @@
      focus / scrollIntoView (inspect composer, minimap). clip is not a
      scroll container, so the shell cannot be pushed under the titlebar. */
   overflow: clip;
+  position: relative;
   background: var(--bg);
 }
 
@@ -196,13 +210,308 @@
 }
 .app-shell > .app-body { flex: 1; min-width: 0; }
 
+/* ============================================================
+   P9 舱壁（Cocoon）：工作台 chrome 在两个主题下都强制近黑。
+   浅色 = 晒图纸画布 + 深色舱壁（CAD / 工程软件的招牌轮廓）；
+   深色 = 全深空蓝图。只覆盖工作台内的 chrome 面（rail / 侧栏 /
+   顶栏 / 状态条 / 面板壳），页面画布照常用主题纸面色。
+   ============================================================ */
+/* 舱壁作用域：AppShell 的 .app-body.adaptive-workbench 之外，对话工作台把
+   rail/侧栏 portal 到 .cw-shell 里（.cw-shared-* 槽），所以同名规则要同时
+   命中 .cw-shell 的宿主。变量定义在两个根上，规则用 :is() 双挂。 */
+.app-body.adaptive-workbench,
+.conversation-workspace {
+  /* 旧「舱壁」命名保留为兼容别名，值一律指向当前主题的表面梯级：
+     工作台与二级页共用同一套表面系统，不再有深色壳包浅色纸的拼缝。 */
+  --cocoon-bg: var(--bg);
+  --cocoon-inset: var(--bg-inset);
+  --cocoon-surface: var(--surface);
+  --cocoon-surface-2: var(--surface-2);
+  --cocoon-border: var(--border);
+  --cocoon-border-strong: var(--border-strong);
+  --cocoon-text: var(--text);
+  --cocoon-text-2: var(--text-2);
+  --cocoon-text-3: var(--text-3);
+  --cocoon-accent: var(--accent);
+  --cocoon-accent-2: var(--accent-2);
+}
+.app-body.adaptive-workbench { background: var(--cocoon-bg); }
+.app-body.adaptive-workbench > .sidebar,
+.cw-shell .sidebar {
+  background: var(--cocoon-inset);
+  border-color: var(--cocoon-border);
+}
+.app-body.adaptive-workbench > .sidebar::after,
+.cw-shell .sidebar::after { background: var(--cocoon-inset); }
+.app-body.adaptive-workbench .app-rail,
+.cw-shell .app-rail {
+  background: var(--cocoon-inset);
+}
+.app-body.adaptive-workbench .app-rail::after,
+.cw-shell .app-rail::after { background: var(--cocoon-border); }
+.app-body.adaptive-workbench .app-rail-btn,
+.cw-shell .app-rail-btn { color: var(--cocoon-text-3); }
+.app-body.adaptive-workbench .app-rail-btn:hover,
+.cw-shell .app-rail-btn:hover { color: var(--cocoon-text); }
+.app-body.adaptive-workbench .app-rail-btn.active,
+.cw-shell .app-rail-btn.active { color: var(--accent); }
+.app-body.adaptive-workbench .app-rail-avatar > span,
+.cw-shell .app-rail-avatar > span { background: var(--cocoon-accent); color: var(--text-on-accent); }
+.app-body.adaptive-workbench .topbar {
+  background: var(--cocoon-inset);
+  border-bottom-color: var(--cocoon-border-strong);
+  color: var(--cocoon-text-2);
+}
+.app-body.adaptive-workbench .topbar :is(.crumb-item, .crumb-current) { color: var(--cocoon-text-2); }
+.app-body.adaptive-workbench .topbar .crumb-item:hover,
+.app-body.adaptive-workbench .topbar .crumb-item.open { background: var(--surface-hover); color: var(--cocoon-text); }
+.app-body.adaptive-workbench .topbar .icon-btn { color: var(--cocoon-text-3); }
+.app-body.adaptive-workbench .topbar .icon-btn:hover { color: var(--cocoon-text); }
+.app-body.adaptive-workbench .topbar .icon-btn.active { color: var(--cocoon-accent); }
+.app-body.adaptive-workbench .topbar .telemetry { color: var(--cocoon-accent-2); }
+.app-body.adaptive-workbench .topbar .tb-crumb .crumb-item::before { color: rgba(140, 155, 177, 0.75); }
+.app-body.adaptive-workbench .sidebar :is(.sb-brand .name, .sb-section-head, .thread .t-title, .project-head .p-name),
+.cw-shell .sidebar :is(.sb-brand .name, .sb-section-head, .thread .t-title, .project-head .p-name) { color: var(--cocoon-text-2); }
+.app-body.adaptive-workbench .sidebar .sb-brand .name,
+.cw-shell .sidebar .sb-brand .name { color: var(--cocoon-text); }
+.app-body.adaptive-workbench .sidebar :is(.sb-scroll, .sb-top, .sb-actions),
+.cw-shell .sidebar :is(.sb-scroll, .sb-top, .sb-actions) { color: var(--cocoon-text-2); }
+.app-body.adaptive-workbench .sidebar .thread:hover,
+.cw-shell .sidebar .thread:hover,
+.app-body.adaptive-workbench .sidebar .project-head-row:hover,
+.cw-shell .sidebar .project-head-row:hover { background: var(--surface-hover); }
+.app-body.adaptive-workbench .sidebar .thread::before,
+.cw-shell .sidebar .thread::before { color: rgba(140, 155, 177, 0.7); }
+.app-body.adaptive-workbench .sidebar .thread.active .t-title,
+.cw-shell .sidebar .thread.active .t-title { color: var(--accent); }
+.app-body.adaptive-workbench .sb-divider,
+.cw-shell .sb-divider { background: var(--cocoon-border); }
+.app-body.adaptive-workbench .minimap { background: var(--cocoon-bg); border-right-color: var(--cocoon-border); }
+.app-body.adaptive-workbench .composer-region { background: var(--cocoon-bg); }
+.app-body.adaptive-workbench .composer { background: var(--cocoon-surface); color: var(--cocoon-text); }
+.app-body.adaptive-workbench .queue-strip { background: var(--cocoon-surface); color: var(--cocoon-text-2); }
+.app-body.adaptive-workbench .banner { background: color-mix(in srgb, var(--amber) 10%, var(--cocoon-surface)); color: var(--cocoon-text); }
+/* 右/底 dock 面板壳与卡片：舱壁面。 */
+.app-body.adaptive-workbench :is(.side-panel, .bottom-panel) {
+  background: var(--cocoon-inset);
+  border-color: var(--cocoon-border);
+}
+.app-body.adaptive-workbench .dock-card { background: var(--cocoon-surface); border-color: var(--cocoon-border); color: var(--cocoon-text); }
+.app-body.adaptive-workbench .side-panel .sp-head,
+.app-body.adaptive-workbench .bottom-panel .bp-head { background: var(--cocoon-surface-2); border-bottom-color: var(--cocoon-border); color: var(--cocoon-text-2); }
+.app-body.adaptive-workbench .env-card { color: var(--cocoon-text); }
+.app-body.adaptive-workbench .context-card { color: var(--cocoon-text-2); }
+/* P10 关键修正：工作台 chrome（顶栏/横幅/Explorer 卡/composer/minimap）经
+   SharedSurface portal 挂进 .conversation-workspace（.cw-* 槽），不在
+   .app-body 子树里 —— 上面所有 .app-body.adaptive-workbench 前缀的规则都
+   打不中它们。这里用 .conversation-workspace 前缀（变量已在此根定义）补齐
+   同一套舱壁。 */
+.conversation-workspace :is(.topbar, .banner.is-floating) {
+  background: var(--cocoon-inset);
+  border-bottom-color: var(--cocoon-border-strong);
+  color: var(--cocoon-text-2);
+}
+.conversation-workspace .topbar :is(.crumb-item, .crumb-current, .crumb-label) { color: var(--cocoon-text-2); }
+.conversation-workspace .topbar .crumb-item:hover,
+.conversation-workspace .topbar .crumb-item.open { background: var(--surface-hover); color: var(--cocoon-text); }
+.conversation-workspace .topbar .icon-btn { color: var(--cocoon-text-3); }
+.conversation-workspace .topbar .icon-btn:hover { color: var(--cocoon-text); }
+.conversation-workspace .topbar .icon-btn.active { color: var(--cocoon-accent); }
+.conversation-workspace .topbar .telemetry { color: var(--cocoon-accent-2); }
+.conversation-workspace .topbar .tb-crumb .crumb-item::before { color: rgba(140, 155, 177, 0.75); }
+.conversation-workspace .tb-crumb .crumb-branch-label { color: var(--cocoon-accent-2); }
+.conversation-workspace .banner { background: color-mix(in srgb, var(--amber) 10%, var(--cocoon-surface)); color: var(--cocoon-text); border-color: color-mix(in srgb, var(--amber) 35%, var(--cocoon-border)); border-left: 2px solid var(--amber); border-radius: var(--r-4); }
+.conversation-workspace .banner .banner-detail { color: var(--cocoon-text-2); }
+/* P10：红色变体与琥珀提示条（Runtime 未连接）在舱内同样近黑化。 */
+.conversation-workspace .banner.red,
+.conversation-workspace .banner.amber {
+  background: color-mix(in srgb, var(--amber) 12%, var(--cocoon-surface));
+  color: var(--cocoon-text);
+  border-color: color-mix(in srgb, var(--amber) 40%, var(--cocoon-border));
+  border-left: 2px solid var(--amber);
+}
+.conversation-workspace .banner.red { border-left-color: var(--red); }
+.conversation-workspace .banner .icon,
+.conversation-workspace .banner :is(.banner-actions .btn) { color: var(--cocoon-text-2); }
+/* P10：不走 portal 的横幅（.main-col 直下，RuntimeLossBanner 默认变体）
+   —— .main-col 在 .app-body.adaptive-workbench 子树内，但 banner 规则
+   （components.css）在 App.css 之后加载需更高特异性压制。 */
+.app-body.adaptive-workbench :is(.main-col > .banner, .main-col .banner) {
+  background: color-mix(in srgb, var(--amber) 12%, var(--cocoon-surface));
+  color: var(--cocoon-text);
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--cocoon-border));
+  border-left: 2px solid var(--amber);
+  border-radius: var(--r-4);
+}
+.app-body.adaptive-workbench :is(.main-col > .banner, .main-col .banner).red {
+  border-left-color: var(--red);
+}
+.app-body.adaptive-workbench :is(.main-col > .banner, .main-col .banner) .banner-detail {
+  color: var(--cocoon-text-2);
+}
+.conversation-workspace :is(.minimap, .composer-region) { background: var(--cocoon-bg); border-color: var(--cocoon-border); }
+.conversation-workspace .composer { background: var(--cocoon-surface); color: var(--cocoon-text); }
+.conversation-workspace .queue-strip { background: var(--cocoon-surface); color: var(--cocoon-text-2); }
+.conversation-workspace :is(.dock-card, .dock-card-region-left) { background: var(--cocoon-inset); border-color: var(--cocoon-border); color: var(--cocoon-text-2); }
+.conversation-workspace .dock-card-region-left :is(.sb-section-head, .dock-files-title, .tree-row, .project-head .p-name) { color: var(--cocoon-text-2); }
+.conversation-workspace .dock-card-region-left .tree-row:hover { background: var(--surface-hover); color: var(--cocoon-text); }
+.conversation-workspace :is(.side-panel, .bottom-panel) { background: var(--cocoon-inset); border-color: var(--cocoon-border); }
+/* P10：dock 面板内容壳（portal 到 body>.dock-host-layer，不在任何舱根子树！）
+   —— 必须单独映射；它的浅底是最后一块拼布。 */
+body > .dock-host-layer > .dock-panel-content {
+  background: var(--cocoon-inset);
+  color: var(--cocoon-text-2);
+}
+body > .dock-host-layer > .dock-panel-content :is(.sb-section-head, .dock-files-title, .tree-row, .project-head .p-name, .thread .t-title) {
+  color: var(--cocoon-text-2);
+}
+body > .dock-host-layer > .dock-panel-content :is(.tree-row, .sb-user, .sb-brand):hover {
+  background: var(--surface-hover);
+  color: var(--cocoon-text);
+}
+body > .dock-host-layer > .dock-panel-content .sb-divider { background: var(--cocoon-border); }
+body > .dock-host-layer > .dock-panel-content .env-card { color: var(--cocoon-text); }
+body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoon-text-2); }
+/* P10：左侧卡区（Explorer 卡在侧栏内 .dock-left-cards）—— 侧栏已近黑，
+   但 .dock-card 基础底是 --bg-inset（浅色主题下是纸白）→ 白卡拼布的最后一块。 */
+.app-body.adaptive-workbench .dock-left-cards .dock-card,
+.conversation-workspace .dock-left-cards .dock-card,
+.cw-shell .dock-left-cards .dock-card {
+  background: var(--cocoon-surface);
+  border-color: var(--cocoon-border);
+  color: var(--cocoon-text-2);
+}
+.app-body.adaptive-workbench .dock-left-cards .dock-card :is(.dock-card-title, .tree-row, .sb-section-head),
+.conversation-workspace .dock-left-cards .dock-card :is(.dock-card-title, .tree-row, .sb-section-head),
+.cw-shell .dock-left-cards .dock-card :is(.dock-card-title, .tree-row, .sb-section-head) {
+  color: var(--cocoon-text-2);
+}
+.app-body.adaptive-workbench .dock-left-cards .dock-card .tree-row:hover,
+.conversation-workspace .dock-left-cards .dock-card .tree-row:hover,
+.cw-shell .dock-left-cards .dock-card .tree-row:hover {
+  background: var(--surface-hover);
+  color: var(--cocoon-text);
+}
+.conversation-workspace .env-card { color: var(--cocoon-text); }
+.conversation-workspace .context-card { color: var(--cocoon-text-2); }
+.conversation-workspace .page-head {
+  background: var(--cocoon-inset);
+  color: var(--cocoon-text-2);
+  border-bottom-color: var(--cocoon-border);
+}
+.conversation-workspace .page-head :is(.ph-title, .page-nav a) { color: var(--cocoon-text-2); }
+.conversation-workspace .page-head .page-nav a:hover { color: var(--cocoon-text); background: var(--surface-hover); }
+/* P10 终结拼布：workspace.css 第 1 行给 .conversation-workspace 根写了 background:var(--bg)
+   —— 它加载在 App.css **之前**，同特异性下源顺序靠后者胜，但这是根容器底色，
+   直接决定标题槽/画布外露的一切缝隙。这里在 App.css（更晚加载）重写为舱底。 */
+.conversation-workspace {
+  background: var(--cocoon-bg);
+  color: var(--cocoon-text);
+}
+.conversation-workspace .cw-tab-strip { background: var(--cocoon-inset); border-bottom-color: var(--cocoon-border); }
+.conversation-workspace .cw-content-loading { background: var(--cocoon-bg); color: var(--cocoon-text-3); }
+/* 纸面画布（对话/首页正文）保持纸色：画布是页，舱是壳。 */
+.conversation-workspace .cw-page-slot { background: var(--bg); }
+/* P10 拼布修复：左侧卡区（dock-card-region-left，Explorer/Environment/Context
+   所在）的卡片与区壳也纳入舱壁；dock-card-region-left 卡原本 transparent，
+   但其宿主 .dock-left-stack / .sidebar 下的分区底色仍是主题浅色 —— 统一压进舱。 */
+.app-body.adaptive-workbench :is(.dock-left-stack, .dock-card-region-left) {
+  background: var(--cocoon-inset);
+  color: var(--cocoon-text-2);
+}
+.app-body.adaptive-workbench .dock-card-region-left .dock-card {
+  background: var(--cocoon-inset);
+  border-color: var(--cocoon-border);
+}
+.app-body.adaptive-workbench .dock-card-region-left :is(.sb-section-head, .dock-files-title, .sb-scroll, .tree-row) {
+  color: var(--cocoon-text-2);
+}
+.app-body.adaptive-workbench .dock-card-region-left .tree-row:hover {
+  background: var(--surface-hover);
+  color: var(--cocoon-text);
+}
+.app-body.adaptive-workbench .dock-card-region-left :is(.sb-brand, .sb-user):hover {
+  background: var(--surface-hover);
+}
+/* 侧栏自身（非 portal 时）整体沉入舱；portal 到 .cw-shell 的侧栏走 .cw-shell .sidebar 规则。 */
+.app-body.adaptive-workbench > .sidebar { color: var(--cocoon-text-2); }
+/* P10：二级页（首页/历史等 route）的页头与状态区同属舱 —— 页头近黑，
+   页面画布保持纸色。选择器挂 .app-shell（页头在 .app-shell > .page 里）。 */
+.app-shell:has(.app-body.adaptive-workbench) .page-head {
+  background: var(--bg-inset);
+  color: var(--text-2);
+  border-bottom-color: var(--border);
+}
+.app-shell:has(.app-body.adaptive-workbench) .page-head :is(.ph-title, .page-nav a) {
+  color: var(--text-2);
+}
+.app-shell:has(.app-body.adaptive-workbench) .page-head .page-nav a:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+/* P11：composer 周边条 —— ctx-strip（目标选择条）在浅色主题下是 --surface 纸白，
+   嵌在近黑舱里就是用户看到的"白条对话框"。连同 queue-strip/发送按钮统一舱面化。 */
+:is(.app-body.adaptive-workbench, .conversation-workspace, .cw-shell) :is(.ctx-strip, .queue-strip) {
+  background: var(--cocoon-surface);
+  color: var(--cocoon-text-2);
+  border: 1px solid var(--cocoon-border);
+  border-radius: var(--r-6);
+}
+:is(.app-body.adaptive-workbench, .conversation-workspace, .cw-shell) :is(.ctx-strip, .queue-strip) :is(.ctx-item, .ctx-item b, button) {
+  color: var(--cocoon-text-2);
+}
+:is(.app-body.adaptive-workbench, .conversation-workspace, .cw-shell) :is(.ctx-strip, .queue-strip) :is(.ctx-item, button):hover {
+  color: var(--cocoon-text);
+}
+:is(.app-body.adaptive-workbench, .conversation-workspace, .cw-shell) .composer :is(.pill-btn, .approval-pill-wrap) {
+  color: var(--cocoon-text-2);
+}
+
+/* ---------- Status bar ---------- */
+.bp-statusbar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: 28px;
+  background: var(--bg-inset);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--text-font-scale));
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+  user-select: none;
+  overflow: hidden;
+}
+.bp-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+}
+.bp-cell:last-child { border-right: none; margin-left: auto; }
+.bp-cell.bp-grow { flex: 1; min-width: 0; }
+.bp-cell.bp-runtime { color: var(--cocoon-accent, var(--accent)); }
+.bp-cell.bp-ctx { color: var(--cocoon-accent-2, var(--accent-2)); }
+.bp-cell.bp-rev { color: var(--cocoon-text-3, var(--text-3)); opacity: 0.75; }
+.bp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  flex: none;
+}
+.bp-dot.ok { background: var(--green); }
+.bp-dot.err { background: var(--red); animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
+
 /* Collapsible rail. Only the wrapper's width animates: the destination column is
    a fixed-width strip clipped by .app-rail-clip, so collapsing hands the 56px
    back to the page (it never overlays the workbench) and the handle can ride the
    moving border instead of jumping from one state's position to the other's. */
 .app-rail {
-  --rail-btn-size: 38px;
-  --rail-step: 42px;
+  --rail-btn-size: 40px;
+  --rail-step: 44px;
   --rail-handle-w: 18px;
   --rail-handle-h: 46px;
   position: relative;
@@ -265,11 +574,10 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--r-full);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-4);
   background: var(--surface);
   color: var(--text-3);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
@@ -306,7 +614,7 @@
 }
 .app-rail.is-collapsed .app-rail-handle {
   margin-left: 0;
-  border-radius: 0 var(--r-full) var(--r-full) 0;
+  border-radius: 0 var(--r-4) var(--r-4) 0;
 }
 .app-rail-handle .icon { transition: transform var(--dur-slow) var(--ease-nav); }
 .app-rail.is-collapsed .app-rail-handle .icon { transform: rotate(180deg); }
@@ -321,7 +629,9 @@
 /* Same clock as .nav-window in pages.css: the tab bubble and the rail
    highlight move together on route changes. It travels on `translate`, which
    the compositor runs by itself: the highlight keeps gliding while the main
-   thread is busy mounting the page it points at. */
+   thread is busy mounting the page it points at.
+   P7：激活态改 **琥珀实底 + 左缘色条** —— 面积拉满按钮，图标反色，
+   一眼可辨当前页（原来是若有若无的角标淡底）。 */
 .app-rail-window {
   position: absolute;
   top: 0;
@@ -330,8 +640,9 @@
   width: var(--rail-btn-size);
   height: var(--rail-btn-size);
   transform: translateX(-50%);
-  border-radius: 10px;
-  background: var(--surface-active);
+  border-radius: var(--r-6);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
   pointer-events: none;
   transition: translate var(--dur-slow) var(--ease-nav);
 }
@@ -343,7 +654,7 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 10px;
+  border-radius: var(--r-4);
   color: var(--text-3);
   position: relative;
   z-index: 1;
@@ -352,6 +663,8 @@
 .app-rail-btn .icon { width: 18px; height: 18px; }
 .app-rail-btn:hover { background: var(--surface-hover); color: var(--text); }
 .app-rail-btn.active { color: var(--text); }
+/* Active icon takes the accent itself; the soft pill supplies the surface. */
+.app-rail-btn.active { color: var(--accent); }
 .app-rail-btn:focus-visible,
 .app-rail-avatar:focus-visible {
   outline: 2px solid var(--accent);
@@ -472,7 +785,7 @@
 }
 .adaptive-workbench[data-layout-overlay="bottom"] .bottom-panel {
   position: absolute;
-  inset: 44px 0 0;
+  inset: var(--topbar-h) 0 0;
   height: auto;
   z-index: calc(var(--z-fab) + 1);
 }
@@ -491,7 +804,7 @@
 .adaptive-workbench .bp-head > .icon-btn,
 .adaptive-workbench .sp-head > .icon-btn { flex: none; }
 .tb-overflow { display: none; position: relative; }
-.tb-overflow-menu { top: 82px; right: 12px; left: auto; max-width: calc(100vw - 24px); max-height: calc(100dvh - 94px); overflow: auto; }
+.tb-overflow-menu { top: calc(var(--topbar-h) + 36px); right: 12px; left: auto; max-width: calc(100vw - 24px); max-height: calc(100dvh - var(--topbar-h) - 48px); overflow: auto; }
 .title-menu-popover { max-width: calc(100vw - 16px); max-height: calc(100dvh - 52px); overflow-y: auto; }
 /* 窄档不藏控件，只把「文字读数」收成图标：Token 用量 → 条形图图标，
    Context → 只剩圆环，Compact 按钮交给 … 菜单（压缩进行中仍留一个取消图标）。
@@ -587,22 +900,22 @@ button.project-head {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--sp-24) var(--sp-32);
+  padding: var(--sp-32) var(--sp-40);
 }
 .page-wide {
-  max-width: 1080px;
+  max-width: 1120px;
   margin: 0 auto;
 }
 
 .eyebrow {
   margin: 0 0 var(--sp-6);
   color: var(--accent);
-  font: var(--fw-semibold) var(--fs-11) var(--font-mono);
-  letter-spacing: 0.08em;
+  font: var(--fw-semibold) var(--fs-11) var(--font-ui);
+  letter-spacing: 0.02em;
 }
 
 .home-hero {
-  margin-bottom: var(--sp-24);
+  margin-bottom: var(--sp-32);
 }
 .home-hero h1,
 .page-heading h1 {
@@ -650,18 +963,21 @@ button.project-head {
 }
 .session-card {
   display: grid;
-  gap: 5px;
-  min-height: 82px;
-  padding: var(--sp-14);
+  gap: 6px;
+  min-height: 88px;
+  padding: var(--sp-16);
   border: 1px solid var(--border);
   border-radius: var(--r-8);
   background: var(--surface);
   color: var(--text);
   text-align: left;
   cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
 .session-card:hover {
   border-color: var(--accent-border);
+  box-shadow: var(--shadow-2);
 }
 .session-card span {
   font-size: var(--fs-11);

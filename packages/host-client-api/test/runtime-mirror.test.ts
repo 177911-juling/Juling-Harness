@@ -35,7 +35,8 @@ const snapshot: OperatorStateSnapshot = {
 
 function makeFacade(invocations: HarnessOperation[], install: () => Promise<RuntimeInstallState> = async () => ({ status: "installed", signature: "unknown" }),
   invokeOverride?: (operation: HarnessOperation) => Promise<HostInvokeOutcome>,
-  onPublication?: (listener: (publication: RuntimePublication) => void) => () => void): HarnessHostClientFacade {
+  onPublication?: (listener: (publication: RuntimePublication) => void) => () => void,
+  registryCapacity?: number): HarnessHostClientFacade {
   return new HarnessHostClientFacade({
     authority: { authorityId: "authority-1" as PublicAuthorityIdentity["authorityId"], authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"] },
     platform: "win32",
@@ -50,14 +51,15 @@ function makeFacade(invocations: HarnessOperation[], install: () => Promise<Runt
     },
     catalog: { list: () => [] },
     diagnostics: createDefaultHostDiagnosticsFactory(),
+    ...(registryCapacity === undefined ? {} : { registryCapacity }),
     install,
     commands: {
       resume: () => snapshot,
       drop: () => snapshot,
       respond: () => snapshot,
       invoke: (operation): HostInvokeOutcome | Promise<HostInvokeOutcome> => {
-        if (invokeOverride !== undefined) return invokeOverride(operation);
         invocations.push(operation);
+        if (invokeOverride !== undefined) return invokeOverride(operation);
         switch (operation.kind) {
           case "runtime.settings.get":
             return {
@@ -143,6 +145,35 @@ test("Runtime install refuses an earlier command whose result has not reached th
     await waitForReceipt(events, "pending" as CommandRequestId);
     await facade.command(install);
     assert.equal((await waitForReceipt(events, install.requestId)).receipt.status, "completed");
+  } finally { finish(); await facade.close(); }
+});
+
+test("pending commands retain idempotency when the terminal registry is full", async () => {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const invocations: HarnessOperation[] = [];
+  const facade = makeFacade(invocations, undefined, async () => { await gate; return snapshot; }, undefined, 1);
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  const first = {
+    commandName: "runtime.settings.get" as const,
+    input: {},
+    requestId: "capacity-first" as CommandRequestId,
+    idempotencyKey: "capacity-first" as IdempotencyKey,
+  };
+  try {
+    await facade.command(first);
+    await assert.rejects(facade.command({
+      ...first,
+      requestId: "capacity-second" as CommandRequestId,
+      idempotencyKey: "capacity-second" as IdempotencyKey,
+    }), { code: "UNAVAILABLE" });
+    await facade.command(first);
+    assert.equal(invocations.length, 1);
+    finish();
+    assert.equal((await waitForReceipt(events, first.requestId)).receipt.status, "completed");
+    await facade.command(first);
+    assert.equal(invocations.length, 1);
   } finally { finish(); await facade.close(); }
 });
 

@@ -102,7 +102,6 @@ export type RuntimeFeatureOperation =
 	| { kind: "seance.ask"; sessionId: string; source: string; task: string; model?: string };
 export interface RuntimeFeatureResultMap {
 	"agent.spawn.options": {
-		fileEnabled: boolean;
 		modelSelection: boolean;
 		maxEffort: string;
 		models: Array<{ selector: string; name: string; thinkingLevels: readonly string[] }>;

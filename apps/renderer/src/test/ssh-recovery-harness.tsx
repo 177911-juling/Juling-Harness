@@ -27,7 +27,7 @@ function setStatus(state: RemoteConnectionStatus["state"]) {
   for (const listener of listeners) listener();
 }
 const unavailable = async () => { throw new Error("隔离演示不执行实际操作"); };
-globalThis.ompHarnessRemote = {
+globalThis.julingHarnessRemote = {
   list: async () => inventory,
   onChanged: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
   onEvent: () => () => {},
@@ -58,4 +58,4 @@ function Surface() {
 }
 const mounted = createRoot(document.getElementById("root")!);
 mounted.render(<ExecutionTargets client={local}>{(_client, key) => <PreviewModeProvider switchEnabled><Surface key={key} /></PreviewModeProvider>}</ExecutionTargets>);
-import.meta.hot?.dispose(() => { mounted.unmount(); listeners.clear(); globalThis.ompHarnessRemote = undefined; void local.close(); });
+import.meta.hot?.dispose(() => { mounted.unmount(); listeners.clear(); globalThis.julingHarnessRemote = undefined; void local.close(); });

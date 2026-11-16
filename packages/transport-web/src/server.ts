@@ -2,11 +2,11 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type {
   ClientBootstrap, ClientCommandRequest, ClientQueryRequest, ClientQueryResponse,
-  ClientCommandAccepted, ClientEvent, SubscriptionScope, QueryName, CommandName,
+  ClientCommandAccepted, ClientContextScope, ClientEvent, ClientTransport, SubscriptionScope, QueryName, CommandName,
 } from "@juling-harness/client-contract";
 
 export interface WebAdapterHost {
-  openContext?(scope: import("@juling-harness/client-contract").ClientContextScope): Promise<import("@juling-harness/client-contract").ClientTransport>;
+  openContext?(scope: ClientContextScope): Promise<ClientTransport>;
   bootstrap(): Promise<ClientBootstrap>;
   query<T extends QueryName>(request: ClientQueryRequest<T>): Promise<ClientQueryResponse<T>>;
   command<T extends CommandName>(request: ClientCommandRequest<T>): Promise<ClientCommandAccepted<T>>;
@@ -24,7 +24,7 @@ export interface WebAdapterOptions {
   now?: () => number;
 }
 
-interface Session { contexts: Map<string, import("@juling-harness/client-contract").ClientTransport>; csrf: string; expiresAt: number; scope: SubscriptionScope; outstanding: number; revoked: boolean }
+interface Session { contexts: Map<string, ClientTransport>; csrf: string; expiresAt: number; scope: SubscriptionScope; outstanding: number; revoked: boolean; closing?: Promise<void>; timer?: NodeJS.Timeout }
 
 function token(bytes = 24): string { return randomBytes(bytes).toString("base64url"); }
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string,string> = {}): void {
@@ -53,7 +53,28 @@ export class LoopbackWebAdapter {
     const host = req.headers.host?.toLowerCase();
     return host !== undefined && this.#options.origins.some(value => value !== "null" && new URL(value).host.toLowerCase() === host);
   }
-  private session(req: IncomingMessage): [string, Session] | undefined { const id = parseCookies(req.headers.cookie).harness_session; if (!id) return; const s = this.#sessions.get(id); if (!s || s.revoked || s.expiresAt <= this.now()) return; return [id,s]; }
+  private closeSession(id: string, session: Session): Promise<void> {
+    if (session.closing) return session.closing;
+    session.revoked = true;
+    clearTimeout(session.timer);
+    if (this.#sessions.get(id) === session) this.#sessions.delete(id);
+    const contexts = [...session.contexts.values()];
+    session.contexts.clear();
+    session.closing = Promise.all(contexts.map(context => context.close())).then(() => undefined);
+    return session.closing;
+  }
+  private session(req: IncomingMessage): [string, Session] | undefined {
+    const id = parseCookies(req.headers.cookie).harness_session;
+    if (!id) return;
+    const session = this.#sessions.get(id);
+    if (!session) return;
+    if (session.revoked || session.expiresAt <= this.now()) {
+      // Authentication remains synchronous; cleanup still starts before the 401/WS refusal.
+      void this.closeSession(id, session).catch(() => {});
+      return;
+    }
+    return [id, session];
+  }
   private async body(req: IncomingMessage): Promise<unknown> { const chunks: Buffer[] = []; let n=0; for await (const c of req) { n += Buffer.byteLength(c); if (n > this.#options.maxBodyBytes) throw new Error("body_too_large"); chunks.push(Buffer.from(c)); } if (!n) return {}; return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown; }
   private auth(req: IncomingMessage, mutate = false): [string,Session] | undefined { if (!this.originAllowed(req, !mutate && req.method === "GET")) return; const s = this.session(req); if (!s) return; if (mutate && req.headers["x-harness-csrf"] !== s[1].csrf) return; return s; }
   private target(req: IncomingMessage, session: Session): WebAdapterHost {
@@ -72,13 +93,19 @@ export class LoopbackWebAdapter {
         const b = await this.body(req); const code = b !== null && typeof b === "object" && "code" in b ? String((b as { code?: unknown }).code ?? "") : "";
         if (this.#pairing.used || this.#pairing.expiresAt <= this.now() || code.length !== this.#pairing.code.length || !timingSafeEqual(Buffer.from(code), Buffer.from(this.#pairing.code))) return json(res, 401, { error: "unauthenticated" });
         this.#pairing.used = true; const sid = token(32), csrf = token(24); const s: Session = { contexts: new Map(), csrf, expiresAt: this.now()+this.#options.sessionTtlMs, scope: { scope: "all" }, outstanding: 0, revoked: false }; this.#sessions.set(sid,s);
+        s.timer = setTimeout(() => { void this.closeSession(sid, s).catch(() => {}); }, this.#options.sessionTtlMs);
+        s.timer.unref();
         return json(res, 200, { csrf, expiresAt: s.expiresAt }, { "set-cookie": `harness_session=${encodeURIComponent(sid)}; HttpOnly; SameSite=Strict; Path=/` });
       }
       if (path === "/api/v1/context/open" && req.method === "POST") {
         const a = this.auth(req, true); if (!a) return json(res,401,{error:"unauthenticated"});
         if (!this.#options.host.openContext) return json(res,501,{error:"context_unavailable"});
-        const context = await this.#options.host.openContext(await this.body(req) as import("@juling-harness/client-contract").ClientContextScope);
-        if (a[1].revoked || a[1].expiresAt <= this.now()) { await context.close(); return json(res,401,{error:"unauthenticated"}); }
+        const context = await this.#options.host.openContext(await this.body(req) as ClientContextScope);
+        if (a[1].revoked || a[1].expiresAt <= this.now()) {
+          await context.close();
+          await this.closeSession(a[0], a[1]);
+          return json(res,401,{error:"unauthenticated"});
+        }
         const contextId = token(); a[1].contexts.set(contextId, context); return json(res,200,{contextId});
       }
       if (path === "/api/v1/context/close" && req.method === "POST") {
@@ -86,7 +113,7 @@ export class LoopbackWebAdapter {
         const id = String(req.headers["x-harness-context"] ?? "");
         const context = a[1].contexts.get(id); a[1].contexts.delete(id); await context?.close(); return json(res,200,{closed:true});
       }
-      if (path === "/api/v1/session/revoke" && req.method === "POST") { const a = this.auth(req,true); if (!a) return json(res,401,{error:"unauthenticated"}); a[1].revoked=true; this.#sessions.delete(a[0]); const contexts = [...a[1].contexts.values()]; a[1].contexts.clear(); await Promise.all(contexts.map(context => context.close())); return json(res,200,{ok:true}); }
+      if (path === "/api/v1/session/revoke" && req.method === "POST") { const a = this.auth(req,true); if (!a) return json(res,401,{error:"unauthenticated"}); await this.closeSession(a[0], a[1]); return json(res,200,{ok:true}); }
       if (path === "/api/v1/bootstrap" && req.method === "GET") { const a=this.auth(req); if(!a) return json(res,401,{error:"unauthenticated"}); return json(res,200,await this.target(req,a[1]).bootstrap()); }
       if (path === "/api/v1/query" && req.method === "POST") { const a=this.auth(req); if(!a) return json(res,401,{error:"unauthenticated"}); return json(res,200,await this.target(req,a[1]).query(await this.body(req) as ClientQueryRequest)); }
       if (path === "/api/v1/command" && req.method === "POST") { const a=this.auth(req,true); if(!a) return json(res,401,{error:"unauthenticated"}); if(a[1].outstanding>=this.#options.maxOutstandingCommands) return json(res,429,{error:"rate_limited"}); a[1].outstanding++; try { return json(res,202,await this.target(req,a[1]).command(await this.body(req) as ClientCommandRequest)); } finally { a[1].outstanding--; } }

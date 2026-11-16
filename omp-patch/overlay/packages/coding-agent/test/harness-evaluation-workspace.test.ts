@@ -8,7 +8,10 @@ import { releaseJudgmentBatches } from "../src/eval/judgment-batch-bridge";
 import type { ToolSession } from "../src/tools";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 import type { AgentSession } from "../src/session/agent-session";
-import { HarnessEvaluationWorkspaceService, evaluationPlan } from "../src/harness/services/evaluation-workspace-service";
+import {
+	HarnessEvaluationWorkspaceService,
+	evaluationPlan,
+} from "../src/harness/services/evaluation-workspace-service";
 import type { EvaluationNativeSnapshot, EvaluationResultPage } from "../src/harness/evaluation-workspace-protocol";
 afterEach(() => {
 	releaseJudgmentBatches("HarnessWorkspaceTest");

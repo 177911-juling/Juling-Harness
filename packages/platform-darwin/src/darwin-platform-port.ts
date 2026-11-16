@@ -16,7 +16,7 @@ import {
  * layout). Concrete macOS literals are allowed here and nowhere else in
  * the shared tree.
  */
-const RUNTIME_EXECUTABLE_NAME = "omp";
+const RUNTIME_EXECUTABLE_NAME = "juling";
 
 /** Absolute POSIX paths: start with `/`. */
 const POSIX_ABSOLUTE_PATH = /^\/[^\0]*$/u;

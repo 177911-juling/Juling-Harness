@@ -37,6 +37,15 @@ export const HARNESS_PROTOCOL_NAME = "juling-harness" as const;
 export const HARNESS_PROTOCOL_VERSION = 1 as const;
 export const DEFAULT_MAX_CONTROL_FRAME_BYTES = 1024 * 1024;
 const LENGTH_PREFIX_BYTES = 4;
+/** Must match packages/harness-protocol/src/frame-codec.ts. */
+export const IMAGE_ATTACHMENT_FRAME_RESERVE_BYTES = 64 * 1024;
+export const IMAGE_ATTACHMENT_JSON_OVERHEAD_BYTES = 128;
+export const MAX_IMAGE_ATTACHMENT_BYTES = Math.floor(
+	((DEFAULT_MAX_CONTROL_FRAME_BYTES - IMAGE_ATTACHMENT_FRAME_RESERVE_BYTES - IMAGE_ATTACHMENT_JSON_OVERHEAD_BYTES) *
+		3) /
+		4,
+);
+export const MAX_IMAGE_ATTACHMENT_BASE64_CHARS = 4 * Math.ceil(MAX_IMAGE_ATTACHMENT_BYTES / 3);
 
 export interface HarnessRetryState {
 	attempt: number;
@@ -173,7 +182,6 @@ export type HarnessOperation =
 			definition: string;
 			model?: string[];
 			assignment?: string;
-			taskFile?: string;
 			solutionSpace?: string;
 			context?: string;
 			async?: boolean;
@@ -552,6 +560,16 @@ function nonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value.length > 0;
 }
 
+function validateImageAttachmentBudget(images: object[]): void {
+	for (const image of images) {
+		if (!("data" in image)) continue;
+		const data = image.data;
+		if (typeof data === "string" && data.length > MAX_IMAGE_ATTACHMENT_BASE64_CHARS) {
+			throw new HarnessFrameError("Image attachment exceeds the Base64 and control-frame budget");
+		}
+	}
+}
+
 function assertJsonValue(value: unknown, seen = new Set<object>()): void {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return;
 	if (typeof value === "number") {
@@ -885,7 +903,6 @@ export function parseHarnessRequest(value: unknown): HarnessRequest {
 				"kind",
 				"definition",
 				"assignment",
-				"taskFile",
 				"context",
 				"async",
 				"isolation",
@@ -954,6 +971,7 @@ export function parseHarnessRequest(value: unknown): HarnessRequest {
 				) {
 					throw new HarnessFrameError("Invalid image attachments");
 				}
+				validateImageAttachmentBudget(operation.images);
 			}
 			break;
 		case "agent.kill":
@@ -1145,6 +1163,7 @@ export function parseHarnessRequest(value: unknown): HarnessRequest {
 				) {
 					throw new HarnessFrameError("Invalid image attachments");
 				}
+				validateImageAttachmentBudget(operation.images);
 			}
 			break;
 		default:

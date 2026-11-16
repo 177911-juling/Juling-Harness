@@ -40,7 +40,7 @@ export function LocalFileImage({ src, alt }: { src: string; alt: string }) {
       void previewFileBlob(previewFile(path, workspaceId ?? "preview")).then(value => { if (value && active) { blob = URL.createObjectURL(value); setUrl(blob); } });
       return () => { active = false; if (blob) URL.revokeObjectURL(blob); };
     }
-    const api = globalThis.ompHarnessChrome?.files;
+    const api = globalThis.julingHarnessChrome?.files;
     if (!api || !workspaceId) return;
     void api.open({ targetId, workspaceId, path }).then(resource => { id = resource.id; if (active) setUrl(resource.url); else void api.release(id); }).catch(() => { if (active) setUrl(undefined); });
     return () => { active = false; if (id) void api.release(id); };

@@ -72,7 +72,7 @@ let sampling = false, phase = "startup", logBytes = 0;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const save = () => writeFile(join(output, "report.json"), JSON.stringify(report, null, 2));
 async function query(name, input = {}) {
-  const response = await page.evaluate(({ name, input }) => window.ompHarness.query({ queryName: name, input }), { name, input });
+  const response = await page.evaluate(({ name, input }) => window.julingHarness.query({ queryName: name, input }), { name, input });
   if (!response.ok) throw new Error(`Native query failed: ${name} ${response.error?.code ?? "unknown"}`);
   return response.result;
 }
@@ -151,7 +151,7 @@ try {
   page.on("console", message => {
     if (["error", "warning"].includes(message.type())) report[message.type() === "error" ? "errors" : "warnings"].push({ kind: "console", message: message.text().slice(0, 1000) });
   });
-  await page.waitForFunction(() => !!window.ompHarness && !!window.ompSessionPerf);
+  await page.waitForFunction(() => !!window.julingHarness && !!window.ompSessionPerf);
   await page.evaluate(() => {
     localStorage.setItem("omp.appSettings", JSON.stringify({ language: "en", theme: "light", startupPage: "home", restoreLastSession: false, rememberLayout: false }));
     localStorage.setItem("omp.previewMode", "0"); localStorage.setItem("omp.lastRoute", "home");

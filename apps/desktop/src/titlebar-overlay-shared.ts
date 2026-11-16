@@ -9,10 +9,10 @@
 export const TITLEBAR_OVERLAY_CHANNEL = "juling-harness:desktop:chrome-theme";
 export const TITLEBAR_OVERLAY_HEIGHT = 36;
 
-/** Matches renderer tokens: light `--bg/#fbfbfc` `--text/#1d2129`; dark `--bg/#121519` `--text/#e7e8eb`. */
+/** Matches renderer tokens: light chrome `#eef0f4` + `#4a5261`; dark `#08090d` + `#b4bbc8`. */
 export const TITLEBAR_OVERLAY = {
-  light: { color: "#fbfbfc", symbolColor: "#1d2129" },
-  dark: { color: "#121519", symbolColor: "#e7e8eb" },
+  light: { color: "#eef0f4", symbolColor: "#4a5261" },
+  dark: { color: "#08090d", symbolColor: "#b4bbc8" },
 } as const;
 
 export type TitlebarTheme = keyof typeof TITLEBAR_OVERLAY;

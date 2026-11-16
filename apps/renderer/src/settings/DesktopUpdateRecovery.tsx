@@ -17,7 +17,7 @@ export function DesktopUpdateRecovery({ preview }: { preview: boolean }) {
   const ready = preview ? demoReady : updates.state.rollbackReady === true;
   const applying = !preview && (updates.state.applying || (pending && ready));
   const busy = pending || (!preview && (updates.state.downloading || updates.state.checking || updates.state.applying));
-  const available = version !== undefined && (preview || Boolean(globalThis.ompHarnessChrome?.rollbackUpdate));
+  const available = version !== undefined && (preview || Boolean(globalThis.julingHarnessChrome?.rollbackUpdate));
   const act = async () => {
     if (inFlight.current || busy || !available) return;
     if (preview) {

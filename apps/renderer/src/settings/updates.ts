@@ -148,7 +148,7 @@ export function handleProgressEvent(event: UpdateProgressEvent): void {
 }
 
 // 模块初始化时绑定进度监听
-const _progressUnsub = globalThis.ompHarnessChrome?.subscribeUpdateProgress?.(handleProgressEvent);
+const _progressUnsub = globalThis.julingHarnessChrome?.subscribeUpdateProgress?.(handleProgressEvent);
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
@@ -161,7 +161,7 @@ export async function checkForUpdates(options?: {
   readonly silent?: boolean | undefined;
 }): Promise<UpdateCheckResult | null> {
   const silent = options?.silent ?? true;
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (!chrome || typeof chrome.checkUpdates !== "function") {
     return null;
   }
@@ -190,7 +190,7 @@ export async function checkForUpdates(options?: {
 }
 
 export async function importLocalUpdate(input: ChromeUpdatesImportInput): Promise<UpdateImportResult> {
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (!chrome || typeof chrome.importLocalUpdate !== "function") {
     const message = "Desktop bridge interface unavailable";
     const res: UpdateImportResult = { ok: false, message };
@@ -212,7 +212,7 @@ export async function importLocalUpdate(input: ChromeUpdatesImportInput): Promis
 }
 
 export async function startRuntimeUpdate(): Promise<UpdateStartResult> {
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (!chrome || typeof chrome.startRuntime !== "function") {
     const message = "Desktop bridge interface unavailable";
     const res: UpdateStartResult = { ok: false, message };
@@ -237,7 +237,7 @@ export async function downloadUpdateToReady(
   kind: UpdateJobKind,
   onProgress?: (event: UpdateProgressEvent) => void,
 ): Promise<UpdateProgressEvent> {
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (!chrome?.subscribeUpdateProgress || !(kind === "app" ? chrome.startApp : chrome.startRuntime)) {
     throw new Error("Desktop update bridge unavailable");
   }
@@ -295,7 +295,7 @@ export async function downloadUpdateToReady(
 }
 
 export async function cancelUpdate(jobId: string): Promise<void> {
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (!chrome || typeof chrome.cancelUpdate !== "function") {
     return;
   }
@@ -303,7 +303,7 @@ export async function cancelUpdate(jobId: string): Promise<void> {
 }
 
 export async function fetchUpdatePrefs(): Promise<UpdatePrefs | null> {
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (!chrome || typeof chrome.getUpdatePrefs !== "function") {
     return null;
   }
@@ -317,7 +317,7 @@ export async function fetchUpdatePrefs(): Promise<UpdatePrefs | null> {
 }
 
 export async function saveUpdatePrefs(patch: ChromeUpdatesPrefsSetInput): Promise<UpdatePrefs | null> {
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (!chrome || typeof chrome.setUpdatePrefs !== "function") {
     return null;
   }

@@ -692,7 +692,7 @@ export class TimeTravelStore {
       });
       if (stat?.isDirectory()) await removeEmpty(path);
       await mkdir(dirname(path), { recursive: true });
-      const temporary = join(dirname(path), `.omp-time-travel-${randomUUID()}`);
+      const temporary = join(dirname(path), `.juling-time-travel-${randomUUID()}`);
       try {
         if (entry.kind === "file") {
           await copyFile(staged.get(entry.hash)!, temporary);

@@ -146,12 +146,12 @@ export function ServicesPane({
       ]);
       return;
     }
-    if (!workspaceId || !globalThis.ompHarnessChrome?.listServiceDefinitions) {
+    if (!workspaceId || !globalThis.julingHarnessChrome?.listServiceDefinitions) {
       setDefinitions([]);
       return;
     }
     try {
-      const value = await globalThis.ompHarnessChrome.listServiceDefinitions({
+      const value = await globalThis.julingHarnessChrome.listServiceDefinitions({
         workspaceId,
       });
       if (epoch !== generation.current) return;
@@ -276,9 +276,9 @@ export function ServicesPane({
         setForm(false);
         return;
       }
-      if (!workspaceId || !globalThis.ompHarnessChrome?.saveServiceDefinition)
+      if (!workspaceId || !globalThis.julingHarnessChrome?.saveServiceDefinition)
         throw new Error("Secure desktop storage is unavailable");
-      const result = await globalThis.ompHarnessChrome.saveServiceDefinition({
+      const result = await globalThis.julingHarnessChrome.saveServiceDefinition({
         workspaceId,
         spec: value,
         ...(editing ? { id: editing.id, revision: editing.revision } : {}),
@@ -563,7 +563,7 @@ export function ServicesPane({
             </section>
           ) : null}
           <h4>{label("保存的配置", "Saved configurations")}</h4>
-          {!preview && !globalThis.ompHarnessChrome?.saveServiceDefinition ? (
+          {!preview && !globalThis.julingHarnessChrome?.saveServiceDefinition ? (
             <p className="small muted">
               {label(
                 "此环境不提供加密配置存储。可以直接创建服务。",
@@ -601,7 +601,7 @@ export function ServicesPane({
                       return;
                     }
                     const result =
-                      await globalThis.ompHarnessChrome?.removeServiceDefinition?.(
+                      await globalThis.julingHarnessChrome?.removeServiceDefinition?.(
                         {
                           workspaceId: row.workspaceId,
                           id: row.id,
@@ -846,7 +846,7 @@ export function ServicesPane({
                       busy ||
                       (!preview &&
                         (!workspaceId ||
-                          !globalThis.ompHarnessChrome?.saveServiceDefinition))
+                          !globalThis.julingHarnessChrome?.saveServiceDefinition))
                     }
                     onClick={() => void save()}
                   >

@@ -47,14 +47,14 @@ for (const platform of ["win32", "darwin"]) test(`${platform} sandboxed preload 
     return runInContext("JSON.parse(__payload)", context);
   };
 
-  for (const name of ["ompHarness", "ompHarnessChrome", "ompHarnessRemote", "ompHarnessTerminal"]) {
+  for (const name of ["julingHarness", "julingHarnessChrome", "julingHarnessRemote", "julingHarnessTerminal"]) {
     assert.ok(globals[name], `${name} must be exposed before the renderer mounts`);
   }
-  assert.equal((await globals.ompHarness.bootstrap()).ready, true);
+  assert.equal((await globals.julingHarness.bootstrap()).ready, true);
   assert.equal(calls[0][0], "juling-harness:desktop:bootstrap");
 
   const events = [];
-  const unsubscribe = globals.ompHarness.subscribe({ scope: "command", requestId: "request-8" }, event => events.push(event));
+  const unsubscribe = globals.julingHarness.subscribe({ scope: "command", requestId: "request-8" }, event => events.push(event));
   // The bridge picks the subscription id itself and sends it with the
   // registration; Main addresses one event to `{ subscriptionIds }`, so the
   // bundle must deliver it once here and drop envelopes that do not name one of

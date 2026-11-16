@@ -75,7 +75,7 @@ export function previewGalleryItems(): readonly ConversationItem[] {
       parentId: "preview-reset-1",
       createdAt: at(2),
       role: "user",
-      content: [{ type: "text", text: "打开 OMP 原生工具卡图鉴" }],
+      content: [{ type: "text", text: "打开 Juling 原生工具卡图鉴" }],
     },
     {
       kind: "message",
@@ -88,7 +88,7 @@ export function previewGalleryItems(): readonly ConversationItem[] {
   ];
 }
 
-/** omp-web 上游同步：工作台预览对话用，看起来像真实项目回合。 */
+/** juling-web 上游同步：工作台预览对话用，看起来像真实项目回合。 */
 const STORY_CARDS: readonly { readonly [key: string]: JsonValue }[] = [
   {
     kind: "think",
@@ -96,7 +96,7 @@ const STORY_CARDS: readonly { readonly [key: string]: JsonValue }[] = [
     status: "done",
     dur: "6s",
     preview: "先核对 package.json 钉住的上游版本，再扫 docs 里现有同步说明。本地 Harness Bridge 和会话目录不要写回 pi-web。",
-    full: "目标：把 pi-web v0.8.1 合进 omp-web。\n保留 packages/harness-bridge 与 ~/.omp/agent/sessions。\n文档落到 docs/UPSTREAM-SYNC.md，README 加入口。",
+    full: "目标：把 pi-web v0.8.1 合进 juling-web。\n保留 packages/harness-bridge 与 ~/.juling/agent/sessions。\n文档落到 docs/UPSTREAM-SYNC.md，README 加入口。",
   },
   {
     kind: "read",
@@ -110,7 +110,7 @@ const STORY_CARDS: readonly { readonly [key: string]: JsonValue }[] = [
     offset: 1,
     preview: [
       "{",
-      "  \"name\": \"omp-web\",",
+      "  \"name\": \"juling-web\",",
       "  \"version\": \"0.8.0\",",
       "  \"dependencies\": {",
       "    \"@earendil-works/pi-web\": \"0.8.0\"",
@@ -141,7 +141,7 @@ const STORY_CARDS: readonly { readonly [key: string]: JsonValue }[] = [
     created: true,
     lines: 86,
     encoding: "UTF-8",
-    preview: ["# 上游同步记录", "", "## v0.8.1", "", "- 保留 Harness Bridge", "- 会话目录仍走 ~/.omp"],
+    preview: ["# 上游同步记录", "", "## v0.8.1", "", "- 保留 Harness Bridge", "- 会话目录仍走 ~/.juling"],
   },
   {
     kind: "edit",
@@ -246,7 +246,7 @@ export const PREVIEW_CONVO_ITEMS: readonly ConversationItem[] = [
     role: "user",
     content: [{
       type: "text",
-      text: "用 /skill:upstream-sync 把上游 pi-web v0.8.1 同步进 omp-web。保留本地 Harness Bridge 和会话目录，不要写回 pi-web 路径。先读 @docs/ 和 @package.json，再出文档。",
+      text: "用 /skill:upstream-sync 把上游 pi-web v0.8.1 同步进 juling-web。保留本地 Harness Bridge 和会话目录，不要写回 pi-web 路径。先读 @docs/ 和 @package.json，再出文档。",
     }],
   },
   {
@@ -360,7 +360,7 @@ export const PREVIEW_CONVO_LIVE: readonly ConversationRuntimeEvent[] = [
     messageId: "preview-live-assistant",
     toolCallId: "preview-bash-live",
     toolName: "Bash",
-    arguments: { command: "npm run typecheck", cwd: "D:/Project/omp-web" },
+    arguments: { command: "npm run typecheck", cwd: "D:/Project/juling-web" },
     startedAt: at(21),
   },
   {

@@ -96,7 +96,6 @@ export type AgentOperation =
       definition: string;
       model?: string[];
       assignment?: string;
-      taskFile?: string;
       solutionSpace?: string;
       context?: string;
       async?: boolean;

@@ -3,6 +3,11 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-sessi
 import { HarnessScriptedInteractionPort } from "@oh-my-pi/pi-coding-agent/harness/services/interaction-port";
 import { HarnessTreeService } from "@oh-my-pi/pi-coding-agent/harness/services/tree-service";
 
+const SINGLE_ASK_HTML = '<form><select name="q1"><option value="A">A</option></select></form>';
+const DOUBLE_ASK_HTML =
+	'<form><select name="q1"><option value="A">A</option><option value="B">B</option></select></form>';
+const MULTI_ASK_HTML = '<form><select name="q1" multiple><option value="A">A</option></select></form>';
+
 describe("WP-034 HarnessTreeService", () => {
 	test("projects a path-free tree and preserves the active leaf", () => {
 		const session = {
@@ -49,7 +54,7 @@ describe("WP-034 HarnessTreeService", () => {
 					cancelled: false,
 					reopenAsk: {
 						toolCallId: "ask-call",
-						questions: [{ id: "q1", question: "Pick", options: [{ label: "A" }, { label: "B" }] }],
+						html: DOUBLE_ASK_HTML,
 					},
 				};
 			}
@@ -61,12 +66,10 @@ describe("WP-034 HarnessTreeService", () => {
 			resumeAfterAskReanswer: () => resumed++,
 			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
 		} as unknown as AgentSession;
-		const result = await new HarnessTreeService(
-			session,
-			new HarnessScriptedInteractionPort([
-				{ results: [{ id: "q1", selectedOptions: ["B"], note: "Keep this choice", noteOption: "B" }] },
-			]),
-		).navigate("cmd-1", { targetId: "ask-result" });
+		const result = await new HarnessTreeService(session, new HarnessScriptedInteractionPort(["option:1"])).navigate(
+			"cmd-1",
+			{ targetId: "ask-result" },
+		);
 		expect(result).toMatchObject({ askReanswerCommitted: true, leafId: "leaf" });
 		expect(resumed).toBe(1);
 	});
@@ -77,7 +80,7 @@ describe("WP-034 HarnessTreeService", () => {
 				cancelled: false,
 				reopenAsk: {
 					toolCallId: "ask-call",
-					questions: [{ id: "q1", question: "Pick", options: [{ label: "A" }] }],
+					html: SINGLE_ASK_HTML,
 				},
 			}),
 			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
@@ -99,17 +102,17 @@ describe("WP-034 HarnessTreeService", () => {
 					cancelled: false,
 					reopenAsk: {
 						toolCallId: "ask-call",
-						questions: [{ id: "q1", question: "Pick any", multi: true, options: [{ label: "A" }] }],
+						html: MULTI_ASK_HTML,
 					},
 				};
 			},
 			resumeAfterAskReanswer: () => {},
 			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
 		} as unknown as AgentSession;
-		const result = await new HarnessTreeService(
-			session,
-			new HarnessScriptedInteractionPort([{ results: [{ id: "q1", selectedOptions: [] }] }]),
-		).navigate("cmd-1", { targetId: "ask-result" });
+		const result = await new HarnessTreeService(session, new HarnessScriptedInteractionPort(["option:1"])).navigate(
+			"cmd-1",
+			{ targetId: "ask-result" },
+		);
 		expect(result).toMatchObject({ cancelled: false, askReanswerCommitted: true });
 		expect(navigateCalls).toBe(2);
 	});
@@ -120,15 +123,17 @@ describe("WP-034 HarnessTreeService", () => {
 				cancelled: false,
 				reopenAsk: {
 					toolCallId: "ask-call",
-					questions: [{ id: "q1", question: "Pick", options: [{ label: "A" }] }],
+					html: SINGLE_ASK_HTML,
 				},
 			}),
 			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
 		} as unknown as AgentSession;
-		await expect(new HarnessTreeService(session).navigate("cmd-1", { targetId: "ask-result" })).rejects.toMatchObject({
-			code: "INTERACTION_REQUIRED",
-			details: { toolCallId: "ask-call" },
-		});
+		await expect(new HarnessTreeService(session).navigate("cmd-1", { targetId: "ask-result" })).rejects.toMatchObject(
+			{
+				code: "INTERACTION_REQUIRED",
+				details: { toolCallId: "ask-call" },
+			},
+		);
 	});
 
 	test("refuses to navigate while streaming without calling navigateTree", async () => {

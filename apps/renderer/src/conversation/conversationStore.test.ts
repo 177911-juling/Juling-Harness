@@ -93,6 +93,26 @@ describe("ConversationStore", () => {
     expect(store.getSnapshot().state.liveMessages.live).toBeUndefined(); expect(store.getSnapshot().state.items.at(-1)?.itemId).toBe("live");
   });
 
+  it("coalesces a fast ten-thousand-delta burst into one render publication and still settles the final message", () => {
+    const { store, sessionId, frames } = create();
+    store.hydrate({ items: [], headCursor: "head" as never, hasMoreBefore: false });
+    store.applyEvent(started(sessionId, "live"), 1);
+    const before = store.getDiagnostics().published ?? 0;
+    for (let index = 0; index < 10_000; index += 1) store.applyEvent(delta(sessionId, "live", "x"), index + 2);
+
+    expect(frames.size).toBe(1);
+    expect(store.getDiagnostics().published).toBe(before);
+    frames.flush();
+    expect(store.getDiagnostics().published).toBe(before + 1);
+    expect(store.getSnapshot().state.liveMessages.live?.blocks[0]?.text).toHaveLength(10_000);
+
+    store.applyEvent({ kind: "conversation.message.completed", sessionId, turnId: "turn", messageId: "live", item: item("live", "assistant", "x".repeat(10_000)) }, 10_002);
+    frames.flush();
+    expect(store.getSnapshot().state.liveMessages.live).toBeUndefined();
+    expect(store.getSnapshot().state.items.at(-1)?.itemId).toBe("live");
+    store.dispose();
+  });
+
   it("marks an aborted live row, settles its tools, and drops them when the next turn opens", () => {
     const { store, sessionId, frames } = create(); store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
     store.applyEvent(started(sessionId, "live"), 1);

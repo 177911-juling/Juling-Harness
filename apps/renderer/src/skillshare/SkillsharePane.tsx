@@ -498,8 +498,8 @@ export function SkillsharePane({
       </div>
       <p className="small muted">
         {t(
-          "安装与发布复用 OMP 原生注册表。远程写入必须先检查确认单；脚本不会在安装时执行。",
-          "Uses the native OMP registry. Review every remote write before confirming; installation does not execute package scripts.",
+          "安装与发布复用 Juling 原生注册表。远程写入必须先检查确认单；脚本不会在安装时执行。",
+          "Uses the native Juling registry. Review every remote write before confirming; installation does not execute package scripts.",
         )}
       </p>
       {!enabled ? (
@@ -1020,7 +1020,7 @@ export function SkillsharePane({
                 !enabled ||
                 (!preview &&
                   (!status?.privateTokenChannel ||
-                    !globalThis.ompHarnessChrome?.revealSkillshareToken))
+                    !globalThis.julingHarnessChrome?.revealSkillshareToken))
               }
               onClick={() =>
                 prepare({
@@ -1162,10 +1162,10 @@ export function SkillsharePane({
           {action.link ? (
             <button
               className="btn small outline"
-              disabled={!globalThis.ompHarnessChrome?.openUrl}
+              disabled={!globalThis.julingHarnessChrome?.openUrl}
               onClick={() => {
                 if (!preview)
-                  void globalThis.ompHarnessChrome?.openUrl({
+                  void globalThis.julingHarnessChrome?.openUrl({
                     url: action.link!,
                   });
               }}
@@ -1177,12 +1177,12 @@ export function SkillsharePane({
             <button
               className="btn small primary"
               disabled={
-                busy || !globalThis.ompHarnessChrome?.revealSkillshareToken
+                busy || !globalThis.julingHarnessChrome?.revealSkillshareToken
               }
               onClick={() =>
                 void run(async (generation) => {
                   const view = secretView.current;
-                  const value = await globalThis.ompHarnessChrome!
+                  const value = await globalThis.julingHarnessChrome!
                     .revealSkillshareToken!({
                     sessionId: sessionId!,
                     secretId: action.secretId!,

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { access, chmod, lstat, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { RuntimeInstallationManifest } from "@juling-harness/harness-protocol";
 import { parseRuntimeInstallationManifest } from "./manifest.js";
@@ -281,19 +281,10 @@ export class RuntimeInstaller {
     );
   }
 
-  async rollback(): Promise<ActiveRuntimeRecord> {
+  async rollback(options: ActivateOptions = {}): Promise<ActiveRuntimeRecord> {
     const current = await this.current();
     if (current?.previousRuntimeVersion === undefined) throw new Error("No previous runtime is available for rollback");
-    const previous = current.previousRuntimeVersion;
-    await access(join(this.#versionsDirectory, previous, "runtime-manifest.json"));
-    const record: ActiveRuntimeRecord = {
-      runtimeVersion: previous,
-      previousRuntimeVersion: current.runtimeVersion,
-      activatedAt: new Date().toISOString(),
-    };
-    await writeJsonAtomic(this.#currentPath, record);
-    this.invalidate();
-    return record;
+    return this.activate(current.previousRuntimeVersion, options);
   }
 
   async uninstall(runtimeVersion: string): Promise<void> {

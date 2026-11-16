@@ -7,7 +7,7 @@ export function OfficePane({ resource, preview, onSettings, initialPage, onPage 
   const [url, setUrl] = useState<string>(), [error, setError] = useState(""), [retry, setRetry] = useState(0);
   useEffect(() => {
     if (preview) { setState(previewOfficeState()); return subscribePreviewOffice(() => setState(previewOfficeState())); }
-    const api = globalThis.ompHarnessChrome?.files;
+    const api = globalThis.julingHarnessChrome?.files;
     if (!api) return;
     let active = true;
     void api.officeState().then(state => { if (active) setState(state); }).catch(error => { if (active) setError(String(error)); });
@@ -21,7 +21,7 @@ export function OfficePane({ resource, preview, onSettings, initialPage, onPage 
     }
     if (!resource || preview || !state.installedVersion) return;
     let active = true; setUrl(undefined); setError("");
-    void globalThis.ompHarnessChrome!.files!.officePreview(resource.id).then(result => { if (active) setUrl(result.url); }).catch(error => { if (active) setError(error instanceof Error ? error.message : String(error)); });
+    void globalThis.julingHarnessChrome!.files!.officePreview(resource.id).then(result => { if (active) setUrl(result.url); }).catch(error => { if (active) setError(error instanceof Error ? error.message : String(error)); });
     return () => { active = false; };
   }, [resource?.id, state.installedVersion, retry, preview]);
   if (!state.installedVersion) return <div className="file-empty file-office-install"><span className="file-badge is-large tone-blue" aria-hidden="true">DOC</span><h3>安装 Office 文档预览组件</h3><p>在工作台中查看 Word 文档和 PowerPoint 幻灯片。组件单独下载，安装后可离线使用。</p><button className="btn primary" onClick={onSettings}>前往安装</button><small>Excel 和 CSV 已内置支持，无需安装此组件。</small></div>;

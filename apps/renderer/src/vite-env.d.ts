@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 import type { HarnessClient } from "@juling-harness/client-contract";
-import type { OmpHarnessDesktopApi } from "@juling-harness/transport-desktop";
+import type { JulingHarnessDesktopApi } from "@juling-harness/transport-desktop";
 
 declare global {
   /**
@@ -14,20 +14,20 @@ declare global {
 
   /**
    * Desktop preload bridge exposed by the Electron shell (frozen
-   * `OmpHarnessDesktopApi`: bootstrap/query/command/subscribe/close only —
+   * `JulingHarnessDesktopApi`: bootstrap/query/command/subscribe/close only —
    * no generic invoke). Used by the Vite entry as a fallback: when
    * `JULING_HARNESS_CLIENT` is absent but this is present, the entry wraps it
    * in a desktop transport + `HarnessClientImpl` itself.
    */
-  var ompHarness: OmpHarnessDesktopApi | undefined;
-  var ompHarnessRemote: import("../../desktop/src/remote/shared").RemoteApi | undefined;
+  var julingHarness: JulingHarnessDesktopApi | undefined;
+  var julingHarnessRemote: import("../../desktop/src/remote/shared").RemoteApi | undefined;
 
   /**
    * Read-only GPU / low-spec performance profile (P0-6). Absent in a browser
    * and in harnesses, so every reader tolerates `undefined`; the renderer
    * entry then degrades to L0 instead of guessing a machine class.
    */
-  var ompHarnessPerf: import("../../desktop/src/perf-profile-shared").OmpHarnessPerfApi | undefined;
+  var julingHarnessPerf: import("../../desktop/src/perf-profile-shared").JulingHarnessPerfApi | undefined;
 
   /**
    * Window-chrome helpers (not the Host transport). Theme sync talks to the
@@ -55,7 +55,7 @@ declare global {
   type HarnessServiceDefinitionResult = { ok: true; definitions: HarnessServiceDefinition[] } | { ok: false; message: string };
   type HarnessArtifactFileResult = { ok: true; cancelled: boolean; artifact?: import("@juling-harness/harness-protocol").ArtifactRecord; storage?: import("@juling-harness/harness-protocol").ArtifactStorageState } | { ok: false; message: string };
 
-  var ompHarnessChrome:
+  var julingHarnessChrome:
     | (Partial<import("../../desktop/src/dictation-audio-shared").DictationAudioApi> & {
         files?: import("../../desktop/src/file-viewer-shared").FileViewerDesktopApi;
         prepareFloatWindow?(input: import("../../desktop/src/floating-windows-shared").FloatWindowPrepare): Promise<import("../../desktop/src/floating-windows-shared").FloatWindowTicket>;
@@ -297,9 +297,9 @@ declare global {
 
   /**
    * Desktop-chrome local shell (not Host / Harness Bridge). Present only
-   * when the Electron preload exposed `ompHarnessTerminal`.
+   * when the Electron preload exposed `julingHarnessTerminal`.
    */
-  var ompHarnessTerminal:
+  var julingHarnessTerminal:
     | {
         create(size?: { cols?: number; rows?: number; targetId?: string; workspaceId?: string; flowControl?: boolean; command?: import("../../desktop/src/terminal-shared").TerminalCommand }): Promise<{ id: string; name: string; cwd: string }>;
         write(id: string, data: string): Promise<void>;

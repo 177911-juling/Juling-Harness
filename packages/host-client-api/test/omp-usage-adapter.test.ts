@@ -45,7 +45,7 @@ async function withDb(
 }
 
 describe("createOmpUsageService", () => {
-  test("returns a path-free empty model when omp and stats.db are missing", async () => {
+  test("returns a path-free empty model when juling and stats.db are missing", async () => {
     const service = createOmpUsageService({
       locateOmp: async () => undefined,
       statsDbPath: join(tmpdir(), "omp-usage-missing-stats.db"),
@@ -53,7 +53,7 @@ describe("createOmpUsageService", () => {
     });
     const model = await service.get();
     assert.equal(model.days.length, 0);
-    assert.match(model.unavailableReason ?? "", /omp/i);
+    assert.match(model.unavailableReason ?? "", /juling/i);
     assert.equal(JSON.stringify(model).includes("\\\\"), false);
   });
 
@@ -209,7 +209,7 @@ describe("createOmpUsageService", () => {
     const result = await service.dashboard?.();
     assert.equal(result?.available, false);
     assert.equal(result?.url, undefined);
-    assert.match(result?.reason ?? "", /未找到 OMP Runtime/);
+    assert.match(result?.reason ?? "", /未找到 Juling Runtime/);
   });
 
   test("dashboard gives up after the startup deadline instead of hanging the page", async () => {
@@ -287,7 +287,7 @@ describe("createOmpUsageService", () => {
       now: () => NOW,
     });
     const model = await service.get();
-    assert.match(model.unavailableReason ?? "", /安装 OMP 或将其加入 PATH/);
+    assert.match(model.unavailableReason ?? "", /安装 Juling 或将其加入 PATH/);
   });
 
   test("concurrent get() calls stay single-flight and share one locator", async () => {

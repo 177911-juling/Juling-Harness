@@ -11,7 +11,7 @@ interface NavigatorLike {
 }
 
 export function detectPlatform(
-  chrome: { readonly platform?: string } | undefined = globalThis.ompHarnessChrome,
+  chrome: { readonly platform?: string } | undefined = globalThis.julingHarnessChrome,
   navigatorLike: NavigatorLike | undefined = globalThis.navigator as NavigatorLike | undefined,
 ): RendererPlatform {
   const fixed = chrome?.platform;
@@ -29,6 +29,6 @@ export const PLATFORM: RendererPlatform = detectPlatform();
  * shortcuts (⌘K, ⌘B, …); the renderer must not act on them a second time.
  * A browser on a Mac has no such menu.
  */
-export function nativeMenuOwnsShortcuts(chrome: { readonly platform?: string } | undefined = globalThis.ompHarnessChrome): boolean {
+export function nativeMenuOwnsShortcuts(chrome: { readonly platform?: string } | undefined = globalThis.julingHarnessChrome): boolean {
   return chrome?.platform === "darwin";
 }

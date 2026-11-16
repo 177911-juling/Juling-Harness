@@ -1,8 +1,21 @@
 export type FileScope = "conversation" | "workspace";
 const KEY = "omp.file-viewer.scope";
 let demo: FileScope = "conversation";
-export function readFileScope(preview = false): FileScope { return preview ? demo : localStorage.getItem(KEY) === "workspace" ? "workspace" : "conversation"; }
-export function saveFileScope(value: FileScope, preview = false): void { if (preview) demo = value; else localStorage.setItem(KEY, value); }
+let remembered: FileScope | undefined;
+/** A blocked preference store falls back safely; a failed write remains effective for this session. */
+export function readFileScope(preview = false): FileScope {
+  if (preview) return demo;
+  if (remembered) return remembered;
+  try { remembered = globalThis.localStorage?.getItem(KEY) === "workspace" ? "workspace" : "conversation"; }
+  catch { remembered = "conversation"; }
+  return remembered;
+}
+export function saveFileScope(value: FileScope, preview = false): boolean {
+  if (preview) { demo = value; return true; }
+  remembered = value;
+  try { globalThis.localStorage?.setItem(KEY, value); return true; }
+  catch { return false; }
+}
 
 /** Editor display preferences shared by every text file window. */
 export interface EditorPrefs { wrap: boolean; fontSize: number }

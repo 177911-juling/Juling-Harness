@@ -46,7 +46,7 @@ beforeEach(() => {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => `blob:frame-${Math.random()}`) });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
-  vi.stubGlobal("ompHarnessChrome", { readComputerFrame: vi.fn(async () => ({ ok: true, data: new ArrayBuffer(8), width: 1280, height: 800, mimeType: "image/png" })), saveComputerFrame: vi.fn(async () => ({ ok: true, artifactId: "saved" })) });
+  vi.stubGlobal("julingHarnessChrome", { readComputerFrame: vi.fn(async () => ({ ok: true, data: new ArrayBuffer(8), width: 1280, height: 800, mimeType: "image/png" })), saveComputerFrame: vi.fn(async () => ({ ok: true, artifactId: "saved" })) });
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); });
 
@@ -64,7 +64,7 @@ it("keeps a historical frame selected when a new execution frame arrives", async
   await screen.findByAltText("电脑目标截图");
   fireEvent.click(screen.getByRole("button", { name: /读取画面.*Juling Harness/ }));
   await screen.findByText("正在查看历史");
-  const read = window.ompHarnessChrome!.readComputerFrame as ReturnType<typeof vi.fn>;
+  const read = window.julingHarnessChrome!.readComputerFrame as ReturnType<typeof vi.fn>;
   await waitFor(() => expect(read).toHaveBeenLastCalledWith({ scopeSessionId: "root", frameId: "computer-preview-frame-1", origin: "local" }));
   const frame = previewComputerFrame("root", 8);
   act(() => api.emit({ sessionId: "root", revision: 9, kind: "frame", frame }));
@@ -95,21 +95,21 @@ it("only reads a child frame through its workspace root and saves on explicit cl
   snapshot.frames = [{ ...previewComputerFrame("child", 2), agentId: "child-agent" }];
   const api = mockClient(snapshot); render(pane(api.client));
   await screen.findByAltText("电脑目标截图");
-  expect(window.ompHarnessChrome!.readComputerFrame).toHaveBeenCalledWith({ scopeSessionId: "root", frameId: "computer-preview-frame-2", origin: "local" });
-  expect(window.ompHarnessChrome!.saveComputerFrame).not.toHaveBeenCalled();
+  expect(window.julingHarnessChrome!.readComputerFrame).toHaveBeenCalledWith({ scopeSessionId: "root", frameId: "computer-preview-frame-2", origin: "local" });
+  expect(window.julingHarnessChrome!.saveComputerFrame).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "保存到产物库" }));
-  await waitFor(() => expect(window.ompHarnessChrome!.saveComputerFrame).toHaveBeenCalledWith({ scopeSessionId: "root", frameId: "computer-preview-frame-2", origin: "local" }));
+  await waitFor(() => expect(window.julingHarnessChrome!.saveComputerFrame).toHaveBeenCalledWith({ scopeSessionId: "root", frameId: "computer-preview-frame-2", origin: "local" }));
 });
 it("never reads a remote frame through the local desktop channel", async () => {
   const api = mockClient(); render(pane(api.client, { executionTarget: { kind: "remote", name: "Build Mac" } }));
   await screen.findByText(/此远端连接只提供画面元数据/);
-  expect(window.ompHarnessChrome!.readComputerFrame).not.toHaveBeenCalled();
+  expect(window.julingHarnessChrome!.readComputerFrame).not.toHaveBeenCalled();
   expect(screen.getByText(/Build Mac/)).toBeTruthy();
 });
 it("drops a late image read after switching session", async () => {
   let resolve!: (value: unknown) => void;
   const read = vi.fn(() => new Promise(done => { resolve = done; }));
-  vi.stubGlobal("ompHarnessChrome", { readComputerFrame: read });
+  vi.stubGlobal("julingHarnessChrome", { readComputerFrame: read });
   const api = mockClient(); const view = render(pane(api.client));
   await waitFor(() => expect(read).toHaveBeenCalled());
   view.rerender(pane(api.client, { sessionId: "another", available: false }));
@@ -178,11 +178,11 @@ it("uses the owning surface's private image channel", async () => {
   const iframe = document.createElement("iframe"); document.body.append(iframe);
   const other = iframe.contentDocument!;
   const read = vi.fn(async () => ({ ok: true, data: new ArrayBuffer(8), width: 1280, height: 800, mimeType: "image/png" }));
-  Object.assign(other.defaultView!, { ompHarnessChrome: { readComputerFrame: read } });
+  Object.assign(other.defaultView!, { julingHarnessChrome: { readComputerFrame: read } });
   Object.assign(other.defaultView!.URL, { createObjectURL: vi.fn(() => "blob:other"), revokeObjectURL: vi.fn() });
   const api = mockClient(); const view = render(<SurfaceProvider document={other}>{pane(api.client)}</SurfaceProvider>);
   await waitFor(() => expect(read).toHaveBeenCalled());
-  expect(window.ompHarnessChrome!.readComputerFrame).not.toHaveBeenCalled();
+  expect(window.julingHarnessChrome!.readComputerFrame).not.toHaveBeenCalled();
   view.unmount(); iframe.remove();
 });
 
@@ -190,7 +190,7 @@ it("does not read or recapture an expired historical image", async () => {
   const api = mockClient(buildComputerPreview("root", "expired").snapshot);
   render(pane(api.client));
   await screen.findByText("图像已过期或未保存。此处不会补拍冒充历史画面。");
-  expect(window.ompHarnessChrome!.readComputerFrame).not.toHaveBeenCalled();
+  expect(window.julingHarnessChrome!.readComputerFrame).not.toHaveBeenCalled();
   expect(api.command).not.toHaveBeenCalled();
 });
 it("opens structure only on demand and highlights only its own frame coordinates", async () => {

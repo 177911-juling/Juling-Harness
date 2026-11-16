@@ -327,7 +327,7 @@ Client reducer 必须：
 preload 只暴露明确方法，不得暴露通用 `invoke(channel, payload)`：
 
 ```ts
-export interface OmpHarnessDesktopApi {
+export interface JulingHarnessDesktopApi {
   bootstrap(): Promise<ClientBootstrap>;
   query(request: ClientQueryRequest): Promise<ClientQueryResponse>;
   command(request: ClientCommandRequest): Promise<ClientCommandAccepted>;

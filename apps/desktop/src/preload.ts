@@ -3,10 +3,10 @@
  *
  * Runs in a sandboxed renderer (contextIsolation + sandbox, no Node
  * integration) and exposes exactly one frozen object under
- * `window.ompHarness` (see {@link DESKTOP_BRIDGE_GLOBAL}):
- * `OmpHarnessDesktopApi` with the fixed named methods bootstrap / query /
- * command / subscribe / close. Window chrome helpers (`ompHarnessChrome`,
- * `ompHarnessTerminal`) are separate frozen objects on named channels —
+ * `window.julingHarness` (see {@link DESKTOP_BRIDGE_GLOBAL}):
+ * `JulingHarnessDesktopApi` with the fixed named methods bootstrap / query /
+ * command / subscribe / close. Window chrome helpers (`julingHarnessChrome`,
+ * `julingHarnessTerminal`) are separate frozen objects on named channels —
  * they are not Host transport.
  *
  * Hard guarantees:
@@ -29,12 +29,12 @@ import {
 } from "./ipc-validation.js";
 import {
   TERMINAL_IPC_CHANNELS,
-  type OmpHarnessTerminalApi,
+  type JulingHarnessTerminalApi,
   type TerminalDataEvent,
   type TerminalExitEvent,
 } from "./terminal-shared.js";
 import { REMOTE_CHANNELS, type RemoteApi } from "./remote/shared.js";
-import { createOmpHarnessChromeApi, subscribeChannel } from "./chrome-api.js";
+import { createJulingHarnessChromeApi, subscribeChannel } from "./chrome-api.js";
 import { createPerfProfileApi } from "./perf-profile-shared.js";
 
 /**
@@ -91,13 +91,13 @@ const remoteApi: RemoteApi = {
   onEvent: listener => subscribeChannel(ipcRenderer, REMOTE_CHANNELS.event, listener),
   onChanged: listener => subscribeChannel(ipcRenderer, REMOTE_CHANNELS.changed, listener),
 };
-contextBridge.exposeInMainWorld("ompHarnessRemote", Object.freeze(remoteApi));
-contextBridge.exposeInMainWorld("ompHarnessChrome", createOmpHarnessChromeApi(ipcRenderer, webUtils));
+contextBridge.exposeInMainWorld("julingHarnessRemote", Object.freeze(remoteApi));
+contextBridge.exposeInMainWorld("julingHarnessChrome", createJulingHarnessChromeApi(ipcRenderer, webUtils));
 // P0-6: read-only GPU/low-spec profile. `cached` is read synchronously at
 // preload time (sendSync) so the Renderer can pick its first-paint policy
 // without waiting for an IPC round-trip; there is no write method.
 contextBridge.exposeInMainWorld(
-  "ompHarnessPerf",
+  "julingHarnessPerf",
   createPerfProfileApi({
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
     sendSync: (channel) => ipcRenderer.sendSync(channel),
@@ -110,13 +110,13 @@ contextBridge.exposeInMainWorld(
   }),
 );
 
-const terminalApi: OmpHarnessTerminalApi = {
+const terminalApi: JulingHarnessTerminalApi = {
   recordingStart(input) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStart, input); },
   recordingStop(id) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStop, { id }); },
   recordingStatus(id) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStatus, { id }); },
   create(size) {
     return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.create, size ?? {}) as ReturnType<
-      OmpHarnessTerminalApi["create"]
+      JulingHarnessTerminalApi["create"]
     >;
   },
   write(id, data) {
@@ -141,4 +141,4 @@ const terminalApi: OmpHarnessTerminalApi = {
   },
 };
 
-contextBridge.exposeInMainWorld("ompHarnessTerminal", Object.freeze(terminalApi));
+contextBridge.exposeInMainWorld("julingHarnessTerminal", Object.freeze(terminalApi));

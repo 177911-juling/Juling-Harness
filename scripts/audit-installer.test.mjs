@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rename, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -76,10 +76,10 @@ test("auditInstallerOutput fails when trusted-keys.json is missing", async () =>
 
   const versionDir = join(unpacked, "runtime", "versions", expectedVersion);
   await mkdir(versionDir, { recursive: true });
-  await writeFile(join(versionDir, "omp.exe"), "omp");
+  await writeFile(join(versionDir, "juling.exe"), "juling");
   await writeFile(
     join(versionDir, "runtime-manifest.json"),
-    JSON.stringify({ runtimeVersion: expectedVersion }),
+    JSON.stringify({ runtimeVersion: expectedVersion, entrypoint: "juling.exe" }),
   );
 
   const keysDir = join(unpacked, "runtime-keys");
@@ -116,10 +116,10 @@ test("auditInstallerOutput fails when a trusted key contains a private key marke
 
   const versionDir = join(unpacked, "runtime", "versions", expectedVersion);
   await mkdir(versionDir, { recursive: true });
-  await writeFile(join(versionDir, "omp.exe"), "omp");
+  await writeFile(join(versionDir, "juling.exe"), "juling");
   await writeFile(
     join(versionDir, "runtime-manifest.json"),
-    JSON.stringify({ runtimeVersion: expectedVersion }),
+    JSON.stringify({ runtimeVersion: expectedVersion, entrypoint: "juling.exe" }),
   );
 
   const keysDir = join(unpacked, "runtime-keys");
@@ -174,4 +174,25 @@ test("auditInstallerOutput rejects a malformed asar containing plausible entrypo
   await writeFile(join(resources, "renderer", "dist", "index.html"), '<meta http-equiv="Content-Security-Policy" content="default-src self">');
   await writeFile(join(resources, "app.asar"), 'not an asar: preload.cjs {"main":"./dist/src/main.js"}');
   assert.throws(() => auditInstallerOutput(output));
+});
+
+test("published Runtime signing key ids stay trusted after the Harness rename", async () => {
+  const table = JSON.parse(await readFile(new URL("../packaging/keys/trusted-keys.json", import.meta.url), "utf8"));
+  assert.equal(table.activeKeyId, "juling-harness-release-2026b");
+  // Already-published runtimes and update catalogs were signed under these ids.
+  // Dropping them makes every existing signed artifact fail verification.
+  for (const legacy of ["omp-studio-release-2026a", "omp-studio-release-2026b"]) {
+    assert.ok(table.keys[legacy], `${legacy} must stay trusted for published artifacts`);
+    const pem = await readFile(new URL(`../packaging/keys/${table.keys[legacy]}`, import.meta.url), "utf8");
+    assert.match(pem, /BEGIN PUBLIC KEY/u);
+  }
+});
+
+test("the trusted key table still holds the ids published artifacts were signed with", async () => {
+  const table = JSON.parse(await readFile(new URL("../packaging/keys/trusted-keys.json", import.meta.url), "utf8"));
+  // Runtime and update artifacts in the 0.2.0 release were signed under these ids.
+  for (const id of ["omp-studio-release-2026a", "omp-studio-release-2026b"]) {
+    assert.equal(typeof table.keys[id], "string", `${id} must remain trusted`);
+  }
+  assert.equal(table.activeKeyId, "juling-harness-release-2026b");
 });

@@ -522,7 +522,6 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, Upgra
     readonly model?: string[];
     readonly definition: string;
     readonly assignment?: string;
-    readonly taskFile?: string;
     readonly solutionSpace?: string;
     readonly context?: string;
     readonly async?: boolean;

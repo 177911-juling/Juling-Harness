@@ -46,7 +46,7 @@ function CredentialRow({ client, preview, provider }: { client: HarnessClient | 
   <input className="input" type="password" autoComplete="new-password" aria-label={provider + " " + t("runtimeUpgrade.authKey")} value={key} disabled={!available || busy} onChange={event => setKey(event.target.value)} />
   <button className="btn small" disabled={!available || busy || !key.trim()} onClick={() => void save(false)}>{t("common.save")}</button>
   <button className="btn small" disabled={!available || busy || !configured} onClick={() => void save(true)}>{t("common.delete")}</button>
-  {provider === "exa" ? <button className="btn small" onClick={() => { if (!preview) void window.ompHarnessChrome?.openUrl({ url: "https://dashboard.exa.ai/api-keys" }); }}>{t("runtimeUpgrade.authWebsite")}</button> : null}
+  {provider === "exa" ? <button className="btn small" onClick={() => { if (!preview) void window.julingHarnessChrome?.openUrl({ url: "https://dashboard.exa.ai/api-keys" }); }}>{t("runtimeUpgrade.authWebsite")}</button> : null}
   {error ? <p role="alert">{error}</p> : null}
  </div>;
 }

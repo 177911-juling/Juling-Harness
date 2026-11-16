@@ -9,14 +9,17 @@ const html = await readFile(new URL("../packaging/ui/index.html", import.meta.ur
 const script = await readFile(new URL("../packaging/ui/wizard.js", import.meta.url), "utf8");
 
 function wizard(overrides = {}) {
-  const dom = new JSDOM(html, { url: "https://omp-installer/index.html?host=installer", runScripts: "outside-only" });
+  const url = "https://omp-installer/index.html" + (overrides.preview ? "" : "?host=installer");
+  const dom = new JSDOM(html, { url, runScripts: "outside-only" });
   const window = dom.window;
   const timers = [];
   let poll;
-  const calls = { installs: [], finishes: [], closes: 0, minimizes: 0 };
+  let animationFrame;
+  const calls = { installs: [], finishes: [], closes: 0, minimizes: 0, navigations: [] };
   let status = { done: false, phase: "files", percent: null };
   window.matchMedia = () => ({ matches: false, addEventListener() {} });
-  window.requestAnimationFrame = () => 0;
+  window.open = (url, target) => { calls.navigations.push({ url, target }); return null; };
+  window.requestAnimationFrame = callback => { animationFrame = callback; return 1; };
   window.cancelAnimationFrame = () => {};
   window.setTimeout = (callback, delay) => { timers.push({ callback, delay }); return timers.length; };
   window.clearTimeout = () => {};
@@ -32,10 +35,10 @@ function wizard(overrides = {}) {
     close: () => calls.closes++,
     minimize: () => calls.minimizes++,
   };
-  if (overrides.noBridge) delete window.installerShell;
+  if (overrides.noBridge || overrides.preview) delete window.installerShell;
   window.eval(script);
   const element = id => window.document.getElementById(id);
-  return { dom, window, calls, element, click: id => element(id).click(), poll: next => { status = next; poll(); }, flush: delay => timers.filter(timer => timer.delay === delay).forEach(timer => timer.callback()) };
+  return { dom, window, calls, element, click: id => element(id).click(), poll: next => { status = next; poll(); }, flush: delay => timers.filter(timer => timer.delay === delay).forEach(timer => timer.callback()), completePreviewInstall: () => animationFrame(window.performance.now() + 10000) };
 }
 
 test("the live wizard uses the package architecture, existing shortcut choice and actual completion path", () => {
@@ -115,4 +118,20 @@ test("a missing installer bridge shows a connection failure and disables install
     w.element("welcomeTitle").dispatchEvent(new w.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     assert.equal(w.element("pathInput").closest(".step").getAttribute("aria-hidden"), "true");
   } finally { w.dom.window.close(); }
+});
+
+test("browser demo completion opens the app preview or leaves the result page", () => {
+  for (const run of [true, false]) {
+    const w = wizard({ preview: true });
+    try {
+      w.click("welcomeNext");
+      w.click("installBtn");
+      w.completePreviewInstall();
+      w.flush(1000);
+      assert.equal(w.window.document.querySelector('.step[data-step="3"]').getAttribute("aria-hidden"), "false");
+      w.element("runCheck").checked = run;
+      w.click("finishBtn");
+      assert.deepEqual(w.calls.navigations, [{ url: run ? "/preview-app-harness.html?preview=1&marks=off" : "about:blank", target: "_self" }]);
+    } finally { w.dom.window.close(); }
+  }
 });

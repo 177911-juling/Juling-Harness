@@ -15,23 +15,19 @@
   background: var(--bg-inset);
   border-top: 1px solid var(--border);
   border-right: 1px solid var(--border);
-  border-top-right-radius: 15px;
   position: relative;
   z-index: var(--z-panel);
   transition: margin-left var(--dur-slow) var(--ease-out);
   overflow: visible;
 }
 .sidebar.collapsed { margin-left: calc(-1 * var(--sidebar-w)); }
-/* Shadow layer sits behind content, same rounded box as the rail, so the
-   glow follows the 15px corner. z-index:-1 keeps it in this stacking
-   context, so the workbench cannot punch a hole in the mid-panel. */
+/* 蓝图 HUD：柔光阴影层退役，换成 0 阴影 + 墨线分离（面与面之间用 border 表达）。
+   ::after 仍保留为底色层，保持原有 z-index 关系。 */
 .sidebar::after {
   content: "";
   position: absolute;
   inset: 0;
-  border-top-right-radius: 15px;
   background: var(--bg-inset);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--text) 16%, transparent);
   pointer-events: none;
   z-index: -1;
 }
@@ -64,7 +60,6 @@
   padding: var(--sp-10) var(--sp-10) 0;
   flex: none;
   overflow: hidden;
-  border-top-right-radius: 15px;
 }
 .sb-brand {
   display: flex;
@@ -73,7 +68,7 @@
   flex: 1;
   min-width: 0;
   padding: 4px var(--sp-6);
-  border-radius: var(--r-6);
+  border-radius: var(--r-4);
   cursor: pointer;
 }
 /* Now a real <button> instead of a click-handled <div>. Buttons center their
@@ -83,12 +78,18 @@
 .sb-brand .logo {
   width: 22px;
   height: 22px;
-  border-radius: var(--r-6);
+  border-radius: var(--r-4);
   display: block;
   flex: none;
   object-fit: contain;
 }
-.sb-brand .name { font-weight: var(--fw-semibold); font-size: var(--fs-14); }
+/* 图签栏：应用名用标题层字体 + 宽字距，蓝图图纸的 title block 气质。 */
+.sb-brand .name {
+  font-family: var(--font-display);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-13, var(--fs-14));
+  letter-spacing: 0.06em;
+}
 .sb-top .icon-btn { width: 28px; height: 28px; }
 
 /* 左上应用菜单弹层：portal 到 body，JS 按锚点定位并做视口钳制，
@@ -105,12 +106,13 @@
   display: flex;
   align-items: center;
   gap: var(--sp-4);
-  padding: var(--sp-6) var(--sp-12) var(--sp-4);
+  padding: var(--sp-8) var(--sp-12) var(--sp-4);
   font-size: var(--fs-11);
   font-weight: var(--fw-semibold);
   color: var(--text-3);
   letter-spacing: 0.04em;
-  text-transform: uppercase;
+  text-transform: none;
+  font-family: var(--font-ui);
   flex: none;
   user-select: none;
 }
@@ -242,23 +244,27 @@
 .thread {
   display: flex;
   align-items: center;
-  gap: var(--sp-6);
+  gap: var(--sp-8);
   width: 100%;
   min-width: 0;
-  /* 左内边距与项目头相同：8px + 14px 文件夹槽 + 6px gap，标题与项目名对齐。 */
-  padding: 6px var(--sp-8);
+  padding: 7px var(--sp-10);
   border-radius: var(--r-6);
   cursor: pointer;
   position: relative;
   overflow: hidden;
   text-align: left;
 }
+.thread .t-title { font-family: var(--font-ui); font-size: var(--fs-12); letter-spacing: 0; }
 .thread:hover { background: var(--surface-hover); }
 /* 悬停高亮挂整行（与 .project-head-row 同规则）：指针移到右侧操作按钮上时
    行背景不熄灭。active 行悬停仍保持 accent-soft。 */
 .thread-row:hover .thread { background: var(--surface-hover); }
 .thread-row:hover .thread.active { background: var(--accent-soft); }
-.thread.active { background: var(--accent-soft); }
+/* 激活会话 = 圆角软底 + 主色标题，不再加左侧刻度条。 */
+.thread.active {
+  background: var(--accent-soft);
+  box-shadow: none;
+}
 .thread.active .t-title { color: var(--accent); font-weight: var(--fw-medium); }
 /* 会话行外壳：thread 是 button，归档/更多操作按钮不能嵌在里面（嵌套交互
    元素非法），平铺为兄弟节点后用绝对定位浮在行右侧。 */

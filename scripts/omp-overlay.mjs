@@ -185,7 +185,7 @@ export async function assertForkApplied(targetDirectory = ompSourceDirectory, ro
   }
 
   const modified = new Set(
-    run("git", ["-C", targetDirectory, "diff", "--name-only"], { capture: true }).split(/\r?\n/u).filter(Boolean),
+    run("git", ["-C", targetDirectory, "diff", "HEAD", "--name-only"], { capture: true }).split(/\r?\n/u).filter(Boolean),
   );
   const patchesDirectory = join(repositoryRoot, ...PATCHES_SUBDIRECTORY.split("/"));
   const unapplied = [];

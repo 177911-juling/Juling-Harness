@@ -68,6 +68,19 @@ submodule working tree. That **will** show as modified content inside
 `omp-patch/vendor/oh-my-pi`. Do not `git add` that dirty vendor tree. The
 source of truth is `omp-patch/overlay/` plus `omp-patch/patches/`.
 
+Without a Rust toolchain, install the matching prebuilt native addon from npm
+(`@oh-my-pi/pi-natives-win32-x64@<upstream version>`) and place its
+`pi_natives.win32-x64-baseline.node` in
+`omp-patch/vendor/oh-my-pi/packages/natives/native/`, run
+`bun --cwd=packages/coding-agent run build` yourself, then generate the signed
+artifact with `scripts/runtime-artifact.mjs`. `omp:build:host` still compiles
+the addon from source when Rust is present.
+
+On Windows, `bun build --compile` fails with
+`failed to copy bun executable into temporary file: ENOENT` when `bun.exe`
+itself lives under a non-ASCII path (for example `G:\源码\bun`). Copy it to an
+ASCII path such as `C:\omp-tools\bun\bun.exe` and set `BUN_EXE` to that copy.
+
 Host logs: `%APPDATA%\juling-harness\logs\host-YYYY-MM-DD.log`; on macOS
 `~/Library/Application Support/juling-harness/logs/host-YYYY-MM-DD.log`.
 

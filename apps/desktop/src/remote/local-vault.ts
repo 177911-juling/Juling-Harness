@@ -33,7 +33,9 @@ export class LocalCredentialVault {
     if (config?.auth?.broker?.url && config.auth.broker.token) return { url: config.auth.broker.url, token: config.auth.broker.token };
     const port = await new Promise<number>((resolve, reject) => { const server = createServer(); server.once("error", reject); server.listen(0, "127.0.0.1", () => { const port = (server.address() as import("node:net").AddressInfo).port; server.close(() => resolve(port)); }); });
     const url = `http://127.0.0.1:${port}`;
-    const child = this.owned = spawn(await this.options.runtimeExecutable(), ["auth-broker", "serve", `--bind=127.0.0.1:${port}`], { windowsHide: true, stdio: "ignore", env: { ...process.env, OMP_AGENT_DIR: directory, PI_CODING_AGENT_DIR: directory } });
+    // Canonical `JULING_*` profile names, plus the legacy `OMP_*`/`PI_*` ones a
+    // Runtime built from the current vendor tree still resolves its profile from.
+    const child = this.owned = spawn(await this.options.runtimeExecutable(), ["auth-broker", "serve", `--bind=127.0.0.1:${port}`], { windowsHide: true, stdio: "ignore", env: { ...process.env, JULING_AGENT_DIR: directory, JULING_CODING_AGENT_DIR: directory, OMP_AGENT_DIR: directory, PI_CODING_AGENT_DIR: directory } });
     let failure: Error | undefined; child.once("error", error => { failure = error; });
     for (let attempt = 0; attempt < 100; attempt++) {
       if (failure) throw failure;

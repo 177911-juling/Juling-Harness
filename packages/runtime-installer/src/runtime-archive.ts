@@ -1,25 +1,37 @@
 import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { unzipSync, zipSync } from "fflate";
-import { RUNTIME_ENTRYPOINTS, runtimeEntrypointFor, type RuntimeEntrypoint } from "./runtime-platform.js";
+import { LEGACY_RUNTIME_ENTRYPOINTS, RUNTIME_ENTRYPOINTS, runtimeEntrypointFor, runtimeLegacyEntrypointFor, type AnyRuntimeEntrypoint } from "./runtime-platform.js";
 
 /** Windows layout; `runtimeArchiveFiles` gives the layout for any entrypoint. */
-export const RUNTIME_ARCHIVE_FILES = ["checksums.json", "omp.exe", "runtime-manifest.json", "runtime-signature.json"] as const;
+export const RUNTIME_ARCHIVE_FILES = ["checksums.json", "juling.exe", "runtime-manifest.json", "runtime-signature.json"] as const;
 /** Fixed (sorted) order keeps block reuse stable across releases. */
-export function runtimeArchiveFiles(entrypoint: RuntimeEntrypoint): readonly string[] {
+export function runtimeArchiveFiles(entrypoint: AnyRuntimeEntrypoint): readonly string[] {
   return ["checksums.json", entrypoint, "runtime-manifest.json", "runtime-signature.json"];
 }
-const ENTRYPOINT_NAMES: ReadonlySet<string> = new Set(Object.values(RUNTIME_ENTRYPOINTS));
-const METADATA_NAMES: ReadonlySet<string> = new Set(["checksums.json", "runtime-manifest.json", "runtime-signature.json"]);
+/** Canonical and pre-rename entrypoint names, keyed for membership checks. */
+const ENTRYPOINT_NAMES: Readonly<Record<string, true>> = Object.freeze(
+  Object.fromEntries([...Object.values(RUNTIME_ENTRYPOINTS), ...Object.values(LEGACY_RUNTIME_ENTRYPOINTS)].map((name) => [name, true] as const)),
+);
+const METADATA_NAMES: Readonly<Record<string, true>> = Object.freeze({ "checksums.json": true, "runtime-manifest.json": true, "runtime-signature.json": true });
 const MAX_ARCHIVE = 768 * 1024 * 1024;
 
-function manifestEntrypoint(value: unknown): RuntimeEntrypoint {
+/**
+ * The archive's entrypoint name, which is also the member name. Archives signed
+ * before the product rename keep their `omp.exe`/`omp` member: the manifest is
+ * the source of truth, so the old name is accepted here and never rewritten.
+ */
+function manifestEntrypoint(value: unknown): AnyRuntimeEntrypoint {
   const record = value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   if (typeof record.platform !== "string" || typeof record.entrypoint !== "string") throw new Error("Runtime archive manifest lacks platform or entrypoint");
-  let expected: RuntimeEntrypoint;
-  try { expected = runtimeEntrypointFor(record.platform); } catch { throw new Error(`Runtime archive platform ${record.platform} is unsupported`); }
-  if (record.entrypoint !== expected) throw new Error(`Runtime archive entrypoint ${record.entrypoint} does not match ${record.platform}`);
-  return expected;
+  const { canonical, legacy } = platformEntrypointNames(record.platform);
+  if (record.entrypoint !== canonical && record.entrypoint !== legacy) throw new Error(`Runtime archive entrypoint ${record.entrypoint} does not match ${record.platform}`);
+  return record.entrypoint === legacy ? legacy : canonical;
+}
+function platformEntrypointNames(platform: string): { canonical: AnyRuntimeEntrypoint; legacy: AnyRuntimeEntrypoint } {
+  try {
+    return { canonical: runtimeEntrypointFor(platform), legacy: runtimeLegacyEntrypointFor(platform) };
+  } catch { throw new Error(`Runtime archive platform ${platform} is unsupported`); }
 }
 function parseManifest(bytes: Uint8Array): unknown {
   try { return JSON.parse(Buffer.from(bytes).toString("utf8")); } catch { throw new Error("Runtime archive manifest is not valid JSON"); }
@@ -43,8 +55,8 @@ export async function extractRuntimeArchive(archive: string, destination: string
   const seen = new Set<string>();
   const entries = unzipSync(bytes, { filter: (entry) => {
     if (isFinderMetadata(entry.name)) throw new Error(`Runtime archive contains Finder metadata ${entry.name}`);
-    const isEntrypoint = ENTRYPOINT_NAMES.has(entry.name);
-    if ((!isEntrypoint && !METADATA_NAMES.has(entry.name)) || seen.has(entry.name) || entry.compression !== 0) throw new Error("Unexpected Runtime archive entry");
+    const isEntrypoint = Object.hasOwn(ENTRYPOINT_NAMES, entry.name);
+    if ((!isEntrypoint && !Object.hasOwn(METADATA_NAMES, entry.name)) || seen.has(entry.name) || entry.compression !== 0) throw new Error("Unexpected Runtime archive entry");
     if (isEntrypoint) {
       if (entrypoint !== undefined) throw new Error("Runtime archive has more than one entrypoint");
       entrypoint = entry.name;
@@ -59,5 +71,5 @@ export async function extractRuntimeArchive(archive: string, destination: string
   await mkdir(destination, { recursive: true });
   for (const name of runtimeArchiveFiles(expected)) await writeFile(join(destination, name), entries[name]!, { flag: "wx" });
   // Zip entries carry no mode bits (os: 0); a POSIX Runtime must be executable for its self-check.
-  if (expected !== "omp.exe") await chmod(join(destination, expected), 0o755);
+  if (!expected.endsWith(".exe")) await chmod(join(destination, expected), 0o755);
 }

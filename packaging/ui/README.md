@@ -27,6 +27,8 @@
 
 `wizard.js` 的演示情景只在浏览器原型中使用；Electron 预览带「演示」标记，模拟安装但读取本机目录。真实 Setup 必须有 `installerShell` 桥接；缺失时禁用安装并显示连接失败。
 
+HTTP 演示点击「完成」且勾选运行应用时进入 `/preview-app-harness.html`；直接打开 HTML 的文件演示可用 `?appUrl=<软件预览 URL>` 指定跳转目标。不勾选运行应用时离开完成页。
+
 演示进度可以按时间播放，真实进度只读 NSIS。真实卸载仍使用原生 MUI2；原型「卸载」仅说明删除范围。
 
 源码：`index.html`、`styles.css`、`wizard.js`。宿主与打包说明见 [packaging/README.md](../README.md)。

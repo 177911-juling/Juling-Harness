@@ -72,7 +72,7 @@ export function NativeWindowHost({ id, title, rect, sourceRect, minimized, maxim
   const [surface, setSurface] = useState<{ doc: Document; key: string } | null>(null);
   const [bounds, setBounds] = useState<DockRect>({ x: 0, y: 0, width: 640, height: 560 });
   useEffect(() => {
-    const api = globalThis.ompHarnessChrome;
+    const api = globalThis.julingHarnessChrome;
     if (!api?.prepareFloatWindow || !api.controlFloatWindow) return;
     let disposed = false, key: string | undefined, release: (() => void) | undefined, unstyle: (() => void) | undefined, unwatch: (() => void) | undefined;
     const open = async () => {
@@ -113,14 +113,14 @@ export function NativeWindowHost({ id, title, rect, sourceRect, minimized, maxim
     const view = surface.doc.defaultView!;
     const resize = () => setBounds({ x: 0, y: 0, width: view.innerWidth, height: view.innerHeight });
     resize(); view.addEventListener("resize", resize);
-    void globalThis.ompHarnessChrome!.controlFloatWindow!({ key: surface.key, action: "ready" });
+    void globalThis.julingHarnessChrome!.controlFloatWindow!({ key: surface.key, action: "ready" });
     return () => view.removeEventListener("resize", resize);
   }, [surface]);
-  useEffect(() => { if (surface) void globalThis.ompHarnessChrome!.controlFloatWindow!({ key: surface.key, action: "topmost", topmost }); }, [surface, topmost]);
+  useEffect(() => { if (surface) void globalThis.julingHarnessChrome!.controlFloatWindow!({ key: surface.key, action: "topmost", topmost }); }, [surface, topmost]);
   useEffect(() => { if (surface) surface.doc.title = title; }, [surface, title]);
   useEffect(() => {
     if (!surface) return;
-    const open = (event: Event) => { if (current.current.acceptsFocus(event)) void globalThis.ompHarnessChrome!.controlFloatWindow!({ key: surface.key, action: "focus" }); };
+    const open = (event: Event) => { if (current.current.acceptsFocus(event)) void globalThis.julingHarnessChrome!.controlFloatWindow!({ key: surface.key, action: "focus" }); };
     window.addEventListener(focusEvent, open);
     return () => window.removeEventListener(focusEvent, open);
   }, [surface, focusEvent]);

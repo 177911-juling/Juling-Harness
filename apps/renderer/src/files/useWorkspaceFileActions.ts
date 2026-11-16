@@ -11,7 +11,7 @@ export function useWorkspaceFileActions({ workspace, remote, onNotice, onOpenIda
   const [fileOpeners, setFileOpeners] = useState<ReadonlyArray<FileOpenerOption>>([]);
   useEffect(() => {
     const activeWorkspace = workspace;
-    const list = globalThis.ompHarnessChrome?.listFileOpeners;
+    const list = globalThis.julingHarnessChrome?.listFileOpeners;
     if (activeWorkspace === undefined || list === undefined) {
       setFileOpeners([]);
       return;
@@ -28,10 +28,10 @@ export function useWorkspaceFileActions({ workspace, remote, onNotice, onOpenIda
       cancelled = true;
     };
   }, [workspace]);
-  const fileShellUnavailable = remote ? "远程文件请先下载，再使用系统应用打开" : globalThis.ompHarnessChrome?.openFile === undefined ? "仅桌面端可用" : undefined;
+  const fileShellUnavailable = remote ? "远程文件请先下载，再使用系统应用打开" : globalThis.julingHarnessChrome?.openFile === undefined ? "仅桌面端可用" : undefined;
 
   const runFileShellAction = (workspaceId: string, action: FileMenuAction, target: FileMenuTarget) => {
-    const desktop = globalThis.ompHarnessChrome;
+    const desktop = globalThis.julingHarnessChrome;
     const messageOf = (cause: unknown): string => (cause instanceof Error && cause.message ? cause.message : String(cause));
     const notice = (text: string, icon: IconName): void => {
       onNotice({ text, icon });

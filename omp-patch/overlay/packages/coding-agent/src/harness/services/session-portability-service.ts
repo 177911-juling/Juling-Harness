@@ -40,7 +40,9 @@ export class HarnessSessionPortabilityService {
 	) {
 		this.#files =
 			files ??
-			(process.env.JULING_HARNESS_MEDIA_ROOT ? new HarnessMediaFiles(process.env.JULING_HARNESS_MEDIA_ROOT) : undefined);
+			(process.env.JULING_HARNESS_MEDIA_ROOT
+				? new HarnessMediaFiles(process.env.JULING_HARNESS_MEDIA_ROOT)
+				: undefined);
 	}
 	#check(id: string): void {
 		if (this.#disposed || id !== this.session.sessionId)

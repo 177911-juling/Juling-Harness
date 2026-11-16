@@ -18,6 +18,9 @@ const RUNTIME_MANIFEST_KEYS = new Set([
   "upstreamCommit",
   "patchsetVersion",
   "harnessProtocol",
+  // Artifacts signed before the Harness rename wrote this field. They parse so
+  // an installed Runtime is reported as outdated instead of crashing startup.
+  "studioProtocol",
   "profile",
   "capabilityHash",
   "commandManifestHash",
@@ -61,7 +64,7 @@ export function parseRuntimeInstallationManifest(value: unknown): RuntimeInstall
   if (input.channel !== "stable" && input.channel !== "canary") {
     throw new TypeError("runtime manifest channel must be stable or canary");
   }
-  const protocol = asRecord(input.harnessProtocol, "runtime manifest harnessProtocol");
+  const protocol = asRecord(input.harnessProtocol ?? input.studioProtocol, "runtime manifest harnessProtocol");
   if (
     !Number.isSafeInteger(protocol.min) ||
     !Number.isSafeInteger(protocol.max) ||
@@ -70,7 +73,10 @@ export function parseRuntimeInstallationManifest(value: unknown): RuntimeInstall
   ) {
     throw new TypeError("runtime manifest harnessProtocol range is invalid");
   }
-  return input as unknown as RuntimeInstallationManifest;
+  return {
+    ...(input as unknown as RuntimeInstallationManifest),
+    harnessProtocol: { min: protocol.min as number, max: protocol.max as number },
+  };
 }
 
 export function parseChecksumManifest(value: unknown): ChecksumManifest {

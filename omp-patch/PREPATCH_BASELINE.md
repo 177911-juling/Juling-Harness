@@ -14,7 +14,7 @@ Verified on Windows x64 on 2026-08-10, before the first OMP source patch.
 - Bun: `1.3.14+0d9b296af`
 - Rust: `nightly-2026-07-28-x86_64-pc-windows-msvc`
 - rustc: `1.99.0-nightly (09ee43b2d 2026-07-27)`
-- Visual Harness: Community 2022 `17.7.4`, with MSVC, CMake, and Ninja
+- Visual Studio: Community 2022 `17.7.4`, with MSVC, CMake, and Ninja
 - Node.js: `v24.13.0`
 
 Bazel is not required for a Windows `host` native build. The upstream driver delegates that target to the local N-API/MSVC build.

@@ -69,10 +69,10 @@ test("executable architecture uses PE on Windows and Mach-O on macOS", async () 
   assert.equal(executableArchitecture(machO(0x0100000c), "darwin-arm64"), "arm64");
   assert.throws(() => executableArchitecture(machO(0x0100000c), "win32-arm64"), /PE/u);
   const root = await mkdtemp(join(tmpdir(), "omp-target-platform-"));
-  await writeFile(join(root, "omp"), machO(0x01000007));
-  assert.throws(() => assertExecutableTarget(join(root, "omp"), "darwin-arm64"), /expected a darwin-arm64 executable, found x64/u);
-  await writeFile(join(root, "omp"), machO(0x0100000c));
-  assertExecutableTarget(join(root, "omp"), "darwin-arm64");
+  await writeFile(join(root, "juling"), machO(0x01000007));
+  assert.throws(() => assertExecutableTarget(join(root, "juling"), "darwin-arm64"), /expected a darwin-arm64 executable, found x64/u);
+  await writeFile(join(root, "juling"), machO(0x0100000c));
+  assertExecutableTarget(join(root, "juling"), "darwin-arm64");
 });
 
 test("Linux Runtime uses ELF targets without enabling Linux desktop updates", () => {
@@ -84,7 +84,7 @@ test("Linux Runtime uses ELF targets without enabling Linux desktop updates", ()
   assert.equal(executableArchitecture(elf, "linux-x64"), "x64");
   elf.writeUInt16LE(183, 18);
   assert.equal(elfArchitecture(elf), "arm64");
-  assert.equal(runtimeEntrypointFor("linux-arm64"), "omp");
+  assert.equal(runtimeEntrypointFor("linux-arm64"), "juling");
   assert.equal(UPDATE_PLATFORMS.includes("linux-x64"), false);
   assert.throws(() => elfArchitecture(pe(0x8664)), /ELF/u);
 });
@@ -109,9 +109,9 @@ test("code signature verification runs codesign strictly and reports its reason"
 });
 
 test("Runtime manifest must match the target platform, entrypoint and series", () => {
-  const manifest = { platform: "darwin-arm64", entrypoint: "omp", runtimeVersion: "18.3.0-harness.12" };
+  const manifest = { platform: "darwin-arm64", entrypoint: "juling", runtimeVersion: "18.3.0-harness.12" };
   assertRuntimeManifestPlatform(manifest, "darwin-arm64", "18.3.0-harness.12");
   assert.throws(() => assertRuntimeManifestPlatform(manifest, "win32-arm64", "18.3.0-harness.12"), /does not match target/u);
-  assert.throws(() => assertRuntimeManifestPlatform({ ...manifest, entrypoint: "omp.exe" }, "darwin-arm64", "18.3.0-harness.12"), /entrypoint/u);
+  assert.throws(() => assertRuntimeManifestPlatform({ ...manifest, entrypoint: "omp" }, "darwin-arm64", "18.3.0-harness.12"), /entrypoint/u);
   assert.throws(() => assertRuntimeManifestPlatform(manifest, "darwin-arm64", "18.3.0-harness.13"), /series/u);
 });

@@ -112,7 +112,7 @@
   overflow-x: hidden;
 }
 .media-file-row {
-  border-radius: var(--r-6);
+  border-radius: var(--r-4);
 }
 .media-file-select {
   min-height: 44px;

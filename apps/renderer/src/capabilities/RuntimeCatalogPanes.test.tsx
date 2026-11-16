@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { HarnessClient } from "@juling-harness/client-contract";
 import type { McpRuntimeStatus, PromptTemplateRow } from "@juling-harness/harness-protocol";
@@ -6,6 +6,13 @@ import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
 import { McpRuntimePane, PromptTemplatesPane } from "./RuntimeCatalogPanes";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
 afterEach(() => { cleanup(); localStorage.clear(); });
 it("previews template expansion and MCP fixtures without Host or automatic sends", async () => {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
@@ -81,23 +88,34 @@ it("loads a template immediately, prepares the selected native version, and inva
 });
 
 it("refreshes native readiness after reconnect and exposes tool identity and the startup failure", async () => {
-  let connected = false;
+  const initialQuery = deferred<McpRuntimeStatus>();
+  const refreshedQuery = deferred<McpRuntimeStatus>();
+  const reconnect = deferred<{ name: string; status: "connected"; scope: "project" }>();
+  let queryCount = 0;
   const { client, command } = nativeClient((kind) => {
-    if (kind === "mcp.auth.reconnect") { connected = true; return { name: "docs", status: "connected", scope: "project" }; }
-    if (kind === "mcp.runtime.status") return {
-      available: true, startupTimeoutMs: 0, ready: connected, settled: true, total: 1,
-      servers: connected ? [{ name: "docs", state: "ready", transport: "http", tools: 1, toolInfo: [{ name: "mcp_docs_search", mcpServerName: "docs", mcpToolName: "search", description: "Search project docs", readOnlyHint: true }] }] : [{ name: "docs", state: "failed", transport: "http", tools: 0, error: "HTTP 503: Service unavailable" }],
-    } satisfies McpRuntimeStatus;
+    if (kind === "mcp.auth.reconnect") return reconnect.promise;
+    if (kind === "mcp.runtime.status") return (++queryCount === 1 ? initialQuery : refreshedQuery).promise;
     throw new Error(`Unexpected command ${kind}`);
   });
   render(<I18nProvider forcedLanguage="en"><PreviewModeProvider switchEnabled><McpRuntimePane client={client} sessionId="session" available authAvailable /></PreviewModeProvider></I18nProvider>);
-  await screen.findByText("HTTP 503: Service unavailable");
+  expect(command).toHaveBeenCalledWith("mcp.runtime.status", { sessionId: "session" });
+  await act(async () => initialQuery.resolve({
+    available: true, startupTimeoutMs: 0, ready: false, settled: true, total: 1,
+    servers: [{ name: "docs", state: "failed", transport: "http", tools: 0, error: "HTTP 503: Service unavailable" }],
+  }));
+  expect(screen.getByText("HTTP 503: Service unavailable")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Reconnect docs" }));
-  await screen.findByText("Tools ready");
-  expect(screen.queryByText("HTTP 503: Service unavailable")).toBeNull();
-  expect(screen.getByText("Wait for all")).toBeTruthy();
+  await act(async () => reconnect.resolve({ name: "docs", status: "connected", scope: "project" }));
   expect(command).toHaveBeenCalledWith("mcp.auth.reconnect", { sessionId: "session", name: "docs" });
   expect(command.mock.calls.filter(([kind]) => kind === "mcp.runtime.status")).toHaveLength(2);
+  expect(screen.queryByText("Tools ready")).toBeNull();
+  await act(async () => refreshedQuery.resolve({
+    available: true, startupTimeoutMs: 0, ready: true, settled: true, total: 1,
+    servers: [{ name: "docs", state: "ready", transport: "http", tools: 1, toolInfo: [{ name: "mcp_docs_search", mcpServerName: "docs", mcpToolName: "search", description: "Search project docs", readOnlyHint: true }] }],
+  }));
+  expect(screen.getByText("Tools ready")).toBeTruthy();
+  expect(screen.queryByText("HTTP 503: Service unavailable")).toBeNull();
+  expect(screen.getByText("Wait for all")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "View tools for docs" }));
   expect(screen.getByText("mcp_docs_search")).toBeTruthy();
   expect(screen.getByText("Search project docs")).toBeTruthy();

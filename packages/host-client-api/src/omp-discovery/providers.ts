@@ -11,7 +11,7 @@ import {
   findRepoRoot,
   listClaudePluginRoots,
 } from "./helpers.js";
-import { getAgentDir } from "./paths.js";
+import { getAgentDirsForRead, getConfigDirNames } from "./paths.js";
 import { listOmpPluginRoots, listSettingsExtensionRoots, resolvePluginSkillDirs } from "./plugin-roots.js";
 import { classifyAgentPluginRoot, legacyProviderAllowed } from "./agent-plugin.js";
 import type { LoadContext, DiscoveredSkill, DiscoveryWarning } from "./types.js";
@@ -23,7 +23,7 @@ export interface ProviderResult {
 
 /** Provider chip text on the Skills inventory (same role as MCP `sourceLabel`). */
 function providerLabel(providerId: string): string {
-  if (providerId === "native") return "OMP";
+  if (providerId === "native") return "Juling";
   if (providerId === "omp-plugins") return "插件";
   if (providerId === "claude") return "Claude";
   if (providerId === "agent-plugins") return "Agent Plugin";
@@ -33,13 +33,14 @@ function providerLabel(providerId: string): string {
   if (providerId === "github") return "GitHub";
   if (providerId === "agents") return "Agents";
   if (providerId === "omp-managed") return "托管";
-  return "OMP";
+  return "Juling";
 }
 
 /**
  * Native provider (priority 100):
- * - Project: walk up from cwd to repoRoot, scan <dir>/.omp/skills at each ancestor
- * - User: ~/.omp/agent/skills (profile-scoped)
+ * - Project: walk up from cwd to repoRoot, scan `<dir>/.juling/skills` (then
+ *   legacy `<dir>/.omp/skills`) at each ancestor
+ * - User: `~/.juling/agent/skills` (profile-scoped, then legacy `~/.omp/agent/skills`)
  */
 export async function loadNativeSkills(ctx: LoadContext): Promise<ProviderResult> {
   const allSkills: DiscoveredSkill[] = [];
@@ -51,53 +52,61 @@ export async function loadNativeSkills(ctx: LoadContext): Promise<ProviderResult
   // Project-level: walk up from cwd to repoRoot
   const ancestors = getAncestorDirs(ctx.cwd, repoRoot, ctx.home);
   for (const ancestor of ancestors) {
-    const dir = path.join(ancestor, ".omp", "skills");
-    const { skills, warnings } = await scanSkillsFromDir({
-      dir,
+    for (const configDirName of getConfigDirNames()) {
+      const dir = path.join(ancestor, configDirName, "skills");
+      const { skills, warnings } = await scanSkillsFromDir({
+        dir,
+        providerId: "native",
+        priority: 100,
+        scope: "workspace",
+        sourceKind: "native",
+        sourceLabel: providerLabel("native"),
+        requireDescription: true,
+      });
+      allSkills.push(...skills);
+      allWarnings.push(...warnings);
+    }
+  }
+
+  // User-level: ~/.juling/agent/skills (profile-scoped, legacy fallback)
+  for (const agentDir of getAgentDirsForRead(ctx.home)) {
+    const { skills: userSkills, warnings: userWarnings } = await scanSkillsFromDir({
+      dir: path.join(agentDir, "skills"),
       providerId: "native",
       priority: 100,
-      scope: "workspace",
+      scope: "global",
       sourceKind: "native",
       sourceLabel: providerLabel("native"),
       requireDescription: true,
     });
-    allSkills.push(...skills);
-    allWarnings.push(...warnings);
+    allSkills.push(...userSkills);
+    allWarnings.push(...userWarnings);
   }
-
-  // User-level: ~/.omp/agent/skills (profile-scoped)
-  const userDir = path.join(getAgentDir(ctx.home), "skills");
-  const { skills: userSkills, warnings: userWarnings } = await scanSkillsFromDir({
-    dir: userDir,
-    providerId: "native",
-    priority: 100,
-    scope: "global",
-    sourceKind: "native",
-    sourceLabel: providerLabel("native"),
-    requireDescription: true,
-  });
-  allSkills.push(...userSkills);
-  allWarnings.push(...userWarnings);
 
   return { skills: allSkills, warnings: allWarnings };
 }
 
 /**
  * Managed skills provider (priority 5):
- * - User: ~/.omp/agent/managed-skills
+ * - User: ~/.juling/agent/managed-skills, then legacy ~/.omp/agent/managed-skills
  */
 export async function loadManagedSkills(ctx: LoadContext): Promise<ProviderResult> {
-  const dir = path.join(getAgentDir(ctx.home), "managed-skills");
-  const { skills, warnings } = await scanSkillsFromDir({
-    dir,
-    providerId: "omp-managed",
-    priority: 5,
-    scope: "builtin",
-    sourceKind: "managed",
-    sourceLabel: providerLabel("omp-managed"),
-    requireDescription: true,
-  });
-  return { skills, warnings };
+  const allSkills: DiscoveredSkill[] = [];
+  const allWarnings: DiscoveryWarning[] = [];
+  for (const agentDir of getAgentDirsForRead(ctx.home)) {
+    const { skills, warnings } = await scanSkillsFromDir({
+      dir: path.join(agentDir, "managed-skills"),
+      providerId: "omp-managed",
+      priority: 5,
+      scope: "builtin",
+      sourceKind: "managed",
+      sourceLabel: providerLabel("omp-managed"),
+      requireDescription: true,
+    });
+    allSkills.push(...skills);
+    allWarnings.push(...warnings);
+  }
+  return { skills: allSkills, warnings: allWarnings };
 }
 
 /**

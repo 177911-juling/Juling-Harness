@@ -33,7 +33,10 @@ async function installRuntime(state: string, artifact: string, keyDirectory: str
     const trustedKeys = { ...savedKeys?.trustedKeys, ...keys.trustedKeys };
     const installer = new RuntimeInstaller(join(state, "runtimes"), { trustedKeys });
     await installer.install(artifact);
-    const smoke = withCodeSignatureCheck(createSmokeTestRunner({ env: { ...process.env, OMP_AGENT_DIR: join(state, "agent"), PI_CODING_AGENT_DIR: join(state, "agent"), OMP_PROFILE: "", PI_PROFILE: "" } }));
+    // The smoke test must see the same isolated profile as the Host: the
+    // canonical `JULING_*` names plus the legacy `OMP_*`/`PI_*` ones a Runtime
+    // built from the current vendor tree still reads.
+    const smoke = withCodeSignatureCheck(createSmokeTestRunner({ env: { ...process.env, JULING_AGENT_DIR: join(state, "agent"), JULING_CODING_AGENT_DIR: join(state, "agent"), JULING_PROFILE: "", OMP_AGENT_DIR: join(state, "agent"), PI_CODING_AGENT_DIR: join(state, "agent"), OMP_PROFILE: "", PI_PROFILE: "" } }));
     const directory = join(state, "keys");
     await secureRemoteDirectory(directory);
     const mapping: Record<string, string> = {};
@@ -150,8 +153,15 @@ export async function runRemoteHost(argv: string[]): Promise<void> {
     throw new Error("Remote Host did not become ready");
   }
   const agentDir = resolve(values["agent-dir"] ?? join(state, "agent"));
+  // Remote Hosts run against an isolated agent directory, so the per-user
+  // `~/.omp` → `~/.juling` migration belongs to the desktop entry point only.
+  // Canonical names first; the legacy `OMP_*`/`PI_*` ones stay because a Runtime
+  // built from the current vendor tree still resolves its profile from them.
+  process.env.JULING_AGENT_DIR = agentDir;
+  process.env.JULING_CODING_AGENT_DIR = agentDir;
   process.env.OMP_AGENT_DIR = agentDir;
   process.env.PI_CODING_AGENT_DIR = agentDir;
+  delete process.env.JULING_PROFILE;
   delete process.env.OMP_PROFILE;
   delete process.env.PI_PROFILE;
   await secureRemoteDirectory(agentDir);

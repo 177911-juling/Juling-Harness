@@ -33,7 +33,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rm, unlink, writeFile, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -318,6 +318,10 @@ function createProductionAuthorityLockServices(): Win32AuthorityLockServices {
     : createPosixAuthorityLiveness({
         socketDirectory: () => ensurePrivateSocketDirectory("authority", { tmpRoot: desktopSocketTmpRoot() }),
       });
+  // The lock file is per profile; its kernel liveness proof must use the same
+  // scope so isolated profiles do not contend for one machine-wide pipe.
+  const profileScope = createHash("sha256").update(desktopPaths().stateRoot).digest("hex").slice(0, 24);
+  const livenessKey = (environmentKey: string): string => `${environmentKey}-${profileScope}`;
   return {
     async createExclusive(lockFilePath: string, content: string): Promise<boolean> {
       let handle: FileHandle;
@@ -335,7 +339,7 @@ function createProductionAuthorityLockServices(): Win32AuthorityLockServices {
         await handle.close();
       }
       const environmentKey = environmentKeyFromLockContent(content);
-      if (!(await liveness.acquire(environmentKey))) {
+      if (!(await liveness.acquire(livenessKey(environmentKey)))) {
         await bestEffort(() => unlink(lockFilePath));
         return false;
       }
@@ -372,11 +376,11 @@ function createProductionAuthorityLockServices(): Win32AuthorityLockServices {
         }
         throw error;
       }
-      await liveness.release(environmentKeyFromLockContent(expectedContent));
+      await liveness.release(livenessKey(environmentKeyFromLockContent(expectedContent)));
       return true;
     },
     async isOwnerAlive(metadata): Promise<boolean> {
-      return liveness.isHeld(metadata.environmentKey);
+      return liveness.isHeld(livenessKey(metadata.environmentKey));
     },
     nowIso: () => new Date().toISOString(),
     randomId: () => randomBytes(16).toString("base64url"),
@@ -550,7 +554,7 @@ export interface ProductionDesktopHostFactory extends DesktopHostFactory {
  * Production factory plus the narrow Main-only workspace lookup used by
  * Desktop chrome (external editor / file manager / local terminal cwd).
  * These methods stay in the Main process and never cross the Host facade.
- * Packaged builds keep the live `omp.exe` under `$INSTDIR\runtime`.
+ * Packaged builds keep the live `juling.exe` under `$INSTDIR\runtime`.
  */
 export function createProductionHostFactory(options?: {
   readonly managedBrowser?: boolean;

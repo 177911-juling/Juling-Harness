@@ -79,7 +79,7 @@ it("shows the full context strip attached above the composer on a new conversati
   expect(composer).not.toBeNull();
 
   // 项目、分支、执行位置、变更统计整条都在。
-  expect(strip!.querySelector(".ctx-project-switch")?.textContent).toContain("omp-web");
+  expect(strip!.querySelector(".ctx-project-switch")?.textContent).toContain("juling-web");
   expect(strip!.querySelector(".ctx-branch-wrap")?.textContent).toContain("main");
   expect(strip!.querySelector(".execution-picker")?.textContent).toContain("此计算机");
   expect(strip!.querySelector(".ctx-diffstat")?.textContent).toContain("+214");

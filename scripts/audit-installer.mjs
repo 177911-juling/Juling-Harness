@@ -257,22 +257,29 @@ export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory
   if (packedVersion !== expectedVersion) {
     throw new Error(`Packed Runtime is ${packedVersion}; series expects ${expectedVersion}`);
   }
-  const omp = join(versionsRoot, packedVersion, "omp.exe");
   const manifest = join(versionsRoot, packedVersion, "runtime-manifest.json");
-  if (!existsSync(omp) || !existsSync(manifest)) {
-    throw new Error("No signed Runtime folder with omp.exe + runtime-manifest.json");
-  }
+  if (!existsSync(manifest)) throw new Error("No signed Runtime folder with a runtime-manifest.json");
   const packedManifest = JSON.parse(readFileSync(manifest, "utf8"));
+  // The signed manifest names the executable, so a legacy `omp.exe` payload
+  // from an older release audits exactly like a current one.
+  const entrypointName = packedManifest.entrypoint;
+  if (typeof entrypointName !== "string" || entrypointName.length === 0) {
+    throw new Error("No signed Runtime folder: runtime-manifest.json has no entrypoint");
+  }
+  const entrypoint = join(versionsRoot, packedVersion, entrypointName);
+  if (!existsSync(entrypoint)) {
+    throw new Error(`No signed Runtime folder with ${entrypointName} + runtime-manifest.json`);
+  }
   if (targetArch) {
     assertRuntimeManifestTarget(packedManifest, targetArch, expectedVersion);
-    assertPeArchitecture(omp, targetArch);
+    assertPeArchitecture(entrypoint, targetArch);
   }
   if (packedManifest.runtimeVersion !== packedVersion) {
     throw new Error(
       `Packed Runtime folder ${packedVersion} does not match manifest ${packedManifest.runtimeVersion}`,
     );
   }
-  notes.push(`runtime ${packedVersion} ${formatSize(omp)}`);
+  notes.push(`runtime ${packedVersion} ${formatSize(entrypoint)}`);
 
   assertPublicRuntimeKeys(join(unpackedDir, "runtime-keys"));
   notes.push("runtime public key only");

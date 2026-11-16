@@ -74,7 +74,7 @@ export type RuntimeFeatureOperation =
   | { kind: "mcp.auth.reconnect"; sessionId: string; name: string }
   | { kind: "seance.ask"; sessionId: string; source: string; task: string; model?: string };
 export interface RuntimeFeatureResultMap {
-  "agent.spawn.options": { fileEnabled: boolean; modelSelection: boolean; maxEffort: string; models: Array<{ selector: string; name: string; thinkingLevels: readonly string[] }> };
+  "agent.spawn.options": { modelSelection: boolean; maxEffort: string; models: Array<{ selector: string; name: string; thinkingLevels: readonly string[] }> };
   "btw.inject": { sent: true };
   "session.history.rename": { targetSessionId: string; title: string };
   "session.history.pin": { targetSessionId: string; pinned: boolean };

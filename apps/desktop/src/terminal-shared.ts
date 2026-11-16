@@ -212,7 +212,7 @@ export function parseAckInput(value: unknown): TerminalAckInput {
   return { id: parseSessionId(value.id, "terminal ack: id"), bytes };
 }
 
-export interface OmpHarnessTerminalApi {
+export interface JulingHarnessTerminalApi {
   create(size?: TerminalCreateInput): Promise<TerminalSessionInfo>;
   write(id: string, data: string): Promise<void>;
   resize(id: string, cols: number, rows: number): Promise<void>;

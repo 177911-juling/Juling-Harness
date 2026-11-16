@@ -7,7 +7,7 @@ import { readWebRouting, writeWebRouting } from "./web-routing.js";
  * File-backed model-config adapter.
  *
  * Providers come from models.yml; roles come from config.yml `modelRoles`.
- * List/save do not spawn `omp`. OAuth login and `omp models refresh` are the
+ * List/save do not spawn `juling`. OAuth login and `juling models refresh` are the
  * optional CLI paths. Auth presence is read from `agent.db` without returning secrets.
  */
 
@@ -51,7 +51,7 @@ import { BUILTIN_MODEL_ROLES, parseModelKind, isModelEnvConfigName, parseCacheTh
 
 import { parse as parseYaml, stringify as stringifyYaml, parseDocument } from "yaml";
 import { parseModelsYml, redactModelsYmlText, restoreRedactedApiKeys, serializeModelsYml, type YamlValue } from "./models-yml.js";
-import { getAgentDir, getProjectConfigDir } from "./omp-discovery/paths.js";
+import { getAgentDir, getConfigDirNames, getProjectConfigDir } from "./omp-discovery/paths.js";
 import type { HostModelsService } from "./services.js";
 import { toClientError } from "./services.js";
 
@@ -174,7 +174,7 @@ const WEB_SEARCH_APIKEY_IDS: Readonly<Record<string, string>> = {
 };
 
 /**
- * `omp login` ids actually offered in the modal. Restricted to ids that exist
+ * `juling login` ids actually offered in the modal. Restricted to ids that exist
  * in the runtime's OAuth registry (`packages/ai/src/registry/*` with a
  * `login`) AND whose flow emits the browser URL before any terminal prompt —
  * RPC-mode login rejects prompt-first providers (google-gemini-cli) and
@@ -237,7 +237,7 @@ const PRESET_GROUPS: ReadonlyArray<ModelPresetGroup> = [
     group: "本地",
     items: [
       { id: "ollama", name: "Ollama", desc: "本地模型服务，自动发现已拉取模型", api: "openai-completions", auth: ["none"], local: true, popular: true, endpoint: "http://localhost:11434/v1", discovery: "ollama" },
-      { id: "lm-harness", name: "LM Harness", desc: "本地 OpenAI 兼容服务", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:1234/v1", discovery: "lm-harness" },
+      { id: "lm-studio", name: "LM Studio", desc: "本地 OpenAI 兼容服务", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:1234/v1", discovery: "lm-studio" },
       { id: "llama.cpp", name: "llama.cpp", desc: "llama-server OpenAI 兼容接口", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:8080/v1", discovery: "llama.cpp" },
     ],
   },
@@ -264,7 +264,7 @@ export interface OmpModelsAdapterOptions {
   readonly exec?: (exe: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
   /** Fetch implementation for connection probes; defaults to the global fetch. */
   readonly fetch?: typeof globalThis.fetch;
-  /** Agent config directory; defaults to `~/.omp/agent` (test injection). */
+  /** Agent config directory; defaults to `~/.juling/agent` (test injection). */
   readonly agentDir?: string;
   readonly catalogCachePath?: string;
   /** Active workspace cwd for project-scoped role writes. */
@@ -1127,7 +1127,7 @@ function providerFromYaml(
     status = "not-authenticated";
     statusDetail = "尚未配置凭据";
   } else if (hasAvailable) {
-    statusDetail = "OMP 已解析到可用模型";
+    statusDetail = "Juling 已解析到可用模型";
   }
   const preset = PRESET_GROUPS.flatMap((group) => group.items).find((item) => item.id === id);
   const yamlName = stringOf(raw.name);
@@ -1200,7 +1200,7 @@ function providersFromAvailable(
       name: preset?.name ?? id,
       source: (preset ? "builtin" : "runtime") as ModelProviderRecord["source"],
       status: disabled.has(id) ? "disabled" : "available",
-      statusDetail: disabled.has(id) ? "已禁用" : "OMP 已解析到可用模型",
+      statusDetail: disabled.has(id) ? "已禁用" : "Juling 已解析到可用模型",
       api: mapApi(preset?.api),
       ...(preset?.endpoint === undefined ? {} : { endpointUrl: preset.endpoint }),
       local: Boolean(preset?.local),
@@ -1336,30 +1336,36 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-/** The Runtime's agent directory, honoring profiles, XDG and `PI_CODING_AGENT_DIR` the same way. */
+/** The Runtime's agent directory, honoring profiles, XDG and `JULING_CODING_AGENT_DIR` the same way. */
 function defaultAgentDir(): string {
   return getAgentDir(homedir());
 }
 
 async function defaultLocateOmp(): Promise<string | undefined> {
-  const exeName = process.platform === "win32" ? "omp.exe" : "omp";
+  // Canonical `juling` first; pre-rebrand `omp` binaries stay usable.
+  const exeNames = process.platform === "win32" ? ["juling.exe", "omp.exe"] : ["juling", "omp"];
   const extraDirs = [
+    join(homedir(), ".juling", "bin"),
     join(homedir(), ".omp", "bin"),
     join(homedir(), ".local", "bin"),
   ];
   const dirs = [...(process.env.PATH ?? "").split(delimiter), ...extraDirs];
-  for (const dir of dirs) {
-    if (!dir) continue;
-    const candidate = join(dir, exeName);
-    if (await fileExists(candidate)) return candidate;
+  for (const exeName of exeNames) {
+    for (const dir of dirs) {
+      if (!dir) continue;
+      const candidate = join(dir, exeName);
+      if (await fileExists(candidate)) return candidate;
+    }
   }
   const whereBin = process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "where.exe") : "which";
-  try {
-    const { stdout } = await execFileAsync(whereBin, [exeName], { timeout: 8_000, windowsHide: true });
-    const first = stdout.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0);
-    if (first && (await fileExists(first))) return first;
-  } catch {
-    // PATH walk already failed
+  for (const exeName of exeNames) {
+    try {
+      const { stdout } = await execFileAsync(whereBin, [exeName], { timeout: 8_000, windowsHide: true });
+      const first = stdout.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0);
+      if (first && (await fileExists(first))) return first;
+    } catch {
+      // PATH walk already failed
+    }
   }
   return undefined;
 }
@@ -1668,7 +1674,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
 
   async function getAvailable(modelsDbPath: string): Promise<AvailableModelRecord[]> {
     // 直接读 OMP 本机 models.db（model_cache 权威行）拿原生供应商/模型，
-    // 不 spawn omp CLI —— Electron 主进程下子进程不可靠，且多了 PATH/锁依赖。
+    // 不 spawn juling CLI —— Electron 主进程下子进程不可靠，且多了 PATH/锁依赖。
     let DatabaseSync: typeof import("node:sqlite").DatabaseSync | undefined;
     try {
       ({ DatabaseSync } = await import("node:sqlite"));
@@ -1818,6 +1824,21 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       return "";
     }
+  }
+
+  /**
+   * Project `config.yml` reads prefer the canonical `.juling` file; when that
+   * file is absent or empty, the pre-rebrand `<cwd>/.omp/config.yml` is read
+   * instead. Writes always target the canonical path.
+   */
+  async function projectConfigReadPath(cwd: string): Promise<string> {
+    const canonical = join(getProjectConfigDir(cwd), "config.yml");
+    if ((await readConfigText(canonical).catch(() => "")).trim().length > 0) return canonical;
+    const [, legacyDirName] = getConfigDirNames();
+    if (legacyDirName === undefined) return canonical;
+    const legacy = join(cwd, legacyDirName, "config.yml");
+    const legacyText = await readConfigText(legacy).catch(() => "");
+    return legacyText.trim().length > 0 ? legacy : canonical;
   }
 
   async function writeConfigText(configPath: string, text: string): Promise<void> {
@@ -2151,8 +2172,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       const cwd = cwdOf();
       let modelRoles = { ...modelRolesGlobal };
       const projectKeys = new Set<string>();
-      if (storage === "project" && cwd) {
-        const projectRoles = await readRolesFromConfigFile(join(getProjectConfigDir(cwd), "config.yml"));
+      const projectConfigPath = storage === "project" && cwd ? await projectConfigReadPath(cwd) : undefined;
+      if (projectConfigPath !== undefined) {
+        const projectRoles = await readRolesFromConfigFile(projectConfigPath);
         for (const [key, value] of Object.entries(projectRoles)) {
           modelRoles[key] = value;
           projectKeys.add(key);
@@ -2161,8 +2183,8 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       const cycleOrder = await readCycleOrder(paths.configPath, configRoot);
       const modelProviderOrder = await readStringList(paths.configPath, "modelProviderOrder", configRoot);
       const fallback = await readFallback(paths.configPath, configRoot);
-      if (storage === "project" && cwd) {
-        const projectFallback = await readFallback(join(getProjectConfigDir(cwd), "config.yml"));
+      if (projectConfigPath !== undefined) {
+        const projectFallback = await readFallback(projectConfigPath);
         Object.assign(fallback.chains, projectFallback.chains);
       }
       const tags = await readModelTags(paths.configPath, configRoot);
@@ -2374,11 +2396,11 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       if (!openUrl) {
         throw {
           code: "CAPABILITY_UNAVAILABLE",
-          message: `应用内登录不可用。请在终端运行 omp login ${input.providerId}`,
+          message: `应用内登录不可用。请在终端运行 juling login ${input.providerId}`,
         };
       }
       const exe = await locateOmp();
-      if (!exe) throw { code: "UNAVAILABLE", message: "omp executable was not found" };
+      if (!exe) throw { code: "UNAVAILABLE", message: "juling executable was not found" };
       const { spawn } = await import("node:child_process");
       return await new Promise<ConfigWriteResult>((resolve, reject) => {
         const child = spawn(exe, ["--mode", "rpc"], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
@@ -2391,7 +2413,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           if (error) reject(toClientError(error, "CAPABILITY_UNAVAILABLE"));
           else resolve(result ?? WRITE_OK);
         };
-        const timer = setTimeout(() => finish({ code: "UNAVAILABLE", message: "login timed out; use omp login in a terminal" }), 120_000);
+        const timer = setTimeout(() => finish({ code: "UNAVAILABLE", message: "login timed out; use juling login in a terminal" }), 120_000);
         child.stdout?.setEncoding("utf8");
         child.stdout?.on("data", (chunk: string) => {
           buffer += chunk;
@@ -2418,7 +2440,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
             if (frame.type === "extension_ui_request" && frame.method === "input") {
               finish({
                 code: "CAPABILITY_UNAVAILABLE",
-                message: `该供应商需要交互式输入。请在终端运行 omp login ${input.providerId}`,
+                message: `该供应商需要交互式输入。请在终端运行 juling login ${input.providerId}`,
               });
               continue;
             }
@@ -2435,7 +2457,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         });
         child.on("exit", () => {
           clearTimeout(timer);
-          if (!settled) finish({ code: "UNAVAILABLE", message: "login process exited; use omp login in a terminal" });
+          if (!settled) finish({ code: "UNAVAILABLE", message: "login process exited; use juling login in a terminal" });
         });
       });
     },
@@ -2682,7 +2704,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           if (response.status < 200 || response.status >= 300) continue;
           const payload = await response.json().catch(() => null);
           let models = parseDiscoveryModels(payload, advertisedReasoning);
-          if (discoveryType === "lm-harness") {
+          if (discoveryType === "lm-studio") {
             const nativeBase = endpointUrl.replace(/\/$/, "").replace(/\/v1$/, "");
             const metadata = new Map<string, Record<string, unknown>>();
             for (const nativePath of ["/api/v0/models", "/api/v1/models"]) {
@@ -2731,7 +2753,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
 
     async refreshDiscovery(): Promise<ConfigWriteResult> {
       const exe = await locateOmp();
-      if (!exe) throw { code: "UNAVAILABLE", message: "omp executable was not found" };
+      if (!exe) throw { code: "UNAVAILABLE", message: "juling executable was not found" };
       const run = options.exec ?? (async (command, args) => {
         const { stdout, stderr } = await execFileAsync(command, args, { timeout: 120_000, windowsHide: true, encoding: "utf8" });
         return { stdout: String(stdout), stderr: String(stderr), code: 0 };
@@ -2739,7 +2761,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       try {
         const result = await run(exe, ["models", "refresh", "--json"]);
         if (result.code !== 0) {
-          throw { code: "INTERNAL_ERROR", message: result.stderr.trim() || "omp models refresh failed" };
+          throw { code: "INTERNAL_ERROR", message: result.stderr.trim() || "juling models refresh failed" };
         }
         return { ...WRITE_OK, message: "已重新扫描 Discovery 缓存（新会话后生效）" };
       } catch (error) {
@@ -2833,7 +2855,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       }
       const text = await readConfigText(paths.configPath);
       await writeConfigText(paths.configPath, upsertYamlScalar(text, "modelRoleStorage", input.storage));
-      return { ...WRITE_OK, message: input.storage === "project" ? "角色写入项目 .omp/config.yml" : "已恢复全局角色配置" };
+      return { ...WRITE_OK, message: input.storage === "project" ? "角色写入项目 .juling/config.yml" : "已恢复全局角色配置" };
     },
 
     async setFallback(input): Promise<ConfigWriteResult> {

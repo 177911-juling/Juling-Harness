@@ -53,8 +53,8 @@ it("uses the native default once, previews the selection and resumes the resolve
   const onOpen = vi.fn();
   mount(<ResumeScopePane client={client} context={context} onOpen={onOpen} />);
   expect(command).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Resume OMP session" }));
-  const dialog = await screen.findByRole("dialog", { name: "Resume OMP session" });
+  fireEvent.click(screen.getByRole("button", { name: "Resume Juling session" }));
+  const dialog = await screen.findByRole("dialog", { name: "Resume Juling session" });
   const preview = within(dialog).getByRole("complementary", { name: "Session preview" });
   await within(preview).findByText("The original attachments are ready.");
   expect(command).toHaveBeenCalledTimes(1);
@@ -122,7 +122,7 @@ it("keeps both preview flows local and hides demo markings when marks are off", 
   const { client, command, query } = receiptClient(() => { throw Error("Preview must not invoke the Host"); });
   const onOpen = vi.fn(), onImported = vi.fn(), onPreviewOpen = vi.fn();
   mount(<><ResumeScopePane client={client} context={context} onOpen={onOpen} onPreviewOpen={onPreviewOpen} /><SessionImportPanel client={client} onOpen={onOpen} onImported={onImported} onPreviewOpen={onPreviewOpen} /></>, true);
-  fireEvent.click(screen.getByRole("button", { name: "Resume OMP session" }));
+  fireEvent.click(screen.getByRole("button", { name: "Resume Juling session" }));
   await screen.findByRole("heading", { name: "会话恢复与附件检查" });
   expect(screen.queryByText("Demo")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Resume session" }));

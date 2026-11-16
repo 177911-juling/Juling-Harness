@@ -3,6 +3,7 @@ import type { DictationCaptureState, DictationConfiguration, DictationInputMode 
 import type { DictationAudioApi, DictationAudioResult, DictationDesktopEvent, DictationOwner, DictationRecovery } from "../../../desktop/src/dictation-audio-shared";
 import type { ComposerDictationHandle } from "./dictationTypes";
 import { acceptDictationConsent, dictationCommand, needsDictationConsent } from "./dictationClient";
+import { runtimeSessionReady, waitForRuntimeSession } from "../sessionLifecycle";
 import { openPcmCapture, type PcmCapture, type PcmCaptureOptions } from "../media/liveCapture";
 import { ensureMicrophoneAccess, microphoneFailureMessage } from "../media/microphoneAccess";
 import { hostErrorMessage } from "../hostError";
@@ -58,7 +59,7 @@ interface Dependencies {
 }
 const EMPTY: DictationView = { phase: "off", message: "", level: 0 };
 
-export function dictationDesktopApi(api = globalThis.ompHarnessChrome): DictationAudioApi | undefined {
+export function dictationDesktopApi(api = globalThis.julingHarnessChrome): DictationAudioApi | undefined {
   if (!api?.attachDictationAudio || !api.controlDictationAudio || !api.appendDictationAudio || !api.drainDictationAudio || !api.getDictationRecovery || !api.replayDictationAudio || !api.retainDictationAudio || !api.releaseDictationAudio || !api.onDictationAudio) return undefined;
   return api as typeof api & DictationAudioApi;
 }
@@ -115,7 +116,7 @@ export class DictationSession {
   }
   async inspect(): Promise<void> {
     const { client, sessionId, available, remote } = this.options;
-    if (!client || !sessionId || !available || remote || this.active) return;
+    if (!client || !sessionId || !available || remote || this.active || !runtimeSessionReady(client, sessionId)) return;
     const generation = ++this.#inspection;
     try {
       const configuration = await dictationCommand(client, "dictation.inspect", { sessionId });
@@ -153,6 +154,7 @@ export class DictationSession {
   }
   async #target(run: CaptureRun): Promise<string> {
     const sessionId = this.options.ensureSession ? await this.options.ensureSession(run.abort.signal) : this.options.sessionId;
+    if (!this.options.ensureSession && sessionId) await waitForRuntimeSession(run.client, sessionId);
     this.#assertCurrent(run);
     if (!sessionId) throw new Error(this.#text("请先创建或打开一个会话，再使用语音输入。", "Create or open a conversation before using dictation."));
     run.owner = { sessionId, draftId: run.draftId, label: this.options.label };

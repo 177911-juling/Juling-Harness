@@ -39,7 +39,7 @@ for (const dir of await readdir("outputs/publish")) {
   const runtimeOnly = process.env.OMP_RELEASE_KIND === "runtime";
   if (runtimeOnly === Boolean(m.app)) throw new Error("Release kind mismatch");
   const tag = runtimeOnly ? `runtime-v${m.runtime.version}` : `v${m.app.version}`;
-  identities.push({ tag, title: runtimeOnly ? `OMP Runtime ${m.runtime.version}` : `Juling Harness ${m.app.version}`, prerelease: m.runtime.channel === "canary", latest: !runtimeOnly });
+  identities.push({ tag, title: runtimeOnly ? `Juling Runtime ${m.runtime.version}` : `Juling Harness ${m.app.version}`, prerelease: m.runtime.channel === "canary", latest: !runtimeOnly });
   const allowed = new Set([name, "release-notes.md"]);
   for (const component of [m.app, m.runtime].filter(Boolean)) for (const file of [component.file, component.blockmap]) {
     const path = join(root, file.asset), bytes = await readFile(path);

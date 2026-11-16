@@ -1,5 +1,5 @@
 diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
-index 3ecd1d6955..89e12e86e8 100644
+index 5c05c427d5..4a0b89b2d0 100644
 --- a/packages/coding-agent/package.json
 +++ b/packages/coding-agent/package.json
 @@ -48,6 +48,10 @@
@@ -14,7 +14,7 @@ index 3ecd1d6955..89e12e86e8 100644
  			"types": "./src/index.ts",
  			"import": "./src/index.ts"
 diff --git a/packages/coding-agent/src/cli.ts b/packages/coding-agent/src/cli.ts
-index 9297d40c53..0c77d5f627 100755
+index 9297d40c53..1c91fb6569 100755
 --- a/packages/coding-agent/src/cli.ts
 +++ b/packages/coding-agent/src/cli.ts
 @@ -346,6 +346,11 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
@@ -29,7 +29,41 @@ index 9297d40c53..0c77d5f627 100755
  	return false;
  }
  
-@@ -561,6 +566,14 @@ export async function runCli(argv: string[]): Promise<void> {
+@@ -479,22 +484,23 @@ export async function runCli(argv: string[]): Promise<void> {
+ 		if (extracted.profile !== undefined) {
+ 			setProfile(extracted.profile);
+ 		} else {
+-			// No explicit --profile: activate any OMP_PROFILE/PI_PROFILE inherited
+-			// from the environment. Module-load resolution deliberately swallows an
+-			// invalid value to avoid an uncaught throw before this try/catch is in
+-			// scope (see `readProfileFromEnvSafe` in dirs.ts), and callers may set
+-			// OMP_PROFILE after importing this module (profile aliases/tests). Surfacing
+-			// validation here turns `OMP_PROFILE=.. omp --version` into a clean error;
+-			// calling setProfile keeps every later path helper on the env-selected
+-			// profile instead of the default agent directory.
+-			setProfile(resolveProfileEnv(process.env.OMP_PROFILE, process.env.PI_PROFILE));
++			// No explicit --profile: activate any JULING_PROFILE/OMP_PROFILE/PI_PROFILE
++			// inherited from the environment. Module-load resolution deliberately
++			// swallows an invalid value to avoid an uncaught throw before this
++			// try/catch is in scope (see `readProfileFromEnvSafe` in dirs.ts), and
++			// callers may set the profile env after importing this module (profile
++			// aliases/tests). Surfacing validation here turns `PROFILE=.. juling
++			// --version` into a clean error; calling setProfile keeps every later
++			// path helper on the env-selected profile instead of the default agent
++			// directory.
++			setProfile(resolveProfileEnv(process.env.JULING_PROFILE, process.env.OMP_PROFILE, process.env.PI_PROFILE));
+ 		}
+ 		if (extracted.aliasName !== undefined) {
+ 			// Command boundary: shell/path setup is used only by --alias.
+ 			const { installProfileAlias, resolveProfileAliasCommandFromProcess } = await import("./cli/profile-alias");
+ 			const profile = extracted.profile ?? getActiveProfile();
+ 			if (!profile) {
+-				throw new Error("--alias requires --profile <name> or OMP_PROFILE");
++				throw new Error("--alias requires --profile <name> or JULING_PROFILE");
+ 			}
+ 			const result = await installProfileAlias({
+ 				profile,
+@@ -561,6 +567,14 @@ export async function runCli(argv: string[]): Promise<void> {
  	// A failed install is reported once the launch has a warning sink (`main.ts`,
  	// `ensureSqliteLockShim`); this module stays free of pi-utils' env snapshot.
  	if (isProcessEntry && !helpOrVersion) installSqliteLockShim();
@@ -45,7 +79,7 @@ index 9297d40c53..0c77d5f627 100755
  	if (
  		!process.env.PI_TIMING &&
 diff --git a/packages/coding-agent/src/cli/args.ts b/packages/coding-agent/src/cli/args.ts
-index cb32c574e3..29ee191cc7 100644
+index cb32c574e3..eebceec8e5 100644
 --- a/packages/coding-agent/src/cli/args.ts
 +++ b/packages/coding-agent/src/cli/args.ts
 @@ -22,7 +22,7 @@ import { CliUsageError } from "./usage-error";
@@ -68,10 +102,10 @@ index cb32c574e3..29ee191cc7 100644
  	sessionDir?: string;
  	providerSessionId?: string;
 diff --git a/packages/coding-agent/src/cli/flag-tables.ts b/packages/coding-agent/src/cli/flag-tables.ts
-index df86b455ee..f72a10a44f 100644
+index 6f6c04a37a..e7f4b2c4f6 100644
 --- a/packages/coding-agent/src/cli/flag-tables.ts
 +++ b/packages/coding-agent/src/cli/flag-tables.ts
-@@ -120,6 +120,14 @@ function parseCostUsd(flag: string, value: string): number {
+@@ -124,6 +124,14 @@ function parseCostUsd(flag: string, value: string): number {
  	);
  }
  
@@ -86,7 +120,7 @@ index df86b455ee..f72a10a44f 100644
  /**
   * Setters for flags with string values. Most built-ins consume the next argv
   * token even when it starts with `-`; flags listed in
-@@ -137,7 +145,14 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
+@@ -141,7 +149,14 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
  		result.addDir = [...(result.addDir ?? []), value];
  	},
  	"--mode": (result, value) => {
@@ -102,7 +136,7 @@ index df86b455ee..f72a10a44f 100644
  			result.mode = value;
  		} else {
  			result.invalidFlagValues.push(
-@@ -145,6 +160,15 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
+@@ -149,6 +164,15 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
  			);
  		}
  	},
@@ -119,7 +153,7 @@ index df86b455ee..f72a10a44f 100644
  		result.fork = value;
  	},
 diff --git a/packages/coding-agent/src/cli/stats-cli.ts b/packages/coding-agent/src/cli/stats-cli.ts
-index c193bc7d68..0b699cf64d 100644
+index 407599a1ef..f9f3e511f3 100644
 --- a/packages/coding-agent/src/cli/stats-cli.ts
 +++ b/packages/coding-agent/src/cli/stats-cli.ts
 @@ -65,6 +65,19 @@ export interface StatsCommandArgs {
@@ -142,7 +176,7 @@ index c193bc7d68..0b699cf64d 100644
  // =============================================================================
  // Command Handler
  // =============================================================================
-@@ -115,13 +128,13 @@ export async function runStatsCommand(cmd: StatsCommandArgs): Promise<void> {
+@@ -127,13 +140,13 @@ export async function runStatsCommand(cmd: StatsCommandArgs): Promise<void> {
  
  	// Close is on before the page first loads, and off again for the system
  	// browser, where closing would leave a dead tab.
@@ -160,9 +194,16 @@ index c193bc7d68..0b699cf64d 100644
  	}
  
 diff --git a/packages/coding-agent/src/commands/launch-help.ts b/packages/coding-agent/src/commands/launch-help.ts
-index cb31720d26..01311931e1 100644
+index cb31720d26..a48774bed9 100644
 --- a/packages/coding-agent/src/commands/launch-help.ts
 +++ b/packages/coding-agent/src/commands/launch-help.ts
+@@ -1,5 +1,5 @@
+ import { Args, type CommandMetadata, Flags } from "@oh-my-pi/pi-utils/cli";
+-import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
++import { APP_NAME, CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import { formatKeyHint } from "@oh-my-pi/pi-tui/key-hint-format";
+ import { CLI_THINKING_LEVELS } from "@oh-my-pi/pi-tui/thinking";
+ import { SERVICE_TIER_OPENAI_VALUES } from "../config/service-tier";
 @@ -50,8 +50,17 @@ export const launchHelp = {
  		alias: Flags.string({ description: "Create a shell shortcut for the selected profile and exit" }),
  		cwd: Flags.string({ description: "Directory to start in (overrides the launch cwd)" }),
@@ -183,8 +224,22 @@ index cb31720d26..01311931e1 100644
  		}),
  		config: Flags.string({
  			description: "Load an extra config.yml-style overlay for this run (repeatable)",
+@@ -154,10 +163,10 @@ export const launchHelp = {
+ 		`# Include files in initial message\n  ${APP_NAME} @prompt.md @image.png "What color is the sky?"`,
+ 		`# Non-interactive mode (process and exit)\n  ${APP_NAME} -p "List all .ts files in src/"`,
+ 		`# Continue previous session\n  ${APP_NAME} --continue "What did we discuss?"`,
+-		`# Pick a session back up after a crash, subagents included\n  ${APP_NAME} --restore ~/.omp/agent/sessions/--path--/session.jsonl`,
+-		`# Create a shell shortcut for a work profile\n  ${APP_NAME} --profile work --alias omp-work`,
++		`# Pick a session back up after a crash, subagents included\n  ${APP_NAME} --restore ~/${CONFIG_DIR_NAME}/agent/sessions/--path--/session.jsonl`,
++		`# Create a shell shortcut for a work profile\n  ${APP_NAME} --profile work --alias ${APP_NAME}-work`,
+ 		`# Use different model (fuzzy matching)\n  ${APP_NAME} --model opus "Help me refactor this code"`,
+ 		`# Limit model cycling to specific models\n  ${APP_NAME} --models claude-sonnet,claude-haiku,gpt-4o`,
+-		`# Export a session file to HTML\n  ${APP_NAME} --export ~/.omp/agent/sessions/--path--/session.jsonl`,
++		`# Export a session file to HTML\n  ${APP_NAME} --export ~/${CONFIG_DIR_NAME}/agent/sessions/--path--/session.jsonl`,
+ 	],
+ } satisfies CommandMetadata;
 diff --git a/packages/coding-agent/src/config/models-config-schema-bundle.ts b/packages/coding-agent/src/config/models-config-schema-bundle.ts
-index 18699bdbb2..2b7fa83679 100644
+index 7325930163..dedfd291cf 100644
 --- a/packages/coding-agent/src/config/models-config-schema-bundle.ts
 +++ b/packages/coding-agent/src/config/models-config-schema-bundle.ts
 @@ -96,6 +96,7 @@ export const getModelsConfigSchemaBundle = once(() => {
@@ -196,10 +251,10 @@ index 18699bdbb2..2b7fa83679 100644
  
  	const OpenAICompatFieldsSchema = type(OpenAICompatFields);
 diff --git a/packages/coding-agent/src/config/registry.ts b/packages/coding-agent/src/config/registry.ts
-index a3d6844121..b606b98162 100644
+index d3cc6db288..14a41a049d 100644
 --- a/packages/coding-agent/src/config/registry.ts
 +++ b/packages/coding-agent/src/config/registry.ts
-@@ -616,7 +616,10 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
+@@ -617,7 +617,10 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
  			case "boolean":
  				return typeof value === "boolean";
  			case "number":
@@ -211,7 +266,7 @@ index a3d6844121..b606b98162 100644
  			case "string":
  				return typeof value === "string";
  			case "enum":
-@@ -647,7 +650,7 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
+@@ -648,7 +651,7 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
  		if (raw === undefined || this.accepts(raw)) {
  			// A fixed value re-arms this instance's warning, so breaking it again is reported again.
  			settings.warnState.invalid.delete(this.id);
@@ -221,10 +276,10 @@ index a3d6844121..b606b98162 100644
  		const warned = settings.warnState.invalid;
  		if (!warned.has(this.id) || !Bun.deepEquals(warned.get(this.id), raw)) {
 diff --git a/packages/coding-agent/src/config/settings.ts b/packages/coding-agent/src/config/settings.ts
-index 8d42713212..53aa9bd30b 100644
+index 38d5f37a9f..cabac0ded4 100644
 --- a/packages/coding-agent/src/config/settings.ts
 +++ b/packages/coding-agent/src/config/settings.ts
-@@ -334,7 +334,7 @@ export type SettingsMirrorWrite =
+@@ -345,7 +345,7 @@ export type SettingsMirrorWrite =
  	| { readonly op: "unsetGlobalValue"; readonly id: string }
  	| { readonly op: "writeEntry"; readonly id: string; readonly key: string; readonly value: unknown }
  	| { readonly op: "writeMember"; readonly id: string; readonly item: string; readonly member: boolean }
@@ -233,7 +288,7 @@ index 8d42713212..53aa9bd30b 100644
  	| { readonly op: "clearOverrideValue"; readonly id: string }
  	| { readonly op: "setModelRole"; readonly role: string; readonly modelId: string | undefined }
  	| { readonly op: "setProjectModelRole"; readonly role: string; readonly modelId: string }
-@@ -1223,9 +1223,8 @@ export class Settings {
+@@ -1234,9 +1234,8 @@ export class Settings {
  	 * disk reload or re-scope that makes a persisted layer configure it, drops it, and an explicit
  	 * override/clear ends it.
  	 */
@@ -246,7 +301,7 @@ index 8d42713212..53aa9bd30b 100644
  		this.writeValue(setting, value, "override");
  		this.#softPins.add(setting);
 diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
-index 2bfe0b7230..a79b98eab2 100644
+index a3adea1626..2b5421cbff 100644
 --- a/packages/coding-agent/src/main.ts
 +++ b/packages/coding-agent/src/main.ts
 @@ -1,3 +1,4 @@
@@ -283,7 +338,7 @@ index 2bfe0b7230..a79b98eab2 100644
  import { getChangelogPath, readLastChangelogVersion, resolveStartupChangelogForDisplay } from "./utils/changelog";
  import { EventBus } from "./utils/event-bus";
  import { resolveFirstLaunchPythonEvalWarning } from "./eval/startup-warning";
-@@ -644,7 +653,7 @@ async function runInteractiveMode(
+@@ -651,7 +660,7 @@ async function runInteractiveMode(
  	notifs: (InteractiveModeNotify | null)[],
  	versionCheckPromise: Promise<string | undefined>,
  	initialMessages: string[],
@@ -292,26 +347,27 @@ index 2bfe0b7230..a79b98eab2 100644
  	lspServers: LspStartupServerInfo[] | undefined,
  	mcpManager: MCPManager | undefined,
  	resuming: boolean,
-@@ -660,6 +669,9 @@ async function runInteractiveMode(
+@@ -666,6 +675,9 @@ async function runInteractiveMode(
+ 	startupLease?: ComposerLease,
  	startupGoal?: string,
  	startupRestore?: () => Promise<RestoreOutcome>,
- 	refreshScopedModelsAfterLogin?: () => Promise<void>,
 +	harnessLoopService?: HarnessLoopService,
 +	harnessModeService?: HarnessModeControlService,
 +	harnessShutdownRequested?: Promise<void>,
  ): Promise<void> {
  	const InteractiveModeConstructor = await loadInteractiveModeConstructor();
  	let mode: InteractiveMode;
-@@ -674,6 +686,8 @@ async function runInteractiveMode(
+@@ -679,6 +691,9 @@ async function runInteractiveMode(
+ 			eventBus,
  			startupLease?.composer,
  			subagentEventBus,
- 			refreshScopedModelsAfterLogin,
++			undefined,
 +			harnessLoopService,
 +			harnessModeService,
  		);
  		startupLease?.adopt();
  	} catch (error) {
-@@ -748,7 +762,7 @@ async function runInteractiveMode(
+@@ -761,7 +776,7 @@ async function runInteractiveMode(
  		const notifyNewVersion = (newVersion: string): void => {
  			if (cfgStartupCheckUpdate.get(settings)) mode.showNewVersionNotification(newVersion);
  		};
@@ -320,8 +376,8 @@ index 2bfe0b7230..a79b98eab2 100644
  			void runAutoUpdate(checkedVersionPromise, {
  				show: update => mode.showVersionUpdate(update),
  				notify: notifyNewVersion,
-@@ -857,8 +871,20 @@ async function runInteractiveMode(
- 	}
+@@ -871,8 +886,20 @@ async function runInteractiveMode(
+ 	mode.settleStartupRun();
  
  	while (true) {
 -		const input = await mode.getUserInput();
@@ -343,7 +399,7 @@ index 2bfe0b7230..a79b98eab2 100644
  	}
  }
  
-@@ -1263,6 +1289,7 @@ export async function createSessionManager(
+@@ -1277,6 +1304,7 @@ export async function createSessionManager(
  		onSessionContinuation?: (continuation: SessionContinuation) => void;
  	} = {},
  ): Promise<SessionManager | undefined> {
@@ -351,7 +407,7 @@ index 2bfe0b7230..a79b98eab2 100644
  	if (parsed.fork) {
  		if (parsed.noSession) {
  			throw new SessionResolutionError("--fork requires session persistence");
-@@ -1272,6 +1299,7 @@ export async function createSessionManager(
+@@ -1286,6 +1314,7 @@ export async function createSessionManager(
  			try {
  				return await SessionManager.forkFrom(forkSource, cwd, parsed.sessionDir, undefined, {
  					repairInterruptedTail: true,
@@ -359,7 +415,7 @@ index 2bfe0b7230..a79b98eab2 100644
  				});
  			} catch (err) {
  				if (err instanceof ForkSourceNotFoundError) {
-@@ -1287,6 +1315,7 @@ export async function createSessionManager(
+@@ -1301,6 +1330,7 @@ export async function createSessionManager(
  		try {
  			return await SessionManager.forkFrom(match.session.path, cwd, parsed.sessionDir, undefined, {
  				repairInterruptedTail: true,
@@ -367,7 +423,7 @@ index 2bfe0b7230..a79b98eab2 100644
  			});
  		} catch (err) {
  			if (err instanceof ForkSourceNotFoundError) {
-@@ -1354,6 +1383,7 @@ export async function createSessionManager(
+@@ -1368,6 +1398,7 @@ export async function createSessionManager(
  	if (parsed.continue) {
  		return await forkIfMovedAway(
  			await SessionManager.continueRecent(cwd, parsed.sessionDir, undefined, {
@@ -375,7 +431,7 @@ index 2bfe0b7230..a79b98eab2 100644
  				onSessionContinuation: options.onSessionContinuation,
  			}),
  			parsed.sessionDir,
-@@ -1362,16 +1392,18 @@ export async function createSessionManager(
+@@ -1376,16 +1407,18 @@ export async function createSessionManager(
  	// --resume without value is handled separately (needs picker UI)
  	// If --session-dir provided without --continue/--resume, create new session there
  	if (parsed.sessionDir) {
@@ -396,7 +452,7 @@ index 2bfe0b7230..a79b98eab2 100644
  				onSessionContinuation: options.onSessionContinuation,
  			}),
  			parsed.sessionDir,
-@@ -1381,8 +1413,8 @@ export async function createSessionManager(
+@@ -1395,8 +1428,8 @@ export async function createSessionManager(
  		}
  		return manager;
  	}
@@ -407,7 +463,7 @@ index 2bfe0b7230..a79b98eab2 100644
  }
  
  /** Discover APPEND_SYSTEM.md file if no CLI append system prompt was provided */
-@@ -1803,6 +1835,7 @@ interface RunRootCommandDependencies {
+@@ -1818,6 +1851,7 @@ interface RunRootCommandDependencies {
  	discoverAuthStorage?: typeof discoverAuthStorage;
  	selectSession?: SessionPicker;
  	runAcpMode?: RunAcpMode;
@@ -415,7 +471,7 @@ index 2bfe0b7230..a79b98eab2 100644
  	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
  	settings?: Settings;
  	forceSetupWizard?: boolean;
-@@ -1877,6 +1910,10 @@ export async function runRootCommand(
+@@ -1892,6 +1926,10 @@ export async function runRootCommand(
  			rejectNoUiWithoutRpc(parsedArgs);
  		}
  		const mode = parsedArgs.mode || "text";
@@ -426,7 +482,7 @@ index 2bfe0b7230..a79b98eab2 100644
  		// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
  		const rpcInput = mode === "rpc" || mode === "rpc-ui" ? claimRpcInput() : undefined;
  
-@@ -1911,8 +1948,10 @@ export async function runRootCommand(
+@@ -1926,8 +1964,10 @@ export async function runRootCommand(
  		// session-critical database connection picks the right busy timeout.
  		// See getDbBusyTimeoutMs().
  		const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
@@ -438,16 +494,16 @@ index 2bfe0b7230..a79b98eab2 100644
  		// Without a terminal on stdin the TUI cannot run, so such a launch is always
  		// headless: a piped or argv prompt runs like `-p`, and one with no prompt
  		// fails with a usage error instead of booting the interactive stack and
-@@ -1920,7 +1959,7 @@ export async function runRootCommand(
+@@ -1935,7 +1975,7 @@ export async function runRootCommand(
  		const stdinIsTerminal = process.stdin.isTTY === true;
  		const autoPrint =
  			(pipedInput !== undefined || !stdinIsTerminal) && !parsedArgs.print && parsedArgs.mode === undefined;
 -		const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
 +		const isInteractive = !parsedArgs.print && !autoPrint && (parsedArgs.mode === undefined || isHarnessHost);
- 		// Before session resolution: resume, fork, and import act on these same
- 		// startup-parse flags, so rejecting later would leave forked or imported
- 		// transcripts (or an opened picker) behind a usage error.
-@@ -1944,7 +1983,7 @@ export async function runRootCommand(
+ 		// The TUI owns the Tern pane or cmux workspace it draws in; an omp its commands start sees the claim and
+ 		// keeps its browser tabs out of this session's pane.
+ 		if (isInteractive) claimTerminal();
+@@ -1962,7 +2002,7 @@ export async function runRootCommand(
  		// Only the interactive host renders a focusable Agent Hub / subagent session
  		// tree; declare it so headless subagent optimizations (e.g. skipping replan
  		// title refresh) can tell a focusable process from a print/RPC/eval one.
@@ -456,7 +512,7 @@ index 2bfe0b7230..a79b98eab2 100644
  		if (!isInteractive) {
  			stopPendingStartupComposer();
  		}
-@@ -1968,8 +2007,12 @@ export async function runRootCommand(
+@@ -1986,8 +2026,15 @@ export async function runRootCommand(
  			process.stderr.write(`${chalk.red(`Error: ${message}`)}\n`);
  			process.exit(1);
  		}
@@ -464,13 +520,16 @@ index 2bfe0b7230..a79b98eab2 100644
  		const settingsInstance = await settingsPromise;
 +		if (isHarnessHost) {
 +			applyHarnessDefaults(settingsInstance);
-+			const stopMemoryCredential = await bindHarnessHindsightCredential(settingsInstance, parsedArgs.bridgeTokenFile);
++			const stopMemoryCredential = await bindHarnessHindsightCredential(
++				settingsInstance,
++				parsedArgs.bridgeTokenFile,
++			);
 +			postmortem.register("harness-memory-credential", stopMemoryCredential);
 +		}
  		// Process-lifetime: broker/account-policy edits reconfigure the shared credential store.
  		createAuthStorageSettingsSync(settingsInstance, authStorage);
  		if (parsedArgs.approvalMode) {
-@@ -2204,6 +2247,9 @@ export async function runRootCommand(
+@@ -2228,6 +2275,9 @@ export async function runRootCommand(
  		}
  		// Only createSessionManager's implicit auto-resume promotes continue here.
  		const autoResumed = !explicitSessionSelection && parsedArgs.continue === true;
@@ -480,7 +539,7 @@ index 2bfe0b7230..a79b98eab2 100644
  
  		if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager && !parsedArgs.noSession) {
  			const previousCwd = cwd;
-@@ -2377,11 +2423,12 @@ export async function runRootCommand(
+@@ -2401,11 +2451,12 @@ export async function runRootCommand(
  			);
  			options.authStorage = authStorage;
  			options.modelRegistry = modelRegistry;
@@ -496,7 +555,7 @@ index 2bfe0b7230..a79b98eab2 100644
  			options.deferSkillDescriptionCompression = isInteractive;
  			options.settings = settingsInstance;
  			options.telemetry = startupTelemetry;
-@@ -2494,8 +2541,11 @@ export async function runRootCommand(
+@@ -2518,8 +2569,11 @@ export async function runRootCommand(
  			// input; the first request waits for them instead. Kept eager when argv may
  			// carry extension flags (they must parse now), `--tools` must validate
  			// extension tools, or a restored transcript needs extension renderers.
@@ -508,7 +567,7 @@ index 2bfe0b7230..a79b98eab2 100644
  				parsedArgs.unrecognizedFlags.length === 0 &&
  				!parsedArgs.tools?.length &&
  				!(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || parsedArgs.restore || foreignSource);
-@@ -2861,33 +2911,94 @@ export async function runRootCommand(
+@@ -2885,32 +2939,93 @@ export async function runRootCommand(
  				try {
  					stopStartupWatchdog();
  					logger.endTiming();
@@ -533,7 +592,6 @@ index 2bfe0b7230..a79b98eab2 100644
 -						startupLease,
 -						initialArgs.goal,
 -						parsedArgs.restore ? () => restoreSession(session, { eventBus, subagentEventBus }) : undefined,
--						refreshScopedModelsAfterLogin,
 -					);
 +					const runTui = (runtime?: HarnessHostRuntime) => {
 +						// The desktop Host owns the UI. In a non-TTY launch, starting the
@@ -566,7 +624,6 @@ index 2bfe0b7230..a79b98eab2 100644
 +							startupLease,
 +							initialArgs.goal,
 +							parsedArgs.restore ? () => restoreSession(session, { eventBus, subagentEventBus }) : undefined,
-+							refreshScopedModelsAfterLogin,
 +							runtime?.services.loop,
 +							runtime?.services.modes,
 +							runtime?.waitForShutdown(),
@@ -627,7 +684,7 @@ index 2bfe0b7230..a79b98eab2 100644
  				// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.
  				stopStartupWatchdog();
  				// PI_TIMING prints the tree after the run; otherwise stop recording now so a
-@@ -2910,6 +3021,8 @@ export async function runRootCommand(
+@@ -2933,6 +3048,8 @@ export async function runRootCommand(
  				await disposeSessionQuietly(session);
  				stopThemeWatcher();
  				await postmortem.quit(exitCode);
@@ -650,7 +707,7 @@ index 82d451ee9b..537fb041e6 100644
  			return target.clearOverrideValue(settingById(write.id));
  		case "setModelRole":
 diff --git a/packages/coding-agent/test/main-host-classification.test.ts b/packages/coding-agent/test/main-host-classification.test.ts
-index 8548d5a093..050c57f656 100644
+index 8548d5a093..c6e34194ca 100644
 --- a/packages/coding-agent/test/main-host-classification.test.ts
 +++ b/packages/coding-agent/test/main-host-classification.test.ts
 @@ -91,3 +91,26 @@ it("standalone auth discovery routes by PI_CONFIG_FILES policy over main config"

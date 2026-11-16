@@ -66,6 +66,38 @@ async function sessionFixture() {
 	};
 }
 
+test("queued compaction waits for native compaction and then preserves the queued request", async () => {
+	const f = await sessionFixture();
+	let nativeCompacting = false;
+	let nativeCompactionChecks = 0;
+	spyOn(f.session, "waitForIdle").mockImplementation(async () => {
+		nativeCompacting = true;
+	});
+	Object.defineProperty(f.session, "isCompacting", {
+		configurable: true,
+		get: () => {
+			nativeCompactionChecks += 1;
+			return nativeCompacting;
+		},
+	});
+	const compact = spyOn(f.session, "compact").mockImplementation(async (_customInstructions, _options) => {
+		expect(nativeCompacting).toBe(false);
+		return { firstKeptEntryId: "native-tail", tokensBefore: 100, summary: "queued custom" };
+	});
+	try {
+		f.compaction.enqueue("custom instructions", { internalGuidance: "custom prelude" });
+		await waitFor(() => nativeCompactionChecks > 0);
+		expect(compact).not.toHaveBeenCalled();
+		nativeCompacting = false;
+		await waitFor(() => compact.mock.calls.length === 1);
+		await waitFor(() => !f.compaction.running);
+		expect(compact).toHaveBeenCalledWith("custom instructions", { internalGuidance: "custom prelude" });
+	} finally {
+		nativeCompacting = false;
+		await f.dispose();
+	}
+});
+
 test("queued compaction runs after yield and before later input, keeping image companions exactly once", async () => {
 	const f = await sessionFixture();
 	const yielded = Promise.withResolvers<void>(),
@@ -80,7 +112,7 @@ test("queued compaction runs after yield and before later input, keeping image c
 			await finishTurn.promise;
 		}
 	});
-	spyOn(f.session, "compact").mockImplementation(async () => {
+	spyOn(f.session, "compact").mockImplementation(async (_customInstructions, _options) => {
 		compacting.resolve();
 		await finishCompaction.promise;
 		return { summary: "kept", firstKeptEntryId: f.session.sessionManager.getLeafId()!, tokensBefore: 10 };

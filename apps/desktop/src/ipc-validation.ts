@@ -49,13 +49,13 @@ import {
   parseSubscriptionScope,
   ValidationError,
 } from "@juling-harness/transport-desktop";
-import type { OmpHarnessDesktopApi } from "@juling-harness/transport-desktop";
+import type { JulingHarnessDesktopApi } from "@juling-harness/transport-desktop";
 
 /**
  * Fixed window global under which the preload exposes the Desktop bridge.
- * The renderer reads `window.ompHarness` (never `ipcRenderer`).
+ * The renderer reads `window.julingHarness` (never `ipcRenderer`).
  */
-export const DESKTOP_BRIDGE_GLOBAL = "ompHarness" as const;
+export const DESKTOP_BRIDGE_GLOBAL = "julingHarness" as const;
 
 /**
  * Opaque per-subscription id. Chosen by the preload, bounded in length and
@@ -153,7 +153,7 @@ export interface DesktopIpcBridge {
 }
 
 /**
- * Build the renderer-facing `OmpHarnessDesktopApi` over a fixed-channel IPC
+ * Build the renderer-facing `JulingHarnessDesktopApi` over a fixed-channel IPC
  * sender. Every method maps 1:1 to a named `DESKTOP_IPC_CHANNELS` constant;
  * the returned object is frozen so the exposed surface cannot be widened at
  * runtime.
@@ -168,8 +168,8 @@ export interface DesktopIpcBridge {
  * gone) simply never delivers, and the matching cancellation resolves as an
  * idempotent no-op.
  */
-export function createDesktopIpcBridge(bridge: DesktopIpcBridge): OmpHarnessDesktopApi {
-  const api: OmpHarnessDesktopApi = {
+export function createDesktopIpcBridge(bridge: DesktopIpcBridge): JulingHarnessDesktopApi {
+  const api: JulingHarnessDesktopApi = {
     openContext: scope => bridge.invoke(DESKTOP_IPC_CHANNELS.openContext, scope) as Promise<string>,
     bootstrap(contextId?: string): Promise<ClientBootstrap> {
       return bridge.invoke(DESKTOP_IPC_CHANNELS.bootstrap, ...contextId ? [contextId] : []) as Promise<ClientBootstrap>;
@@ -241,5 +241,5 @@ export function createDesktopIpcBridge(bridge: DesktopIpcBridge): OmpHarnessDesk
     },
   };
 
-  return Object.freeze(api) as OmpHarnessDesktopApi;
+  return Object.freeze(api) as JulingHarnessDesktopApi;
 }

@@ -14,7 +14,7 @@ it("stores a token for the selected SSH target without reading it back", async (
     setMemoryCredential: vi.fn(async () => ({ ok: true as const, configured: true, syncSupported: true })),
     removeMemoryCredential: vi.fn(async () => ({ ok: true as const, configured: false, syncSupported: true })),
   };
-  vi.stubGlobal("ompHarnessChrome", api);
+  vi.stubGlobal("julingHarnessChrome", api);
   const snapshot = { "memory.backend": "hindsight", "hindsight.apiUrl": "https://memory.example" } as RuntimeSettingsReadModel;
   render(<PreviewModeProvider><I18nProvider forcedLanguage="zh"><MemoryCredentialPane targetId="server-a" runtime={{ preview: false, snapshot }} /></I18nProvider></PreviewModeProvider>);
   await waitFor(() => expect(api.memoryCredentialStatus).toHaveBeenCalledWith({ targetId: "server-a", url: "https://memory.example" }));
@@ -28,7 +28,7 @@ it("stores a token for the selected SSH target without reading it back", async (
 it("keeps preview credential changes local and hides demo notices when marks are off", () => {
   window.history.replaceState(null, "", "/?preview=1&marks=off");
   const save = vi.fn();
-  vi.stubGlobal("ompHarnessChrome", { setMemoryCredential: save });
+  vi.stubGlobal("julingHarnessChrome", { setMemoryCredential: save });
   render(<PreviewModeProvider><I18nProvider forcedLanguage="zh"><MemoryCredentialPane targetId={null} runtime={{ preview: true, previewValues: { "memory.backend": "hindsight" } }} /></I18nProvider></PreviewModeProvider>);
   fireEvent.change(screen.getByLabelText("Hindsight 令牌"), { target: { value: "example" } });
   fireEvent.click(screen.getByRole("button", { name: "保存令牌" }));

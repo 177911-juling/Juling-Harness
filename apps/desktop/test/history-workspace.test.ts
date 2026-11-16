@@ -31,7 +31,7 @@ async function writeSession(directory: string, name: string, sessionId: string, 
 
 test("workspace-scoped history stays isolated and rejects unknown workspace ids", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-history-workspaces-"));
-  const previousAgentDir = process.env.OMP_AGENT_DIR;
+  const previousAgentDir = process.env.JULING_AGENT_DIR;
   const agentDirectory = join(root, "agent");
   const sessionsDirectory = join(agentDirectory, "sessions", "project");
   const workspaceA = join(root, "workspace-a");
@@ -41,7 +41,7 @@ test("workspace-scoped history stays isolated and rejects unknown workspace ids"
   await mkdir(workspaceB);
   await writeSession(sessionsDirectory, "a", "session-a", workspaceA);
   await writeSession(sessionsDirectory, "b", "session-b", workspaceB);
-  process.env.OMP_AGENT_DIR = agentDirectory;
+  process.env.JULING_AGENT_DIR = agentDirectory;
 
   try {
     const catalog = createWorkspaceSessionCatalog(
@@ -62,8 +62,8 @@ test("workspace-scoped history stays isolated and rejects unknown workspace ids"
       (error: unknown) => error instanceof HarnessHostError && error.code === "INVALID_ARGUMENT",
     );
   } finally {
-    if (previousAgentDir === undefined) delete process.env.OMP_AGENT_DIR;
-    else process.env.OMP_AGENT_DIR = previousAgentDir;
+    if (previousAgentDir === undefined) delete process.env.JULING_AGENT_DIR;
+    else process.env.JULING_AGENT_DIR = previousAgentDir;
     await rm(root, { recursive: true, force: true });
   }
 });

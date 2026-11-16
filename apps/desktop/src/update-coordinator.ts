@@ -291,7 +291,7 @@ export class UpdateCoordinator {
       const previousVersion = (await this.installer.current())?.previousRuntimeVersion;
       if (!active || speaks(active.manifest.harnessProtocol) || !previousVersion) return;
       const previous = await verifySignedArtifact({ directory: join(this.options.runtimeRoot, "versions", previousVersion), layout: RUNTIME_ARTIFACT_LAYOUT, parseManifest: parseRuntimeInstallationManifest, requireCovered: m => ["runtime-manifest.json", m.entrypoint], trustedKeys: this.options.keys });
-      if (speaks(previous.manifest.harnessProtocol)) await this.installer.rollback();
+      if (speaks(previous.manifest.harnessProtocol)) await this.installer.rollback(this.options.activateOptions);
     } catch { /* The Host reports the incompatible Runtime; Diagnostics can still roll it back. */ }
   }
 

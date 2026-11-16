@@ -149,7 +149,7 @@ export async function openPcmCapture(options: PcmCaptureOptions): Promise<PcmCap
 export async function openLiveCapture(options: {
   deviceId?: string; signal: AbortSignal; attach(): Promise<string>; onFault(message: string): void;
 }): Promise<LiveCapture> {
-  const api = globalThis.ompHarnessChrome;
+  const api = globalThis.julingHarnessChrome;
   if (!api?.attachLiveAudio || !api.appendLiveAudio || !api.detachLiveAudio) throw new Error("Desktop Live audio is unavailable");
   let audioId: string | undefined;
   const detach = () => { if (audioId) void api.detachLiveAudio!({ audioId }).catch(() => {}); };

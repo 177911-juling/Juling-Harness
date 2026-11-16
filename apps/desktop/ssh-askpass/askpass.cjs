@@ -1,6 +1,6 @@
 const { connect } = require("node:net");
-const endpoint = process.env.OMP_SSH_ASKPASS_ENDPOINT;
-const ticket = process.env.OMP_SSH_ASKPASS_TICKET;
+const endpoint = process.env.JULING_SSH_ASKPASS_ENDPOINT ?? process.env.OMP_SSH_ASKPASS_ENDPOINT;
+const ticket = process.env.JULING_SSH_ASKPASS_TICKET ?? process.env.OMP_SSH_ASKPASS_TICKET;
 const prompt = process.argv[2];
 if (!endpoint || !ticket || !prompt || process.env.SSH_ASKPASS_PROMPT === "confirm") process.exit(1);
 const socket = connect(endpoint);

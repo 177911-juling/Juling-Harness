@@ -11,7 +11,7 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
   {
     kind: "think", name: "Think", status: "done", dur: "8s",
     preview: "先按 TUI 分型画每张展开卡，Plan 不再单独占一行。",
-    full: "对话只保留文本块和工具批次。\nThinking 进链，限高往上滚。\n每张工具卡对齐 OMP 原生 renderer，没有 renderer 的走 Args + Output 默认卡。",
+    full: "对话只保留文本块和工具批次。\nThinking 进链，限高往上滚。\n每张工具卡对齐 Juling 原生 renderer，没有 renderer 的走 Args + Output 默认卡。",
   },
   {
     kind: "read", name: "Read", target: "src/tools/builtin-names.ts", status: "done", dur: "0.2s",
@@ -33,7 +33,7 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
   },
   {
     kind: "bash", name: "Bash", target: "npm run typecheck", status: "done", dur: "11.2s",
-    cmd: "npm run typecheck", cwd: demoPath("omp-web"),
+    cmd: "npm run typecheck", cwd: demoPath("juling-web"),
     output: [["> tsc --noEmit", "dim"], ["", ""], ["0 errors, 0 warnings", "ok"]], exit: 0,
     hasExecutionTrace: true,
     meta: { minimized: { filter: "tsc", inputBytes: 18240, outputBytes: 94, artifactId: "preview-typecheck-output" } },
@@ -78,8 +78,8 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
     answer: "修复它",
   },
   {
-    kind: "debug", name: "Debug", target: "launch · omp-web", status: "done", dur: "3.4s",
-    action: "launch", program: "bin/omp-web.js",
+    kind: "debug", name: "Debug", target: "launch · juling-web", status: "done", dur: "3.4s",
+    action: "launch", program: "bin/juling-web.js",
     snapshot: "paused at MermaidBlock.tsx:147",
     output: ["Debugger attached", "Breakpoint hit: TS2322 site"],
   },
@@ -111,7 +111,7 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
   },
   {
     kind: "browser", name: "Browser", target: "run · waitForSelector", status: "done", dur: "1.9s",
-    action: "run", tab: "omp-web", url: "http://127.0.0.1:30141",
+    action: "run", tab: "juling-web", url: "http://127.0.0.1:30141",
     code: "await page.waitForSelector(\".mermaid\")",
     output: "ok · 1 node",
   },
@@ -216,17 +216,17 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
   },
   {
     kind: "retain", name: "Retain", status: "done", dur: "0.3s",
-    stored: 2, items: ["omp-web 会话目录是 ~/.omp/agent/sessions/", "代码主题走 useCodeTheme"],
+    stored: 2, items: ["juling-web 会话目录是 ~/.juling/agent/sessions/", "代码主题走 useCodeTheme"],
   },
   {
-    kind: "recall", name: "Recall", target: "omp-web 路径适配", status: "done", dur: "0.4s",
-    query: "omp-web 路径适配", count: 1,
-    excerpts: ["会话、models.json、config.yml 都在 ~/.omp/agent/ 下，不要写回 pi-web 路径。"],
+    kind: "recall", name: "Recall", target: "juling-web 路径适配", status: "done", dur: "0.4s",
+    query: "juling-web 路径适配", count: 1,
+    excerpts: ["会话、models.json、config.yml 都在 ~/.juling/agent/ 下，不要写回 pi-web 路径。"],
   },
   {
     kind: "reflect", name: "Reflect", target: "这次同步该保留什么？", status: "done", dur: "0.6s",
     query: "这次同步该保留什么？",
-    answer: "保留包名、CLI 名、~/.omp/agent/ 路径和 useCodeTheme；吸纳 DirectoryPicker 与 loopback 监听。",
+    answer: "保留包名、CLI 名、~/.juling/agent/ 路径和 useCodeTheme；吸纳 DirectoryPicker 与 loopback 监听。",
   },
   {
     kind: "memory_edit", name: "Memory Edit", target: "update mem_02", status: "done", dur: "0.2s",
@@ -241,7 +241,7 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
   {
     kind: "manage_skill", name: "Manage Skill", target: "create upstream-sync", status: "done", dur: "0.5s",
     args: { action: "create", name: "upstream-sync" },
-    output: "skill created at .omp/skills/upstream-sync/SKILL.md",
+    output: "skill created at .juling/skills/upstream-sync/SKILL.md",
   },
   {
     kind: "yield", name: "Submit Result", target: "type: result", status: "done", dur: "0.1s",
@@ -255,7 +255,7 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
   },
   {
     kind: "generate_image", name: "GenerateImage", target: "graft 演进链示意", status: "done", dur: "5.1s",
-    subject: "git replace --graft 把 omp-web 接到 pi-web v0.8.0",
+    subject: "git replace --graft 把 juling-web 接到 pi-web v0.8.0",
     images: 1, output: "image attached · 1024×576",
   },
   {

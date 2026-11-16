@@ -1,5 +1,6 @@
 export type ContextCategoryId =
 	| "system-prompt"
+	| "instruction-files"
 	| "skills"
 	| "built-in-tools"
 	| "custom-tools"

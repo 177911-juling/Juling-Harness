@@ -36,7 +36,7 @@ const TOOL_COPY: Partial<Record<PanelId, ToolCopy>> = {
   problems: { name: ["问题", "Problems"], detail: ["诊断与报错", "Diagnostics and errors"], tint: "rose" },
   tests: { name: ["测试", "Tests"], detail: ["测试运行结果", "Test runs"], tint: "green" },
   output: { name: ["输出", "Output"], detail: ["进程输出", "Process output"], tint: "cyan" },
-  logs: { name: ["OMP 日志", "OMP logs"], detail: ["Runtime 日志", "Runtime logs"], tint: "orange" },
+  logs: { name: ["Juling 日志", "Juling logs"], detail: ["Runtime 日志", "Runtime logs"], tint: "orange" },
   pvlogs: { name: ["预览日志", "Preview logs"], detail: ["预览服务日志", "Preview server logs"], tint: "blue" },
 };
 /** 大卡片：最常打开的几样；其余按「新建标签」菜单的分类顺序排成小标签。 */

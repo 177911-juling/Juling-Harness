@@ -65,7 +65,7 @@ export function AgentAccountRules({ agent, state, models, disabled = false, onMa
             const regionId = `${id}-${index}`;
             const description = mode === "selected" ? (zh ? "仅使用勾选的 OAuth 账号；不可用时不会借用其他账号或 API Key。" : "Only checked OAuth accounts may be used. Other accounts and API keys are excluded.")
               : mode === "blocked" ? (zh ? "此子代理不能使用该提供商的账号或 API Key。其他提供商仍按各自规则执行。" : "This agent cannot use this provider's accounts or API keys. Other providers keep their own rules.")
-                : (zh ? "由 OMP 按默认或继承的账号规则选择，也可使用已配置的 API Key。" : "OMP follows its default or inherited account rules, including configured API keys.");
+                : (zh ? "由 Juling 按默认或继承的账号规则选择，也可使用已配置的 API Key。" : "Juling follows its default or inherited account rules, including configured API keys.");
             return <div className={`sa-account-provider${isOpen ? " is-open" : ""}`} key={provider}>
               <button type="button" className="sa-account-provider-head" aria-expanded={isOpen} aria-controls={regionId} onClick={() => setExpanded(isOpen ? "" : provider)}>
                 <span className="sa-provider-symbol">{hasBrand(provider) ? <Brand id={provider} /> : <Icon name="server" />}</span>

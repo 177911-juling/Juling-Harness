@@ -270,9 +270,14 @@ test("worktree removal preserves files changed after review and startup policy f
 test("message suggestions are opt-in, cancel when a draft appears, and still account for a late reply", async () => {
 	const settings = Settings.isolated();
 	const reply = Promise.withResolvers<{ replyText: string; assistantMessage: AssistantMessage }>();
-	const usage = mock(() => {}),
+	const usageSeen = Promise.withResolvers<void>();
+	const usage = mock(() => usageSeen.resolve()),
 		publish = mock(() => {}),
-		run = mock(() => reply.promise);
+		run = mock(async (options: { onUsage?: (message: AssistantMessage) => void }) => {
+			const result = await reply.promise;
+			options.onUsage?.(result.assistantMessage);
+			return result;
+		});
 	const assistant = {
 		role: "assistant",
 		content: [{ type: "text", text: "Completed" }],
@@ -324,8 +329,7 @@ test("message suggestions are opt-in, cancel when a draft appears, and still acc
 				stopReason: "stop",
 			},
 		});
-		await Promise.resolve();
-		await Promise.resolve();
+		await usageSeen.promise;
 		expect(publish).not.toHaveBeenCalled();
 		expect(usage).toHaveBeenCalledTimes(1);
 	} finally {

@@ -93,7 +93,7 @@ it("keeps old Runtime and preview title display free of real queries", () => {
       <PreviewModeProvider switchEnabled>
         <Panel client={client} id="s" />
         <SessionTitleMark
-          row={previewSessionTitle("s", "跟踪上游 pi-web 更新到 omp-web")}
+          row={previewSessionTitle("s", "跟踪上游 pi-web 更新到 juling-web")}
           title="Changed title"
         />
       </PreviewModeProvider>

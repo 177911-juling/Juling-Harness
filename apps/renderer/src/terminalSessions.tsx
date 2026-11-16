@@ -5,7 +5,7 @@ import { utf8ByteLength } from "@juling-harness/client-contract";
 import { TerminalGraphicsDecoder, type TerminalGraphic } from "./terminalGraphics";
 import type { TerminalCommand } from "../../desktop/src/terminal-shared";
 
-type Api = NonNullable<typeof globalThis.ompHarnessTerminal>;
+type Api = NonNullable<typeof globalThis.julingHarnessTerminal>;
 export interface TerminalSession {
   readonly conversationId?: string;
   readonly targetId: string | null;
@@ -388,7 +388,7 @@ export class TerminalSessions {
 const Context = createContext<TerminalSessions | undefined>(undefined);
 export const terminalOwnerKey = (targetId: string | null, workspaceId?: string, sessionId?: string) => JSON.stringify([targetId, workspaceId ?? null, sessionId ?? null]);
 export function TerminalSessionsProvider({ children }: { children: ReactNode }) {
-  const store = useMemo(() => new TerminalSessions(globalThis.ompHarnessTerminal), []);
+  const store = useMemo(() => new TerminalSessions(globalThis.julingHarnessTerminal), []);
   useEffect(() => () => store.close(), [store]);
   return <Context.Provider value={store}>{children}</Context.Provider>;
 }

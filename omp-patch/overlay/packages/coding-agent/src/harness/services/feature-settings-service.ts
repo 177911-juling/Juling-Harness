@@ -8,13 +8,7 @@ import {
 	cfgDisplayAdvisorCollapsedLines,
 } from "../../modes/settings";
 import { cfgTitleRefreshAfterPrompts } from "../../utils/title-settings";
-import {
-	cfgTaskFile,
-	cfgTaskPerCallModel,
-	cfgTaskPerCallModelAllow,
-	cfgTaskWorkerThreads,
-	cfgOvnfsPath,
-} from "../../task/settings";
+import { cfgTaskPerCallModel, cfgTaskPerCallModelAllow, cfgTaskWorkerThreads, cfgOvnfsPath } from "../../task/settings";
 import {
 	cfgPrewalkFrom,
 	cfgPrewalkInto,
@@ -100,7 +94,6 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"display.shellVisualization": cfgDisplayShellVisualization,
 	"title.refreshAfterPrompts": cfgTitleRefreshAfterPrompts,
 	"display.advisorCollapsedLines": cfgDisplayAdvisorCollapsedLines,
-	"task.file": cfgTaskFile,
 	"task.perCallModel": cfgTaskPerCallModel,
 	"task.perCallModelAllow": cfgTaskPerCallModelAllow,
 	"task.workerThreads": cfgTaskWorkerThreads,

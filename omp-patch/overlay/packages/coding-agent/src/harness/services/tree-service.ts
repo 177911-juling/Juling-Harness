@@ -1,13 +1,10 @@
-import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { shiftImageMarkers } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
-import { renderAttachmentSourceNotice } from "../../session/attachment-source-notice";
 import { expandModelMentionTags, type ModelMention } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { AgentSession } from "../../session/agent-session";
 import type { SessionTreeNode } from "../../session/session-entries";
-import { formatQuestionResult, formatSingleQuestionResponse, type AskToolInput } from "../../tools/ask";
-import { mapAskDialogValue } from "../remote-extension-ui";
-import type { AskToolDetails, QuestionResult } from "@oh-my-pi/pi-tui/tools/ask";
+import { reanswerAskForm } from "../../tools/ask";
+import { HarnessRemoteExtensionUiContext, type HarnessUiGateway } from "../remote-extension-ui";
+import type { AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
 import type { HarnessInteractionPort } from "./interaction-port";
 
 const EDITOR_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -121,10 +118,10 @@ export class HarnessTreeService {
 			if (this.interaction === undefined) {
 				throw new HarnessTreeError("INTERACTION_REQUIRED", "Tree navigation requires an Ask response", {
 					toolCallId: result.reopenAsk.toolCallId,
-					questions: structuredClone(result.reopenAsk.questions),
+					html: result.reopenAsk.html,
 				});
 			}
-			const reanswer = await this.#reanswerAsk(commandId, result.reopenAsk.questions);
+			const reanswer = await this.#reanswerAsk(commandId, result.reopenAsk.html);
 			if (reanswer === undefined) {
 				return {
 					cancelled: true,
@@ -175,82 +172,8 @@ export class HarnessTreeService {
 		};
 	}
 
-	async #reanswerAsk(
-		commandId: string,
-		questions: AskToolInput["questions"],
-	): Promise<AgentToolResult<AskToolDetails> | undefined> {
-		const payload = await this.interaction!.ask({
-			commandId,
-			title: "Re-answer",
-			acceptImages: true,
-			questions: questions.map(question => ({
-				id: question.id,
-				question: question.question,
-				options: question.options.map((option, index) => ({ id: `option:${index}`, ...option })),
-				multiple: question.multi === true,
-			})),
-		});
-		if (payload === undefined) return undefined;
-		const mapped = mapAskDialogValue(payload, questions, true);
-		if (mapped.kind !== "submit") return undefined;
-		const images: ImageContent[] = [];
-		const results: QuestionResult[] = mapped.results.map(answer => {
-			const customOffset = images.length;
-			images.push(...(answer.customInputImages ?? []));
-			const noteOffset = images.length;
-			images.push(...(answer.noteImages ?? []));
-			return {
-				id: answer.id,
-				question: answer.question,
-				options: answer.options,
-				multi: answer.multi,
-				selectedOptions: answer.selectedOptions,
-				...(answer.customInput === undefined
-					? {}
-					: {
-							customInput: shiftImageMarkers(
-								answer.customInput,
-								customOffset,
-								answer.customInputImages?.length ?? 0,
-							),
-						}),
-				...(answer.note === undefined
-					? {}
-					: { note: shiftImageMarkers(answer.note, noteOffset, answer.noteImages?.length ?? 0) }),
-				...(answer.noteOption === undefined ? {} : { noteOption: answer.noteOption }),
-			};
-		});
-		if (
-			results.length === 1 &&
-			!results[0]!.multi &&
-			!results[0]!.selectedOptions.length &&
-			results[0]!.customInput === undefined &&
-			!images.length
-		)
-			return undefined;
-		const imageBlocks: AgentToolResult<AskToolDetails>["content"] = images.flatMap((image, index) => {
-			const notice = renderAttachmentSourceNotice(image, index + 1, { askAnswer: true });
-			return notice ? [{ type: "text" as const, text: notice.content }, image] : [image];
-		});
-		if (results.length === 1) {
-			const answer = results[0]!;
-			const details: AskToolDetails = {
-				question: answer.question,
-				options: answer.options,
-				multi: answer.multi,
-				selectedOptions: answer.selectedOptions,
-				...(answer.customInput === undefined ? {} : { customInput: answer.customInput }),
-				...(answer.note ? { note: answer.note } : {}),
-				...(answer.noteOption ? { noteOption: answer.noteOption } : {}),
-			};
-			return { content: [{ type: "text", text: formatSingleQuestionResponse(answer) }, ...imageBlocks], details };
-		}
-		return {
-			content: [
-				{ type: "text", text: `User answers:\n${results.map(formatQuestionResult).join("\n")}` },
-				...imageBlocks,
-			],
-			details: { results },
-		};
+	async #reanswerAsk(commandId: string, html: string): Promise<AgentToolResult<AskToolDetails> | undefined> {
+		const ui = new HarnessRemoteExtensionUiContext(this.interaction! as HarnessUiGateway, commandId);
+		return reanswerAskForm(ui, html);
 	}
 }

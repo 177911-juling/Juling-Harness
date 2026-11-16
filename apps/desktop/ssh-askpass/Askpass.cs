@@ -12,8 +12,8 @@ internal static class Askpass
         byte[] response = null;
         try
         {
-            string endpoint = Environment.GetEnvironmentVariable("OMP_SSH_ASKPASS_ENDPOINT");
-            string ticket = Environment.GetEnvironmentVariable("OMP_SSH_ASKPASS_TICKET");
+            string endpoint = Environment.GetEnvironmentVariable("JULING_SSH_ASKPASS_ENDPOINT") ?? Environment.GetEnvironmentVariable("OMP_SSH_ASKPASS_ENDPOINT");
+            string ticket = Environment.GetEnvironmentVariable("JULING_SSH_ASKPASS_TICKET") ?? Environment.GetEnvironmentVariable("OMP_SSH_ASKPASS_TICKET");
             if (String.IsNullOrEmpty(endpoint) || String.IsNullOrEmpty(ticket) || args.Length != 1 || Environment.GetEnvironmentVariable("SSH_ASKPASS_PROMPT") == "confirm") return 1;
             const string prefix = @"\\.\pipe\";
             if (!endpoint.StartsWith(prefix, StringComparison.Ordinal)) return 1;

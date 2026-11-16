@@ -1003,7 +1003,7 @@ export function SubagentsPanel({
                       <b>{agent.name}</b>
                       <span className={`chip ${SOURCE_CHIP[agent.source]} xs`}>{sourceLabel(agent.source, t)}</span>
                       {agent.disabled ? <span className="chip gray xs">{t("modelConfig.disabled")}</span> : null}
-                      {agent.promptPacked ? <span className="chip gray xs">{t("skills.scopeBuiltin")}</span> : null}
+                      {agent.promptPacked ? <span className="chip gray xs">{zh ? "已打包提示词" : "Prompt packed"}</span> : null}
                     </div>
                     <div className="sa-card-desc">{agent.description}</div>
                     <div className="sa-card-meta">

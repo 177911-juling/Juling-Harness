@@ -99,7 +99,7 @@ export function subscribeChannel<T>(
   };
 }
 
-export function createOmpHarnessChromeApi(ipcRenderer: IpcRendererLike, webUtils?: WebUtilsLike, platform: string = process.platform) {
+export function createJulingHarnessChromeApi(ipcRenderer: IpcRendererLike, webUtils?: WebUtilsLike, platform: string = process.platform) {
   return Object.freeze({
     files: Object.freeze<FileViewerDesktopApi>({
       open: input => ipcRenderer.invoke(FILE_VIEWER_CHANNELS.open, input) as ReturnType<FileViewerDesktopApi["open"]>,
@@ -320,4 +320,4 @@ export function createOmpHarnessChromeApi(ipcRenderer: IpcRendererLike, webUtils
   });
 }
 
-export type OmpHarnessChromeApi = ReturnType<typeof createOmpHarnessChromeApi>;
+export type JulingHarnessChromeApi = ReturnType<typeof createJulingHarnessChromeApi>;

@@ -1,8 +1,8 @@
 /**
  * P1 preload bridge security tests (FRONTEND_INTEGRATION.md §9.1).
  *
- * The sandboxed preload exposes exactly one frozen `OmpHarnessDesktopApi`
- * object (window.ompHarness) built by `createDesktopIpcBridge` over a
+ * The sandboxed preload exposes exactly one frozen `JulingHarnessDesktopApi`
+ * object (window.julingHarness) built by `createDesktopIpcBridge` over a
  * fixed-channel sender. These tests exercise the bridge headlessly with a
  * fake sender: no Electron import, no display. They defend the preload's
  * hard guarantees — named methods only (no generic invoke), fixed channels
@@ -22,8 +22,8 @@ import {
   isSubscriptionEventEnvelope,
   type DesktopIpcBridge,
 } from "../src/ipc-validation.js";
-import type { OmpHarnessDesktopApi } from "@juling-harness/transport-desktop";
-import { createOmpHarnessChromeApi } from "../src/chrome-api.js";
+import type { JulingHarnessDesktopApi } from "@juling-harness/transport-desktop";
+import { createJulingHarnessChromeApi } from "../src/chrome-api.js";
 
 interface RecordedInvoke {
   readonly channel: string;
@@ -134,7 +134,7 @@ describe("createDesktopIpcBridge: fixed named surface, no generic invoke", () =>
   });
 
   test("exposes the bridge under the documented window global", () => {
-    assert.equal(DESKTOP_BRIDGE_GLOBAL, "ompHarness");
+    assert.equal(DESKTOP_BRIDGE_GLOBAL, "julingHarness");
   });
 });
 
@@ -159,7 +159,7 @@ describe("createDesktopIpcBridge: named methods route to fixed channels", () => 
       input: { threadId: "t-1" as const },
       idempotencyKey: "idem-1" as const,
       requestId: "req-1" as const,
-    } as unknown as Parameters<OmpHarnessDesktopApi["command"]>[0];
+    } as unknown as Parameters<JulingHarnessDesktopApi["command"]>[0];
     await api.query(query);
     await api.command(command);
     assert.deepEqual(bridge.invokes, [
@@ -484,14 +484,14 @@ describe("createDesktopIpcBridge: envelope id limit is the shared protocol limit
   });
 });
 
-describe("createOmpHarnessChromeApi: fixed named surface, frozen object", () => {
+describe("createJulingHarnessChromeApi: fixed named surface, frozen object", () => {
   test("exposes exactly the expected named methods and is frozen", () => {
     const fakeIpc = {
       invoke: async () => undefined,
       on: () => {},
       removeListener: () => {},
     };
-    const chromeApi = createOmpHarnessChromeApi(fakeIpc);
+    const chromeApi = createJulingHarnessChromeApi(fakeIpc);
     assert.ok(Object.isFrozen(chromeApi));
 
     const expectedMethods = [
@@ -559,9 +559,9 @@ describe("createOmpHarnessChromeApi: fixed named surface, frozen object", () => 
 
   test("the platform is fixed at preload time and anything but Windows or macOS reads as linux", () => {
     const fakeIpc = { invoke: async () => undefined, on: () => {}, removeListener: () => {} };
-    assert.equal(createOmpHarnessChromeApi(fakeIpc, undefined, "darwin").platform, "darwin");
-    assert.equal(createOmpHarnessChromeApi(fakeIpc, undefined, "win32").platform, "win32");
-    assert.equal(createOmpHarnessChromeApi(fakeIpc, undefined, "freebsd").platform, "linux");
+    assert.equal(createJulingHarnessChromeApi(fakeIpc, undefined, "darwin").platform, "darwin");
+    assert.equal(createJulingHarnessChromeApi(fakeIpc, undefined, "win32").platform, "win32");
+    assert.equal(createJulingHarnessChromeApi(fakeIpc, undefined, "freebsd").platform, "linux");
   });
 
   test("menu commands arrive only from the fixed channel and only when allowlisted", () => {
@@ -572,7 +572,7 @@ describe("createOmpHarnessChromeApi: fixed named surface, frozen object", () => 
       removeListener: (channel: string) => { listeners.delete(channel); },
     };
     const received: string[] = [];
-    const unsubscribe = createOmpHarnessChromeApi(fakeIpc, undefined, "darwin").onMenuCommand((command) => received.push(command));
+    const unsubscribe = createJulingHarnessChromeApi(fakeIpc, undefined, "darwin").onMenuCommand((command) => received.push(command));
     const deliver = listeners.get("juling-harness:desktop:menu-command");
     assert.ok(deliver);
     deliver({}, "view.commandPalette");

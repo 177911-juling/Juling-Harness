@@ -12,8 +12,8 @@ async function withTempHome<T>(run: (home: string, cwd: string) => Promise<T>): 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-mcp-"));
   const home = path.join(root, "home");
   const cwd = path.join(root, "project");
-  await fs.mkdir(path.join(home, ".omp", "agent"), { recursive: true });
-  await fs.mkdir(path.join(cwd, ".omp"), { recursive: true });
+  await fs.mkdir(path.join(home, ".juling", "agent"), { recursive: true });
+  await fs.mkdir(path.join(cwd, ".juling"), { recursive: true });
   try {
     return await run(home, cwd);
   } finally {
@@ -35,7 +35,7 @@ async function withTempHome<T>(run: (home: string, cwd: string) => Promise<T>): 
 describe("createOmpMcpService", () => {
   test("instructions defaults on and saves only the effective native source while preserving secrets and enablement", async () => {
     await withTempHome(async (home,cwd) => {
-      const userFile=path.join(home,".omp","agent","mcp.json");const projectFile=path.join(cwd,".omp","mcp.json");
+      const userFile=path.join(home,".juling","agent","mcp.json");const projectFile=path.join(cwd,".juling","mcp.json");
       const userConfig={mcpServers:{same:{command:"node",instructions:true,env:{TOKEN:"synthetic"}}}};
       const projectConfig={mcpServers:{same:{command:"node",enabled:false,args:["server.js"],env:{TOKEN:"synthetic-project"}}},disabledServers:["unrelated"]};
       await fs.writeFile(userFile,JSON.stringify(userConfig));await fs.writeFile(projectFile,JSON.stringify(projectConfig));
@@ -53,7 +53,7 @@ describe("createOmpMcpService", () => {
   test("lists user and project servers without leaking secrets", async () => {
     await withTempHome(async (home, cwd) => {
       await fs.writeFile(
-        path.join(home, ".omp", "agent", "mcp.json"),
+        path.join(home, ".juling", "agent", "mcp.json"),
         JSON.stringify({
           mcpServers: {
             filesystem: {
@@ -67,7 +67,7 @@ describe("createOmpMcpService", () => {
         "utf8",
       );
       await fs.writeFile(
-        path.join(cwd, ".omp", "mcp.json"),
+        path.join(cwd, ".juling", "mcp.json"),
         JSON.stringify({
           mcpServers: {
             github: { type: "http", url: "https://example.internal/mcp", headers: { Authorization: "Bearer x" } },
@@ -110,7 +110,7 @@ describe("createOmpMcpService", () => {
   test("setEnabled disables and re-enables via mcp.json + denylist", async () => {
     await withTempHome(async (home, cwd) => {
       await fs.writeFile(
-        path.join(home, ".omp", "agent", "mcp.json"),
+        path.join(home, ".juling", "agent", "mcp.json"),
         JSON.stringify({
           mcpServers: {
             filesystem: { command: "npx", args: ["fs"] },
@@ -205,7 +205,7 @@ args = []
       assert.equal(off.applied, true);
       const after = await service.get();
       assert.equal(after.servers.find((s) => s.name === "blender")?.enabled, false);
-      const native = JSON.parse(await fs.readFile(path.join(home, ".omp", "agent", "mcp.json"), "utf8")) as {
+      const native = JSON.parse(await fs.readFile(path.join(home, ".juling", "agent", "mcp.json"), "utf8")) as {
         disabledServers?: string[];
       };
       assert.ok(native.disabledServers?.includes("blender"));
@@ -215,7 +215,7 @@ args = []
   test("discovers native user .mcp.json", async () => {
     await withTempHome(async (home, cwd) => {
       await fs.writeFile(
-        path.join(home, ".omp", "agent", ".mcp.json"),
+        path.join(home, ".juling", "agent", ".mcp.json"),
         JSON.stringify({ mcpServers: { extra: { command: "extra-mcp" } } }),
         "utf8",
       );
@@ -289,7 +289,7 @@ args = []
         JSON.stringify({ mcpServers: { pack_tool: { command: "pack-mcp" } } }),
         "utf8",
       );
-      await fs.writeFile(path.join(cwd, ".omp", "settings.json"), JSON.stringify({ extensions: [ext] }), "utf8");
+      await fs.writeFile(path.join(cwd, ".juling", "settings.json"), JSON.stringify({ extensions: [ext] }), "utf8");
       const model = await createOmpMcpService({ home, getCwd: () => cwd, now: () => NOW }).get();
       assert.equal(model.servers[0]?.name, "pack_tool");
       assert.equal(model.servers[0]?.sourceLabel, "插件");
@@ -316,7 +316,7 @@ args = []
         }),
         "utf8",
       );
-      await fs.writeFile(path.join(cwd, ".omp", "settings.json"), JSON.stringify({ extensions: [ext] }), "utf8");
+      await fs.writeFile(path.join(cwd, ".juling", "settings.json"), JSON.stringify({ extensions: [ext] }), "utf8");
       const model = await createOmpMcpService({ home, getCwd: () => cwd, now: () => NOW }).get();
       assert.equal(model.servers[0]?.name, "weather:lookup");
       assert.equal(model.servers[0]?.sourceLabel, "Agent Plugin");
@@ -351,7 +351,7 @@ args = []
   test("native project config shadows lower-priority mcp-json of the same name", async () => {
     await withTempHome(async (home, cwd) => {
       await fs.writeFile(
-        path.join(cwd, ".omp", "mcp.json"),
+        path.join(cwd, ".juling", "mcp.json"),
         JSON.stringify({ mcpServers: { shared: { command: "native-one" } } }),
         "utf8",
       );
@@ -407,7 +407,7 @@ describe("mcp probe / refresh / logs", () => {
       const script = path.join(cwd, "fake-mcp.mjs");
       await fs.writeFile(script, FAKE_MCP_SERVER, "utf8");
       await fs.writeFile(
-        path.join(home, ".omp", "agent", "mcp.json"),
+        path.join(home, ".juling", "agent", "mcp.json"),
         JSON.stringify({
           mcpServers: {
             filesystem: {
@@ -450,7 +450,7 @@ describe("mcp probe / refresh / logs", () => {
   test("failed probe and shadowed servers stay honest", async () => {
     await withTempHome(async (home, cwd) => {
       await fs.writeFile(
-        path.join(home, ".omp", "agent", "mcp.json"),
+        path.join(home, ".juling", "agent", "mcp.json"),
         JSON.stringify({
           mcpServers: {
             shared: { command: "__omp_missing_mcp_bin__" },
@@ -460,7 +460,7 @@ describe("mcp probe / refresh / logs", () => {
         "utf8",
       );
       await fs.writeFile(
-        path.join(cwd, ".omp", "mcp.json"),
+        path.join(cwd, ".juling", "mcp.json"),
         JSON.stringify({
           mcpServers: {
             shared: { command: "__omp_project_winner__" },
@@ -489,6 +489,45 @@ describe("mcp probe / refresh / logs", () => {
       const refreshed = await service.refresh({});
       assert.equal(refreshed.applied, true);
       assert.equal(refreshed.runtimeEffect, "new-session");
+    });
+  });
+
+  test("reads the pre-rebrand .omp tree read-only and never writes it", async () => {
+    await withTempHome(async (home, cwd) => {
+      const legacyAgentDir = path.join(home, ".omp", "agent");
+      const legacyProjectDir = path.join(cwd, ".omp");
+      await fs.mkdir(legacyAgentDir, { recursive: true });
+      await fs.mkdir(legacyProjectDir, { recursive: true });
+      const legacyUserFile = path.join(legacyAgentDir, "mcp.json");
+      const legacyProjectFile = path.join(legacyProjectDir, "mcp.json");
+      const legacyUser = { mcpServers: { "legacy-user": { command: "node" } } };
+      const legacyProject = { mcpServers: { "legacy-project": { command: "node" } } };
+      await fs.writeFile(legacyUserFile, JSON.stringify(legacyUser), "utf8");
+      await fs.writeFile(legacyProjectFile, JSON.stringify(legacyProject), "utf8");
+
+      const service = createOmpMcpService({ home, getCwd: () => cwd, now: () => NOW });
+      const model = await service.get();
+      assert.deepEqual(model.servers.map((server) => server.name).sort(), ["legacy-project", "legacy-user"]);
+      // Legacy entries are inventory only: their instructions stay read-only.
+      await assert.rejects(
+        async () => service.setInstructions!({ name: "legacy-user", scope: "user", enabled: false }),
+        (error: unknown) => {
+          const code = error !== null && typeof error === "object" && "code" in error ? error.code : undefined;
+          return code === "CAPABILITY_UNAVAILABLE";
+        },
+      );
+
+      // Toggling writes the canonical tree; the legacy files stay byte-identical.
+      await service.setEnabled({ name: "legacy-user", enabled: false });
+      assert.deepEqual(JSON.parse(await fs.readFile(legacyUserFile, "utf8")), legacyUser);
+      assert.deepEqual(JSON.parse(await fs.readFile(legacyProjectFile, "utf8")), legacyProject);
+      // Test fixture read: the adapter owns the file shape, asserted on the next line.
+      const canonical = JSON.parse(
+        await fs.readFile(path.join(home, ".juling", "agent", "mcp.json"), "utf8"),
+      ) as { disabledServers?: string[] };
+      assert.deepEqual(canonical.disabledServers, ["legacy-user"]);
+      const after = await service.get();
+      assert.equal(after.servers.find((server) => server.name === "legacy-user")?.enabled, false);
     });
   });
 });

@@ -282,8 +282,8 @@ export function NativeMaintenancePane({
           </h2>
           <p>
             {zh
-              ? "执行 OMP 原生导出与清理，保留实际结果和失败原因。"
-              : "Run native OMP exports and cleanup with their actual results and errors."}
+              ? "执行 Juling 原生导出与清理，保留实际结果和失败原因。"
+              : "Run native Juling exports and cleanup with their actual results and errors."}
           </p>
         </div>
         <button
@@ -348,7 +348,7 @@ export function NativeMaintenancePane({
             </span>
             <button
               className="btn small outline"
-              disabled={!preview && !globalThis.ompHarnessChrome?.exportArtifact}
+              disabled={!preview && !globalThis.julingHarnessChrome?.exportArtifact}
               onClick={() => {
                 if (preview) {
                   if (marks)
@@ -359,7 +359,7 @@ export function NativeMaintenancePane({
                     );
                   return;
                 }
-                void globalThis.ompHarnessChrome!.exportArtifact!({
+                void globalThis.julingHarnessChrome!.exportArtifact!({
                   artifactId: exportState.result!.asset.artifactId,
                 })
                   .then((result) => {
@@ -383,8 +383,8 @@ export function NativeMaintenancePane({
             <h3>{zh ? "清理预览" : "Cleanup preview"}</h3>
             <p>
               {zh
-                ? "范围为本机 OMP 数据目录，与独立 CLI 共用。先查看原生扫描结果，再确认执行。"
-                : "Applies to the local OMP data directory shared with the CLI. Review the native scan before applying."}
+                ? "范围为本机 Juling 数据目录，与独立 CLI 共用。先查看原生扫描结果，再确认执行。"
+                : "Applies to the local Juling data directory shared with the CLI. Review the native scan before applying."}
             </p>
           </div>
           <button

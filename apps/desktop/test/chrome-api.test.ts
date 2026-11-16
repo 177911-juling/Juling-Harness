@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createOmpHarnessChromeApi, type IpcRendererLike } from "../src/chrome-api.js";
+import { createJulingHarnessChromeApi, type IpcRendererLike } from "../src/chrome-api.js";
 import { DICTATION_AUDIO_CHANNELS, type DictationDesktopEvent, type DictationAudioAttach } from "../src/dictation-audio-shared.js";
 
 test("dictation preload methods preserve Main faults, use fixed private channels, and unsubscribe exactly", async () => {
@@ -12,7 +12,7 @@ test("dictation preload methods preserve Main faults, use fixed private channels
     on(channel, listener) { if (!listeners.has(channel)) listeners.set(channel, new Set()); listeners.get(channel)!.add(listener); },
     removeListener(channel, listener) { listeners.get(channel)?.delete(listener); },
   };
-  const api = createOmpHarnessChromeApi(ipc);
+  const api = createJulingHarnessChromeApi(ipc);
   const audioId = "audio", attach = { channel: { audioId }, owner: { sessionId: "session", draftId: "draft" } } as DictationAudioAttach;
   const control = { audioId, input: { kind: "cancel" as const } };
   const chunk = { audioId, sequence: 0, bytes: new Float32Array([1]).buffer };

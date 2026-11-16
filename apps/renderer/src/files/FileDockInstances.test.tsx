@@ -18,7 +18,7 @@ vi.mock("../dock/DockContext", () => ({
 }));
 vi.mock("./FilePane", () => ({ default: ({ descriptor, actions, onOpen }: { descriptor: FilePanelDescriptor; actions?: FileViewerActions; onOpen: (reference: { path: string }) => void }) => <section data-testid={descriptor.fileId}><button onClick={() => actions?.addContext({ path: descriptor.path, label: descriptor.title })}>添加到对话</button><button onClick={() => onOpen({ path: "linked.md" })}>打开相对链接</button></section> }));
 const stores: DockStore[] = [];
-afterEach(() => { cleanup(); for (const store of stores.splice(0)) store.flush(); localStorage.removeItem("omp.file-viewer.scope"); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); for (const store of stores.splice(0)) store.flush(); vi.restoreAllMocks(); localStorage.removeItem("omp.file-viewer.scope"); });
 
 function setup() {
   const source = new DockStore(null), active = new DockStore(null); stores.push(source, active);
@@ -58,4 +58,13 @@ it("opens links through the file's original Host target after the conversation s
   fireEvent.click(within(pane).getByRole("button", { name: "打开相对链接" }));
   await waitFor(() => expect(source.query).toHaveBeenCalledWith("workspace.file.inspect", { workspaceId: "workspace", path: "linked.md" }));
   expect(targets.readyClient).toHaveBeenCalledWith(null); expect(targets.readyClient).not.toHaveBeenCalledWith("current-ssh");
+});
+
+it("still opens a linked file when the file scope preference cannot be read", async () => {
+  const source = setup();
+  vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new DOMException("blocked", "SecurityError"); });
+  render(source.ui());
+  const pane = await screen.findByTestId("source-file");
+  fireEvent.click(within(pane).getByRole("button", { name: "打开相对链接" }));
+  await waitFor(() => expect(Object.values(source.source.getSnapshot().layout.fileViews).some(file => file.path === "linked.md")).toBe(true));
 });

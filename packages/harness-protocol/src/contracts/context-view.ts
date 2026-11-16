@@ -1,4 +1,4 @@
-export type ContextCategoryId = "system-prompt" | "skills" | "built-in-tools" | "custom-tools" | "user-messages" | "assistant-messages" | "assistant-thinking" | "tool-calls" | "tool-output";
+export type ContextCategoryId = "system-prompt" | "instruction-files" | "skills" | "built-in-tools" | "custom-tools" | "user-messages" | "assistant-messages" | "assistant-thinking" | "tool-calls" | "tool-output";
 
 /** Shared reasoning weight of one assistant message with several thinking blocks; member entries carry zero. */
 export interface ContextThinkingGroupSummary { id: string; label: string; tokens: number; interrupted?: boolean }

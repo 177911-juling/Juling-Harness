@@ -261,12 +261,12 @@ async function readVersionOf(pluginsDir: string, name: string): Promise<string |
 }
 
 /**
- * Project-level toggles are also recorded in `<cwd>/.omp/plugin-overrides.json`
+ * Project-level toggles are also recorded in `<cwd>/.juling/plugin-overrides.json`
  * `disabled` (the same file the discovery layer reads): disabling adds the
  * name, enabling removes it. Other keys are preserved.
  */
 async function updateProjectOverrides(cwd: string, name: string, enabled: boolean): Promise<void> {
-  const overridesPath = path.join(cwd, ".omp", "plugin-overrides.json");
+  const overridesPath = path.join(getProjectConfigDir(cwd), "plugin-overrides.json");
   const current = (await readJsonFile(overridesPath)) ?? {};
   const disabled = Array.isArray(current.disabled)
     ? current.disabled.filter((entry): entry is string => typeof entry === "string")

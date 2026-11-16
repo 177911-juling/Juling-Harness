@@ -119,9 +119,9 @@ Git、文件、终端、浏览器、电脑操作、Time Travel、评测和语音
 ### 3 · 工具可以停在任何地方
 
 <p align="center">
-  <img src="docs/readme/demo-docking.webp" width="100%" alt="演示：把网页标签拖成浮窗并吸附到对话左侧，再把底栏的 OMP Logs 拖进右侧栏">
+  <img src="docs/readme/demo-docking.webp" width="100%" alt="演示：把网页标签拖成浮窗并吸附到对话左侧，再把底栏的 Juling Logs 拖进右侧栏">
   <br>
-  <sub>▲ 网页标签拖成浮窗后吸附到对话左侧，底栏的 OMP Logs 拖进右侧栏</sub>
+  <sub>▲ 网页标签拖成浮窗后吸附到对话左侧，底栏的 Juling Logs 拖进右侧栏</sub>
 </p>
 
 <p align="center">
@@ -219,7 +219,7 @@ Files、Changes、Git、Browser、Computer、Agents、Terminal、Logs、BTW 等�
   <img src="docs/readme/model-config-light.webp" width="100%" alt="模型配置：统一供应商列表">
 </picture>
 <h3>🧠 统一模型配置</h3>
-Anthropic、OpenAI、OpenRouter、本地 LM Harness 等供应商在同一页管理开关、端点和 <code>modelProviderOrder</code>；在角色页为 <code>@default</code>、<code>@plan</code>、<code>@task</code> 分别指定模型和思考强度。
+Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管理开关、端点和 <code>modelProviderOrder</code>；在角色页为 <code>@default</code>、<code>@plan</code>、<code>@task</code> 分别指定模型和思考强度。
 </td>
 </tr>
 <tr>
@@ -294,7 +294,7 @@ xattr -dr com.apple.quarantine "/Applications/Juling Harness.app"
 </details>
 
 > [!TIP]
-> 模型与登录沿用 OMP 的 `models.yml` / `omp login`。**本仓库不内置任何供应商密钥。**
+> 模型与登录沿用 Juling Runtime 的 `models.yml` / `juling login`。**本仓库不内置任何供应商密钥。**
 
 <br>
 
@@ -330,7 +330,7 @@ Windows 也可以直接双击仓库根目录的 `preview.cmd`；macOS 需要先�
 npm run omp:install-deps     # MSVC Build Tools + Rust（macOS：检查 Xcode CLT / rustup / Bun）
 npm run omp:overlay:apply    # 把 overlay 铺进 vendor 并套用接缝补丁（幂等）
 npm run omp:keys             # 每台机器一次，生成本地签名密钥
-npm run omp:build:host       # 构建 omp --mode harness-host
+npm run omp:build:host       # 构建 juling --mode harness-host
 npm run preview
 ```
 
@@ -365,7 +365,7 @@ npm run preview
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/architecture-dark.svg">
-    <img src="docs/readme/architecture-light.svg" width="100%" alt="架构：Renderer → HarnessClient → Desktop IPC → Host facade → 本机服务 / Harness Bridge → OMP Runtime">
+    <img src="docs/readme/architecture-light.svg" width="100%" alt="架构：Renderer → HarnessClient → Desktop IPC → Host facade → 本机服务 / Harness Bridge → Juling Runtime">
   </picture>
 </p>
 
@@ -404,7 +404,7 @@ Runtime 钉在 oh-my-pi 子模块上，Harness 的改动分两层：
 - **overlay**：Harness 自有文件，上游没有这些路径，按普通源码编辑，升级上游时不会冲突；
 - **接缝补丁**：只包含对上游已有文件的改动，按上游子系统分成四组，统一用 `npm run omp:patches:regen` 生成。
 
-托管 Runtime 以 `omp --mode harness-host` 启动，产物使用 Ed25519 校验。详见 [omp-patch/README.md](omp-patch/README.md)。
+托管 Runtime 以 `juling --mode harness-host` 启动，产物使用 Ed25519 校验。详见 [omp-patch/README.md](omp-patch/README.md)。
 
 </details>
 
@@ -413,15 +413,15 @@ Runtime 钉在 oh-my-pi 子模块上，Harness 的改动分两层：
 ## 常见问题
 
 <details>
-<summary><b>它和 omp CLI 是什么关系？</b></summary>
+<summary><b>它和 Juling Runtime 是什么关系？</b></summary>
 <br>
-Juling Harness 是 omp 的桌面外壳。模型、登录、Skills 和会话都沿用 OMP 自己的配置与格式；Harness 通过 Bridge 调用 Runtime 的语义能力，不包装终端。上游 OMP 的缺陷请提交到 <a href="https://github.com/can1357/oh-my-pi">can1357/oh-my-pi</a>。
+Juling Harness 是 Juling Runtime 的桌面外壳。模型、登录、Skills 和会话都沿用 Juling Runtime 的配置与格式；Harness 通过 Bridge 调用 Runtime 的语义能力，不包装终端。上游 oh-my-pi 的缺陷请提交到 <a href="https://github.com/can1357/oh-my-pi">can1357/oh-my-pi</a>。
 </details>
 
 <details>
 <summary><b>支持哪些模型？需要我提供密钥吗？</b></summary>
 <br>
-支持 OMP 能连接的全部供应商，例如 Anthropic、OpenAI、OpenRouter、本地 LM Harness 等。密钥和登录走 OMP 的 <code>models.yml</code> / <code>omp login</code>，本仓库不内置任何密钥。
+支持 Juling Runtime 能连接的全部供应商，例如 Anthropic、OpenAI、OpenRouter、本地 LM Studio 等。密钥和登录走 Juling Runtime 的 <code>models.yml</code> / <code>juling login</code>，本仓库不内置任何密钥。
 </details>
 
 <details>

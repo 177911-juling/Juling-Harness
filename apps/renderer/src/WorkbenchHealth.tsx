@@ -40,7 +40,7 @@ export function createWorkbenchHealth(options: {
 }
 
 const health = createWorkbenchHealth({
-  report: (status) => { void globalThis.ompHarnessChrome?.reportPayloadHealth?.(status).catch(() => {}); },
+  report: (status) => { void globalThis.julingHarnessChrome?.reportPayloadHealth?.(status).catch(() => {}); },
   requestFrame: (callback) => requestAnimationFrame(callback),
   cancelFrame: (id) => cancelAnimationFrame(id),
 });

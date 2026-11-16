@@ -1145,7 +1145,7 @@ export function MediaWorkbench({
                   {!visible ? null : (
                       preview
                         ? previewMediaUrl(output.kind)
-                        : globalThis.ompHarnessChrome?.exportArtifact
+                        : globalThis.julingHarnessChrome?.exportArtifact
                     ) ? (
                     output.kind === "image" ? (
                       <img

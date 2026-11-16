@@ -64,8 +64,8 @@ async function bundle() {
   write(join(resources, "zh_CN.lproj", "InfoPlist.strings"), infoPlistStrings(MAC_USAGE_DESCRIPTIONS_ZH));
 
   const runtime = join(resources, "runtime", "versions", RUNTIME);
-  write(join(runtime, "omp"), machO());
-  write(join(runtime, "runtime-manifest.json"), JSON.stringify({ runtimeVersion: RUNTIME, platform: "darwin-arm64", entrypoint: "omp" }));
+  write(join(runtime, "juling"), machO());
+  write(join(runtime, "runtime-manifest.json"), JSON.stringify({ runtimeVersion: RUNTIME, platform: "darwin-arm64", entrypoint: "juling" }));
   const keys = join(resources, "runtime-keys");
   write(join(keys, "key-id.txt"), "k1\n");
   write(join(keys, "trusted-public.pem"), "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----\n");
@@ -80,7 +80,7 @@ async function bundle() {
   return { out, app, contents, resources };
 }
 
-const EXECUTABLES = /[\\/](omp|spawn-helper|Juling Harness)$/u;
+const EXECUTABLES = /[\\/](juling|spawn-helper|Juling Harness)$/u;
 
 function harness(app, { fail, modeOf } = {}) {
   const calls = [];
@@ -110,7 +110,7 @@ test("a complete ad hoc bundle passes every check", async () => {
   assert.equal(report.appPath, app);
   assert.ok(report.notes.some((note) => note.includes("(ad hoc)")));
   assert.ok(calls.includes(`/usr/bin/codesign --verify --deep --strict --verbose=2 ${app}`));
-  assert.ok(calls.some((call) => call.startsWith("/usr/bin/codesign --verify --strict ") && call.endsWith(`${RUNTIME}${app.includes("\\") ? "\\" : "/"}omp`)));
+  assert.ok(calls.some((call) => call.startsWith("/usr/bin/codesign --verify --strict ") && call.endsWith(`${RUNTIME}${app.includes("\\") ? "\\" : "/"}juling`)));
   assert.ok(calls.some((call) => call.startsWith("/usr/bin/hdiutil verify ")));
   assert.ok(calls.some((call) => call.startsWith("/usr/bin/ditto -x -k ")));
   assert.equal(calls.filter((call) => call.startsWith("/usr/bin/codesign --verify --deep --strict")).length, 2, "the app and the copy restored from the zip");
@@ -130,9 +130,9 @@ test("a missing privacy purpose string fails before macOS would kill the app", a
 
 test("the Runtime must stay 0755 and arm64", async () => {
   const { out, app, resources } = await bundle();
-  const notExecutable = harness(app, { modeOf: (path) => (path.endsWith("omp") ? 0o100644 : 0o100755) }).options;
+  const notExecutable = harness(app, { modeOf: (path) => (path.endsWith("juling") ? 0o100644 : 0o100755) }).options;
   await assert.rejects(() => auditMacOutput(out, notExecutable), /0755/u);
-  write(join(resources, "runtime", "versions", RUNTIME, "omp"), machO("x64"));
+  write(join(resources, "runtime", "versions", RUNTIME, "juling"), machO("x64"));
   await assert.rejects(() => auditMacOutput(out, harness(app).options), /expected a darwin-arm64 executable/u);
 });
 

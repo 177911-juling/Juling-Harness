@@ -96,9 +96,9 @@ export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
 
   return <>
     <button type="button" className="btn small outline" disabled={!enabled}
-      data-tip={!enabled ? zh ? "连接 Runtime 后可浏览 OMP 会话" : "Connect the Runtime to browse OMP sessions" : undefined}
-      onClick={() => setOpened(true)}><Icon name="history" extra="sm" />{zh ? "恢复 OMP 会话" : "Resume OMP session"}</button>
-    {opened ? <WorkspaceDialog title={zh ? "恢复 OMP 会话" : "Resume OMP session"} onClose={() => setOpened(false)}>
+      data-tip={!enabled ? zh ? "连接 Runtime 后可浏览 Juling 会话" : "Connect the Runtime to browse Juling sessions" : undefined}
+      onClick={() => setOpened(true)}><Icon name="history" extra="sm" />{zh ? "恢复 Juling 会话" : "Resume Juling session"}</button>
+    {opened ? <WorkspaceDialog title={zh ? "恢复 Juling 会话" : "Resume Juling session"} onClose={() => setOpened(false)}>
       <div className="session-picker">
         <div className="session-picker-intro"><p>{zh ? "查找已保存的会话，预览后继续对话。" : "Find a saved session, preview it, and continue the conversation."}</p>{preview && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}</div>
         <div className="session-picker-toolbar">
@@ -106,13 +106,13 @@ export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
           <AppSelect className="select" aria-label={zh ? "恢复范围" : "Resume scope"} value={scope ?? resolvedScope} disabled={loading || resuming} onChange={event => setScope(event.target.value as "directory" | "repo")}>
             <option value="directory">{zh ? "仅当前目录" : "This directory"}</option><option value="repo">{zh ? "同仓库 Worktree" : "Repository worktrees"}</option>
           </AppSelect>
-          <button type="button" className="icon-btn" aria-label={zh ? "刷新 OMP 会话" : "Refresh OMP sessions"} data-tip={t("common.refresh")} disabled={loading || resuming} onClick={() => setRefresh(value => value + 1)}><Icon name="refresh" extra="sm" /></button>
+          <button type="button" className="icon-btn" aria-label={zh ? "刷新 Juling 会话" : "Refresh Juling sessions"} data-tip={t("common.refresh")} disabled={loading || resuming} onClick={() => setRefresh(value => value + 1)}><Icon name="refresh" extra="sm" /></button>
         </div>
         <div className="session-picker-columns">
           <section className="session-picker-catalog" aria-label={zh ? "可恢复会话" : "Resumable sessions"}>
             <div className="session-picker-list-heading"><span>{zh ? "最近会话" : "Recent sessions"}</span><output aria-live="polite">{loading ? "…" : visibleRows.length}</output></div>
             {loading ? <div className="session-picker-loading" role="status"><Icon name="refresh" extra="sm" />{t("common.loading")}</div>
-              : visibleRows.length ? <SessionPickerList listRef={listRef} label={zh ? "OMP 会话列表" : "OMP sessions"} selectedId={selected?.sessionId} onSelect={setSelectedId} onAccept={() => void resume()} disabled={resuming}
+              : visibleRows.length ? <SessionPickerList listRef={listRef} label={zh ? "Juling 会话列表" : "Juling sessions"} selectedId={selected?.sessionId} onSelect={setSelectedId} onAccept={() => void resume()} disabled={resuming}
                 items={visibleRows.map(row => ({ id: row.sessionId, title: row.title, metadata: metadata(row), excerpt: row.firstMessage, marker: row.continuationOf ? <span role="img" aria-label={zh ? "继续副本" : "Continuing copy"}><Icon name="fork" extra="sm" /></span> : undefined }))} />
               : <WorkspaceEmpty icon="history" title={!enabled || error ? zh ? "会话暂时不可用" : "Sessions unavailable" : needle ? t("history.noMatches") : zh ? "这个范围内还没有会话" : "No sessions in this scope"} />}
           </section>

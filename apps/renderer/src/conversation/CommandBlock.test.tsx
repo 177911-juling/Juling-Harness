@@ -48,7 +48,7 @@ it("starts a new terminal in the conversation workspace before revealing it", as
   let store!: TerminalSessions;
   function Probe() { store = useTerminalStore(); return null; }
   const create = vi.fn(async () => ({ id: "command-terminal", name: "pwsh", cwd: "D:/work" }));
-  vi.stubGlobal("ompHarnessTerminal", { create, dispose: vi.fn(async () => {}), onData: () => () => {}, onExit: () => () => {} });
+  vi.stubGlobal("julingHarnessTerminal", { create, dispose: vi.fn(async () => {}), onData: () => () => {}, onExit: () => () => {} });
   render(<TerminalSessionsProvider><Probe /><CommandBlockProvider workspaceId="work" sessionId="session" conversationId="chat"><MarkdownText text={'```pwsh\nGet-Location\n```'} /></CommandBlockProvider></TerminalSessionsProvider>);
   fireEvent.click(screen.getByRole("button", { name: "在终端执行" }));
   await waitFor(() => expect(dock.dispatch).toHaveBeenCalledWith({ type: "open", panel: "terminal" }));

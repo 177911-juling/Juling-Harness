@@ -29,7 +29,7 @@
     { id: 'google-vertex',        label: 'Google Vertex' }
   ];
 
-  MR.DISCOVERY_TYPES = ['Ollama', 'llama.cpp', 'LM Harness', 'OpenAI Models List', 'Proxy', 'LiteLLM'];
+  MR.DISCOVERY_TYPES = ['Ollama', 'llama.cpp', 'LM Studio', 'OpenAI Models List', 'Proxy', 'LiteLLM'];
 
   /* ---------- Provider 预设注册表（OMP Provider Registry → Harness Preset） ----------
      p(id, name, desc, api, auth[], opts)  opts: endpoint/local/discovery/oauth */
@@ -64,7 +64,7 @@
     ]},
     { group: '本地', items: [
       p('ollama', 'Ollama', '本地模型服务，自动发现已拉取模型', 'openai-completions', ['none'], { endpoint: 'http://localhost:11434/v1', local: true, discovery: 'Ollama', popular: true }),
-      p('lmharness', 'LM Harness', '本地 OpenAI 兼容服务', 'openai-completions', ['none'], { endpoint: 'http://localhost:1234/v1', local: true, discovery: 'LM Harness' }),
+      p('lmstudio', 'LM Studio', '本地 OpenAI 兼容服务', 'openai-completions', ['none'], { endpoint: 'http://localhost:1234/v1', local: true, discovery: 'LM Studio' }),
       p('llamacpp', 'llama.cpp', 'llama-server OpenAI 兼容接口', 'openai-completions', ['none'], { endpoint: 'http://localhost:8080/v1', local: true, discovery: 'llama.cpp' })
     ]},
     { group: '更多 Provider', items: [
@@ -152,7 +152,7 @@
       statusDetail: '已登录 snowpear@gmail.com · 延迟 182ms',
       auth: { type: 'oauth', account: 'snowpear@gmail.com' },
       api: 'google-generative', endpoint: { url: 'https://generativelanguage.googleapis.com/v1beta' },
-      local: false, enabled: true, website: 'https://aiharness.google.com',
+      local: false, enabled: true, website: 'https://aistudio.google.com',
       note: '', presetId: 'google-gemini',
       models: [
         m('gemini-3-pro', 'Gemini 3 Pro', 1000000, 64000, { img: 1, reason: 1, cIn: 2, cOut: 12 }),
@@ -227,14 +227,14 @@
       ]
     },
     {
-      id: 'lmharness', name: 'LM Harness', source: 'runtime', status: 'offline',
+      id: 'lmstudio', name: 'LM Studio', source: 'runtime', status: 'offline',
       statusDetail: '本地服务未运行 · 最后在线 2 天前',
       auth: { type: 'none' },
       api: 'openai-completions',
       endpoint: { url: 'http://localhost:1234/v1' },
-      local: true, enabled: true, website: 'https://lmharness.ai',
-      note: '', presetId: 'lmharness',
-      discovery: { enabled: true, type: 'LM Harness', timeout: 5, found: 0, usable: 0 },
+      local: true, enabled: true, website: 'https://lmstudio.ai',
+      note: '', presetId: 'lmstudio',
+      discovery: { enabled: true, type: 'LM Studio', timeout: 5, found: 0, usable: 0 },
       models: []
     },
     {

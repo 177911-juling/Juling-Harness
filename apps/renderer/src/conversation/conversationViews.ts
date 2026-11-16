@@ -46,14 +46,14 @@ export class ConversationViewLeases {
 const surfaces = new Map<Document, ConversationViewLeases>();
 let currentEpoch: number | undefined;
 export function registerConversationSurface(doc: Document): () => void {
-  const leases = new ConversationViewLeases(state => { void surfaceWindow(doc).ompHarnessChrome?.setConversationViewState?.(state).catch(() => {}); }, true);
+  const leases = new ConversationViewLeases(state => { void surfaceWindow(doc).julingHarnessChrome?.setConversationViewState?.(state).catch(() => {}); }, true);
   leases.setOwnerKnown(); leases.setEpoch(currentEpoch); surfaces.set(doc, leases);
   return () => { surfaces.delete(doc); };
 }
 export const conversationViewLeases = new ConversationViewLeases((state) => {
   currentEpoch = state.runtimeEpoch;
   for (const leases of surfaces.values()) leases.setEpoch(currentEpoch);
-  void globalThis.ompHarnessChrome?.setConversationViewState?.(state).catch(() => {});
+  void globalThis.julingHarnessChrome?.setConversationViewState?.(state).catch(() => {});
 }, true);
 
 export function useConversationViewLease(identity: ConversationIdentity | null, demo: boolean, host: RefObject<HTMLElement | null>, enabled = true): void {
@@ -62,7 +62,7 @@ export function useConversationViewLease(identity: ConversationIdentity | null, 
   const leases = surfaces.get(doc) ?? conversationViewLeases;
   const epoch = identity?.runtimeEpoch, id = identity?.sessionId;
   useEffect(() => {
-    if (target.id !== null || demo || !enabled || epoch === undefined || id === undefined || host.current === null || globalThis.ompHarnessChrome?.setConversationViewState === undefined) return;
+    if (target.id !== null || demo || !enabled || epoch === undefined || id === undefined || host.current === null || globalThis.julingHarnessChrome?.setConversationViewState === undefined) return;
     let release: (() => void) | undefined;
     const update = (visible: boolean) => {
       if (visible && release === undefined) release = leases.acquire(Number(epoch), id);

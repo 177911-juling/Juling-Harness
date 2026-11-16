@@ -36,7 +36,7 @@ test("profile values win, except Electron switches, Harness's channel and shell 
       ELECTRON_RUN_AS_NODE: "1",
       JULING_HARNESS_MEDIA_ROOT: "/profile/media",
       JULING_HARNESS_RESOLVING_ENVIRONMENT: "1",
-      OMP_CODING_AGENT_DIR: "/Users/dev/.omp/agent",
+      JULING_CODING_AGENT_DIR: "/Users/dev/.omp/agent",
       SHLVL: "2",
       PWD: "/Users/dev",
       _: "/usr/bin/env",
@@ -47,7 +47,7 @@ test("profile values win, except Electron switches, Harness's channel and shell 
   assert.equal(merged.ELECTRON_RUN_AS_NODE, undefined);
   assert.equal(merged.JULING_HARNESS_MEDIA_ROOT, "/app/media");
   assert.equal(merged.JULING_HARNESS_RESOLVING_ENVIRONMENT, undefined);
-  assert.equal(merged.OMP_CODING_AGENT_DIR, "/Users/dev/.omp/agent");
+  assert.equal(merged.JULING_CODING_AGENT_DIR, "/Users/dev/.omp/agent");
   assert.equal(merged.HOMEBREW_PREFIX, "/opt/homebrew");
   assert.equal(merged.ONLY_APP, "1");
   assert.equal(merged.SHLVL, undefined);

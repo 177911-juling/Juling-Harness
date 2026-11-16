@@ -87,8 +87,8 @@ export function StatisticsPage({ client }: { client: HarnessClient }) {
         {marks ? (
           <p className="stats-demo-note">
             {zh
-              ? "统计面板由本机 OMP Runtime 提供，需关闭预览后查看；下面是演示汇总。"
-              : "The statistics panel is served by the local OMP Runtime. Turn preview off to view it; demo aggregates follow."}
+              ? "统计面板由本机 Juling Runtime 提供，需关闭预览后查看；下面是演示汇总。"
+              : "The statistics panel is served by the local Juling Runtime. Turn preview off to view it; demo aggregates follow."}
           </p>
         ) : null}
         <div className="stats-demo">
@@ -125,7 +125,7 @@ export function StatisticsPage({ client }: { client: HarnessClient }) {
           <iframe
             className="stats-frame-body"
             src={url}
-            title={zh ? "OMP 统计面板" : "OMP statistics panel"}
+            title={zh ? "Juling 统计面板" : "Juling statistics panel"}
             onLoad={onFrameLoad}
           />
         ) : null}

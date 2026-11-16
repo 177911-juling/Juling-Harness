@@ -154,10 +154,7 @@
   border-radius: var(--r-8);
   margin-bottom: var(--sp-10);
   overflow: hidden;
-  /* 静止态不要写 scale:1。独立 scale 会造合成层，套在 page-in 的
-     translateY 里会按错误尺寸合成，进场结束掉层时每张卡一起跳；
-     首页/能力中心的卡片没有 rest scale，所以那些页没有这个问题。
-     scale 只在拖动（.is-dragging / .is-settling）时出现。 */
+  box-shadow: var(--shadow-1);
   transition:
     border-color var(--dur) var(--ease-out),
     box-shadow var(--dur) var(--ease-out),
@@ -165,26 +162,18 @@
     opacity var(--dur) var(--ease-out),
     scale var(--dur) var(--ease-ios);
 }
-/* 卡片 hover 浅紫外发光（参考 ccswitch 风格）：边框变 accent，外面浮出一圈
-   accent-softer 圆环，加 18px 投影，让卡片视觉上「浮出」 */
 .pv-card:hover,
 .pv-card:focus-within {
   border-color: var(--accent-border);
-  box-shadow:
-    0 0 0 3px var(--accent-softer),
-    0 6px 18px rgba(110, 86, 207, 0.08);
+  box-shadow: var(--shadow-2);
 }
 .pv-card.is-disabled { opacity: 0.72; }
-/* 关掉供应商后仍要能测连接 / 编辑 / 复制：四个 .is-action 跟开启态一样，
-   hover 或键盘焦点时滑入，不要整组藏死。 */
-.pv-card.is-error { border-color: var(--red); }
-.pv-card.is-warn { border-color: var(--amber); }
+.pv-card.is-error { border-left: 3px solid var(--red); }
+.pv-card.is-warn { border-left: 3px solid var(--amber); }
 .pv-card.is-dragging,
 .pv-card.is-settling {
   border-color: var(--accent-border);
-  box-shadow:
-    0 0 0 3px var(--accent-softer),
-    0 6px 18px rgba(110, 86, 207, 0.08);
+  box-shadow: var(--shadow-2);
   position: relative;
   z-index: var(--z-resizer);
   transform-origin: center;
@@ -927,7 +916,7 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   --role-columns: minmax(232px, .85fr) minmax(220px, 1.15fr) 144px 28px 28px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--r-10);
+  border-radius: var(--r-4);
   overflow: hidden;
 }
 .mc-role-columns,
@@ -940,11 +929,14 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
 .mc-role-columns {
   align-items: center;
   padding-block: var(--sp-10);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-strong);
   background: var(--surface-2);
   color: var(--text-3);
   font-size: var(--fs-11);
   font-weight: var(--fw-medium);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .mc-role-columns > :first-child { padding-left: calc(36px + var(--sp-12)); }
 .mc-role-empty { padding: var(--sp-24); color: var(--text-3); font-size: var(--fs-12); }
@@ -1004,14 +996,16 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   box-shadow: inset 0 0 0 2px var(--role-soft);
 }
 
-/* 色彩只用于扫描角色，控件和表面保持统一。 */
+/* 色彩只用于扫描角色，控件和表面保持统一。
+   蓝图 HUD：图标区改方形色标（近方角 + 角色色描边），色块承担辨识。 */
 .role-row .role-icon-area {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 36px;
   height: 36px;
-  border-radius: var(--r-6);
+  border-radius: var(--r-4);
+  border: 1px solid color-mix(in srgb, var(--role-c) 45%, transparent);
   background: color-mix(in srgb, var(--role-c) 10%, var(--bg-inset));
   flex-shrink: 0;
   transition: background var(--dur-fast) var(--ease);
@@ -2099,7 +2093,7 @@ body.is-wsx-sorting { cursor: grabbing; }
 
 /* Credential modal (ported to <body>; centered, slightly above mid-window). */
 .wsx-modal-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px 24px 14vh; background: color-mix(in srgb, #000 52%, transparent); }
-.wsx-modal { width: min(480px, 100%); box-sizing: border-box; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); box-shadow: 0 18px 50px rgba(0, 0, 0, .35); }
+.wsx-modal { width: min(480px, 100%); box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: var(--r-10); background: var(--bg); box-shadow: 0 18px 50px rgba(0, 0, 0, .35); }
 .wsx-modal-head { display: flex; align-items: center; gap: var(--sp-10); padding: var(--sp-12) var(--sp-14); border-bottom: 1px solid var(--border); }
 .wsx-modal-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .wsx-modal-title b { font-size: var(--fs-13); font-weight: var(--fw-semibold); color: var(--text); }

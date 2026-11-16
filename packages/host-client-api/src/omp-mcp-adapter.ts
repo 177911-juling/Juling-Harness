@@ -24,7 +24,12 @@ import type {
 
 import { classifyAgentPluginRoot } from "./omp-discovery/agent-plugin.js";
 import { listClaudePluginRoots, type ClaudePluginRoot } from "./omp-discovery/helpers.js";
-import { getAgentDir, getProjectConfigDir } from "./omp-discovery/paths.js";
+import {
+  getAgentDir,
+  getAgentDirsForRead,
+  getProjectConfigDir,
+  getProjectConfigDirsForRead,
+} from "./omp-discovery/paths.js";
 import { listOmpPluginRoots, listSettingsExtensionRoots } from "./omp-discovery/plugin-roots.js";
 import { sanitizeDisplayText } from "./read-models.js";
 import { probeMcpServer, type McpConnectSpec } from "./omp-mcp-probe.js";
@@ -45,6 +50,11 @@ const RANK = {
   nativeProjectDot: 11,
   nativeUser: 12,
   nativeUserDot: 13,
+  // Pre-rebrand `.omp` config trees: readable, shadowed by canonical `.juling`.
+  legacyNativeProject: 14,
+  legacyNativeProjectDot: 15,
+  legacyNativeUser: 16,
+  legacyNativeUserDot: 17,
   ompPlugins: 20,
   claudeProject: 30,
   claudeUser: 31,
@@ -659,8 +669,6 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
     return preferred;
   };
 
-  const userNativePath = () => path.join(getAgentDir(home), "mcp.json");
-
   const collect = async (): Promise<{
     servers: InternalServer[];
     warnings: string[];
@@ -672,49 +680,98 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
     const warnings: string[] = [];
     const servers: InternalServer[] = [];
     const seq = { n: 0 };
-    const userFile = userNativePath();
+    const agentDir = getAgentDir(home);
+    const userFile = path.join(agentDir, "mcp.json");
     const cwd = getCwd()?.trim() || undefined;
-    const projectFile = cwd ? path.join(getProjectConfigDir(cwd), "mcp.json") : undefined;
+    const projectConfigDir = cwd ? getProjectConfigDir(cwd) : undefined;
+    const projectFile = projectConfigDir ? path.join(projectConfigDir, "mcp.json") : undefined;
     const scanCwd = cwd ?? home;
 
-    const userConfig = await readJsonFile(userFile).catch((error) => {
-      warnings.push(
-        sanitizeDisplayText(`读取用户 MCP 配置失败: ${String(error)}`, WARNING_MAX) ?? "读取用户 MCP 配置失败",
-      );
-      return null;
-    });
-    if (userConfig?.mcpServers && typeof userConfig.mcpServers === "object" && !Array.isArray(userConfig.mcpServers)) {
-      servers.push(
-        ...listFromMap(userFile, userConfig.mcpServers, "user", "用户", RANK.nativeUser, true, warnings, seq),
-      );
-    }
-    servers.push(
-      ...(await loadJsonSource(
-        path.join(getAgentDir(home), ".mcp.json"),
-        "user",
-        "用户",
-        RANK.nativeUserDot,
-        true,
-        warnings,
-        seq,
-      )),
-    );
-
-    if (cwd && projectFile) {
-      servers.push(
-        ...(await loadJsonSource(projectFile, "project", "项目", RANK.nativeProject, true, warnings, seq)),
-      );
+    // Canonical `.juling` first, then any pre-rebrand `.omp` tree that still
+    // exists. Legacy sources never become write targets.
+    const userSources = [
+      { file: userFile, rank: RANK.nativeUser, label: "用户", writable: true },
+      ...getAgentDirsForRead(home)
+        .filter((dir) => path.resolve(dir) !== path.resolve(agentDir))
+        .map((dir) => ({
+          file: path.join(dir, "mcp.json"),
+          rank: RANK.legacyNativeUser,
+          label: "用户 (旧)",
+          writable: false,
+        })),
+    ];
+    let userConfig: McpConfigFile | null = null;
+    for (const source of userSources) {
+      const config = await readJsonFile(source.file).catch((error) => {
+        warnings.push(
+          sanitizeDisplayText(`读取用户 MCP 配置失败: ${String(error)}`, WARNING_MAX) ?? "读取用户 MCP 配置失败",
+        );
+        return null;
+      });
+      if (source.writable) userConfig = config;
+      if (config?.mcpServers && typeof config.mcpServers === "object" && !Array.isArray(config.mcpServers)) {
+        servers.push(
+          ...listFromMap(
+            source.file,
+            config.mcpServers,
+            "user",
+            source.label,
+            source.rank,
+            source.writable,
+            warnings,
+            seq,
+          ),
+        );
+      }
       servers.push(
         ...(await loadJsonSource(
-          path.join(getProjectConfigDir(cwd), ".mcp.json"),
-          "project",
-          "项目",
-          RANK.nativeProjectDot,
-          true,
+          path.join(path.dirname(source.file), ".mcp.json"),
+          "user",
+          source.label,
+          source.rank + 1,
+          source.writable,
           warnings,
           seq,
         )),
       );
+    }
+
+    if (cwd && projectFile && projectConfigDir) {
+      const projectSources = [
+        { file: projectFile, rank: RANK.nativeProject, label: "项目", writable: true },
+        ...getProjectConfigDirsForRead(cwd)
+          .filter((dir) => path.resolve(dir) !== path.resolve(projectConfigDir))
+          .map((dir) => ({
+            file: path.join(dir, "mcp.json"),
+            rank: RANK.legacyNativeProject,
+            label: "项目 (旧)",
+            writable: false,
+          })),
+      ];
+      for (const source of projectSources) {
+        servers.push(
+          ...(await loadJsonSource(
+            source.file,
+            "project",
+            source.label,
+            source.rank,
+            source.writable,
+            warnings,
+            seq,
+          )),
+        );
+        servers.push(
+          ...(await loadJsonSource(
+            path.join(path.dirname(source.file), ".mcp.json"),
+            "project",
+            source.label,
+            source.rank + 1,
+            source.writable,
+            warnings,
+            seq,
+          )),
+        );
+      }
       const projectMcp = path.join(cwd, "mcp.json");
       const projectDotMcp = path.join(cwd, ".mcp.json");
       if (path.resolve(projectMcp) !== path.resolve(projectFile)) {

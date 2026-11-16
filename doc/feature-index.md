@@ -4,19 +4,23 @@
 
 这是 **功能 → 文件** 的地图，不是架构愿景。协议形状以类型为准，不在这里复述。搬家后改这一份，不要在 `AGENTS.md` 复制表格。
 
-## OMP 18.18.0 适配入口
+## OMP 18.19.0 适配入口
 
 | 功能 | Renderer / 预览 | Runtime / 协议 |
 | --- | --- | --- |
-| worker 子 Agent、任务文件与精确模型 | `AgentHub.tsx`、`preview/taskSpawnPreview.ts` | overlay `services/harness-thread-service.ts`、`task-options-service.ts`、`agent-hub-service.ts`；`contracts/agents-jobs.ts`、`runtime-upgrade.ts`；可选项瞬时 query `agent.spawn.options.read` |
+| worker 子 Agent、inline assignment / task.steps / autoParallel 与精确模型 | `AgentHub.tsx`、`preview/taskSpawnPreview.ts` | overlay `services/harness-thread-service.ts`、`task-options-service.ts`、`agent-hub-service.ts`；`contracts/agents-jobs.ts`、`runtime-upgrade.ts`；可选项瞬时 query `agent.spawn.options.read`；18.19 起无 `taskFile` |
 | 排队压缩、历史重命名/置顶/占用 | `composer/RuntimeQueueBar.tsx`、`HistoryPage.tsx`、`preview/runtimeQueuePreview.ts` | overlay `services/queued-compaction-service.ts`、`compaction-yield.ts`、`upgrade-service.ts`；`contracts/runtime-queue.ts`；占用瞬时 query `session.lease.read` |
 | 中途回复、扩展、BTW 注入、预测 | `conversation/conversationStore.ts`、`ExtensionLinks.tsx`、`btw/BtwPanel.tsx`、`composer/useWordPrediction.ts`；`preview/conversationFixtures.ts`、`btwPreview.ts`、`nextMessagePreview.ts` | overlay `services/conversation-entry-identity.ts`、`conversation-live-projector.ts`、`session-transcript-service.ts`、`extension-links-service.ts`、`btw-injection.ts`、`message-prediction.ts` |
 | Shell 回放、缓存、Eval 与作业 | `conversation/ShellView.tsx`、`PromptCachePanel.tsx`、`ContextCard.tsx`、`ToolBody.tsx`、`JobInspector.tsx`；`preview/runtimeViewsPreview.ts`、`nativeToolGallery.ts`、`hubPreview.ts` | overlay `services/runtime-view-service.ts`、`job-inspect.ts`；`contracts/runtime-views.ts`、`shell-view.ts`、`runtime-features.ts`、`benchmarks.ts` |
 | 模型与新设置 | `ModelConfigPage.tsx`、`settings/runtime18180Settings.ts`；`preview/modelConfigFixtures.ts`、`featureSettingsPreview.ts` | `scripts/model-catalog.mjs`、Host `omp-models-adapter.ts` / `model-role-migration.ts`、`provider-yaml-draft.ts`；overlay `services/runtime-catalog-service.ts`、`feature-settings-service.ts` |
 | Live WebRTC 与语音准备 | `media/LiveAudioPane.tsx`、`webrtcCapture.ts`、`composer/DictationControl.tsx`；`preview/dictationPreview.ts` | overlay `services/live-audio-service.ts`、`dictation-capture.ts`；瞬时 `contracts/runtime-views.ts`，原生 Live controller |
 | WebMCP | `browser/WebMcpPane.tsx`、`ManagedBrowserPane.tsx`；`preview/webmcpPreview.ts` | overlay `services/managed-browser-service.ts`、原生 `tools/browser/` controller 与 tab bridge；Desktop `managed-browser-relay.ts`；`contracts/webmcp.ts` |
+| Browser 18.19 open/targets 与 WebKit lease | `browser/ManagedBrowserPane.tsx`；`preview/webmcpPreview.ts` | 原生 `tools/browser.ts`、`tools/browser/{downloads,tab-supervisor,tab-worker}.ts`、`relay/protocol.ts`；managed 分派、`insecure` 豁免、顶层 `target` / `argv` |
+| Ask HTML form / Tree 重答 | `deck/ApprovalCard.tsx`、Tree 会话恢复入口 | 原生 `tools/ask.ts`；overlay `services/tree-service.ts` 的 `reopenAsk`；共享 `reanswerAskForm` |
+| 分窗口 reset auto-redeem | `settings/catalog.ts`；Host `harness-protocol/contracts/gui-settings.ts` | overlay `gui-settings-protocol.ts`、`services/runtime-settings-service.ts`；`session/agent-session.ts` consent；5h / weekly / Fable 独立配置 |
+| Context `instruction-files` | `contextViewer/contextViewMath.ts`、`preview/contextViewPreview.ts`、双语文案；Host `contracts/context-view.ts` | overlay `context-view-protocol.ts` 与 `services/context-view-service.ts` |
 
-版本变化和验收见 [18.18.0 迁移报告](../docs/migrations/omp-18.18.0.md)。
+版本变化和验收见 [18.19.0 迁移报告](../docs/migrations/omp-18.19.0.md)。
 
 瞬时读取契约在 `contracts/runtime-views.ts`。历史 Shell 在 `runtime-view-service.ts` 仅保留当前命令的一份回放数据，`shell.view.release` 与 Runtime dispose 释放；Renderer 关闭、隐藏或切换来源时释放，回放等上一帧完成后再推进。
 
@@ -25,7 +29,7 @@
 ```
 Renderer (apps/renderer)
   → @juling-harness/client (HarnessClientImpl + reducer)
-  → transport-desktop / preload `window.ompHarness`
+  → transport-desktop / preload `window.julingHarness`
   → apps/desktop ipc.ts
   → host-client-api facade.ts
       ├─ Host 自有：session catalog / archive / models.yml / skills 磁盘扫描 / git
@@ -101,7 +105,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 主题 / 密度 / 上次路由 | `apps/renderer/src/settings/appSettings.ts` | 本地 UI 记忆，不进 Host；旧 `LayoutMemory` 只作为迁移输入，新布局与 BTW 几何由 `dock/store.ts` 保存；侧栏项目展开与 Explorer 目录展开记忆在 `sidebar/expandMemory.ts` |
 | 对话阅读宽度 / 窄窗口预算 | `settings/ConversationWidthSettings.tsx`、`settings/ConversationWidthContext.tsx`、`layout/{useReadingColumn,useWorkbenchLayout,workbenchLayout}.ts`、`conversation/conversationReflow.ts`；使用说明 `docs/conversation-width.md` | AppSettings 全局偏好，标准/宽松/填满/自定义；读取实际 `.convo-wrap` 宽度、正文与输入列共用净宽；左/右/底面板临时首选/有效布局与窄窗退让；离底阅读消息/块锚定，贴底仍由唯一 writer 负责；预览演示值不写真实存储。 |
 | 工作台使用教程 | `apps/renderer/src/onboarding/{OnboardingHost,OnboardingTour,scenes}.tsx`、`timelines.ts`、`onboardingState.ts`、`onboarding.css`；`workbench/AppShell.tsx`（帮助菜单、`help.tutorial` 菜单命令、根部轻量 `OnboardingHost`）；Desktop `app-menu-shared.ts` / `platform/app-menu.ts` | 内容、舞台及 CSS 首次打开时加载。首次进入 0.2.0 自动弹出，必须走完 8 步才出现关闭按钮（不计停留时长），看完写 localStorage `omp.onboarding.completed`（改 `ONBOARDING_TOUR_ID` 可让老用户重看）；「帮助 → 使用教程」随时重开且随时可关。舞台是 640×400 低保真画布整体缩放，只有形状与图标、无文字；动画关键帧在 `timelines.ts` 用编排秒写、生成 CSS，整体节奏只改 `scenes.tsx` 的 `ONBOARDING_TEMPO`；元素的非动画样式即减少动效档位下的静帧。首启时教程先于启动提示；测试 `setup.ts` 关闭自动弹出，harness 页标记已看完（`preview-app-harness.html?tour=1` 保留） |
-| 进入应用提示（尚未完成） | `apps/renderer/src/StartupNotice.tsx`、`settings/startupNotice.ts` | 中文全局弹窗：项目 GitHub、关闭 / 不再提醒；「不再提醒」只写 localStorage，不进 Host；GitHub 卡点开走 `ompHarnessChrome.openUrl` |
+| 进入应用提示（尚未完成） | `apps/renderer/src/StartupNotice.tsx`、`settings/startupNotice.ts` | 中文全局弹窗：项目 GitHub、关闭 / 不再提醒；「不再提醒」只写 localStorage，不进 Host；GitHub 卡点开走 `julingHarnessChrome.openUrl` |
 | 预览开关 | `apps/renderer/src/preview/mode.ts`、`PreviewContext.tsx` | 显示层开关；`PREVIEW_MODE_SWITCH_ENABLED` |
 | 预览 fixture / 壳 | `apps/renderer/src/preview/fixtures.ts`、`surfaces.tsx`、`btwPreview.ts`；`conversationFixtures.ts`、`conversationScenarios.ts`、`contentGallery*.ts`、`ContentGallerySamples.tsx`、`changeDiffsPreview.ts` | 新读表面必须同时接预览与真实；内容图鉴（t15）集中展示全部工具种类（排除 Ask）、正文/GFM、引用胶囊、代码高亮、图形和结果变体；末尾直接复用组件展示二进制 GLB 与未闭合围栏/命令/SVG/Mermaid 流式样例，无审批/Plan 演示弹窗；侧栏各会话独立故事，正文排版（t11）、多 Shell 命令（t13）、失败修复/空结果/长日志（t14）、工具图鉴（t10），保留空白/流式/中断/压缩；Git 与 Changes 使用逐文件差异，Problems/Tests/Logs 覆盖不同状态与长路径 |
 
@@ -133,7 +137,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | Agent 测试面板 | `AgentTestsPane.tsx`、`agentTestRuns.ts` | |
 | Chip Composer | `apps/renderer/src/composer/ChipComposer.tsx`、`composer/useComposerDraft.ts`、`composer/draftStore.ts` | Enter：`core.prompt` / 本地排队；Ctrl+Enter：`core.followUp`（带图）；插入纠偏：`core.steer`；精确草稿与目标级草稿簿不走击键 React state，140ms trailing 发布，状态边界与命令式恢复立即发布 |
 | 空输入「继续」播放键 | 发送位 `workbench/WorkbenchCanvas.tsx`（stop / continue / send 三臂）、`composer/dispatch.ts`（`composerContinueEnabled`）、`conversation/conversationViewModel.ts`（`tailInterrupted`）、`conversation/conversationStore.ts`（`lastTurnInterrupted`）；overlay `harness/services/session-control-service.ts`（`continueTurn`）、`harness/state-projector.ts`（`lastTurnOutcome`） | 上一回合停在「没有最终汇报」的尾巴上（报错 / 手动中止 / 崩溃补记）且输入框为空时，发送位换成播放图标。命令 `core.continue`：先 `restoreInterruptedTurn()`，否则发**隐藏 synthetic** 的 `manual-continue.md`（不产生用户气泡）。旧 Runtime 无该能力时降级走 `turn.retry`。判定来源是 `OperatorStateSnapshot.lastTurnOutcome`，不是 transcript 字段 |
-| 图片预览 | `composer/ImagePreview.tsx`；桌面 `chrome-image.ts` | 缩略图点击预览；复制/保存走 `ompHarnessChrome`，不是 Host |
+| 图片预览 | `composer/ImagePreview.tsx`；桌面 `chrome-image.ts` | 缩略图点击预览；复制/保存走 `julingHarnessChrome`，不是 Host |
 | slash 命令菜单 | `composer/commands.ts`、`CommandMenu.tsx` | 解析后走语义 command；typed 名必须在 `operations.ts` / IPC `COMMAND_NAMES`。`/clear` → `session.clearContext` → facade `#commandP4` → overlay `clearContext`；`/drop` 补当前 `threadId` 后走 Host `session.drop` |
 | @ 提及 | `composer/mentions.ts` | `workspace.fileTree`、`agents.definitions.get`、查询非空时 `skills.get` |
 | 模型 / 模式选择 | `ComposerModelPicker.tsx`、`ComposerModePicker.tsx` | `session.model.set`、`session.thinking.set`、plan/vibe |
@@ -208,7 +212,7 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 功能 | UI | 实现 |
 |---|---|---|
 | 状态 / 暂存 / 提交 | `apps/renderer/src/git/GitStatusPanel.tsx`、`git/useGitRepository.ts`、`git/GitDockMeter.tsx` | `apps/desktop/src/git-service.ts` → `git.execute`；仓库读按 client/workspace 共享订阅与在途请求，失效通知合并补读；`GitDockMeter` 复用同一份仓库状态，在面板正文之外发布 `git` / `git-quick` 折叠卡摘要 |
-| 对话区 Git 快捷卡 | `git/GitQuickCard.tsx`、`git/useGitQuickReads.ts`、`git/GitWorkspaceContext.tsx` | 独立 `git-quick` 停靠工具；纯图标切换更改 / 历史 / Issues / PR，按工作区记忆；历史支持列表 / 历史树切换并记忆；按视图读取 5 条提交或 3 条协作条目；与完整 Git 共享工作区状态、提交草稿、远端和操作；Git 拖到对话工具列时使用快捷卡预览和落点；旧 rail Git 布局迁移在 `dock/model.ts` |
+| 对话区 Git 快捷卡 | `git/GitQuickCard.tsx`、`git/useGitQuickReads.ts`、`git/GitWorkspaceContext.tsx`、`git/viewMemory.ts` | 独立 `git-quick` 停靠工具；纯图标切换更改 / 历史 / Issues / PR，按工作区记忆；历史支持列表 / 历史树切换并记忆，存储禁用或值非法时回退默认视图且不阻断切换；按视图读取 5 条提交或 3 条协作条目；与完整 Git 共享工作区状态、提交草稿、远端和操作；Git 拖到对话工具列时使用快捷卡预览和落点；旧 rail Git 布局迁移在 `dock/model.ts` |
 | Composer 项目上下文条 | `workbench/WorkbenchCanvas.tsx` 项目上下文条、`workspaces/ExecutionTargetPicker.tsx` | 只在还没发送消息的新对话显示整条（项目 / 分支 / 执行位置 / Git 增删统计），贴在 Composer 上沿；已开始的对话整条隐藏，项目和分支看顶栏；点击统计展开右侧 Git 页签；预览 / 真实共用 `onOpenGit` |
 | 面板拆分 / 更多操作 | `git/GitPanelSplit.tsx`、`GitMoreActionsMenu.tsx` | 操作 kind 见 `client-contract/src/git.ts` `GitOperation` |
 | 文件树 git 徽章 | `git/treeStatus.ts`；`sidebar/WorkspaceTree.tsx` `RealFileTree` | `git.repository.get` |
@@ -219,7 +223,7 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 工作区注册 | 首页 / 设置 | `harness-host/src/workspace-registry.ts`、`workspace.open` / `pick` |
 | 文件树 query | `sidebar/WorkspaceTree.tsx` `RealFileTree` | facade `workspace.fileTree`；磁盘 `apps/desktop/src/workspace-files.ts` |
 | 通用文件窗口 / 编辑与预览 | `files/{FileDockInstances,FilePane,FileTextEditor,PdfPane,SpreadsheetPane,OfficePane}.tsx`、`fileDocuments.ts`、`fileLinks.tsx`；Dock `file-view:` 实例 | `workspace.file.inspect/readText/readChunk/writeText` → `workspace-files.ts`；桌面 `file-resources.ts` 的 `omp-file:` Range 通道覆盖本地 / SSH；保存版本冲突、共享缓冲、布局恢复与关闭确认；预览 `preview/filesPreview.ts`，说明 `docs/file-viewer.md` |
-| 文件窗口头部 / 状态栏 / Git 标记 / 添加到对话 | `files/{FileHeader,FileStatusBar}.tsx`、`gitMarks.ts`（hunk → 行号旁标记）、`fileActions.ts`（`workbench/AppShell.tsx` 的 `fileViewerActions` 复用 Explorer 文件菜单动作与 Composer 胶囊）、`filePreferences.ts`（换行 / 字号） | Git 改动走 `git.diff.get`（`target: "working"`），Diff 视图复用 `git/GitPatch.tsx`；预览补丁 `previewFilePatch` |
+| 文件窗口头部 / 状态栏 / Git 标记 / 添加到对话 | `files/{FileHeader,FileStatusBar}.tsx`、`gitMarks.ts`（hunk → 行号旁标记）、`fileActions.ts`（`workbench/AppShell.tsx` 的 `fileViewerActions` 复用 Explorer 文件菜单动作与 Composer 胶囊）、`filePreferences.ts`（窗口归属 / 换行 / 字号；存储不可用时保留会话内偏好并提示） | Git 改动走 `git.diff.get`（`target: "working"`），Diff 视图复用 `git/GitPatch.tsx`；预览补丁 `previewFilePatch` |
 | 可选 Office 预览组件 | `files/FileViewerSettings.tsx`；更新与维护的「可选组件」 | Desktop `office-component.ts` / `office-process.ts` / `office-component-manifest.ts` / `file-viewer-ipc.ts`；仅主动安装，独立签名工件；打包 `scripts/office-component.mjs`，独立验收 `office-component-smoke.mjs`，手动 workflow `office-component.yml` |
 | Explorer 文件 ⋯ / 右键菜单 | `apps/renderer/src/menus.tsx`（`MenuItem` / `FileRowMenu`）、`sidebar/WorkspaceTree.tsx` `RealFileTree`；`useRowMenuAnchor` 与会话行共享定位；预览 `preview/surfaces.tsx` 同款 | 打开 / 打开方式（已装编辑器子菜单 + 系统「打开方式」）/ 资源管理器定位 / 复制绝对路径 = workspace-shell 文件级通道（`workspace-shell-shared.ts` `fileOpen` / `fileOpenWith` / `fileReveal` / `fileAbsolutePath` / `fileOpeners`，Main 强制包含性校验）；复制相对路径 = Renderer 剪贴板；「添加上下文」复用 @ 按钮的 Composer 胶囊链路；目录「打开」= 树内展开；预览态桌面项禁用 |
 | 拖放路径 | Composer / Explorer | `apps/desktop/src/dropped-paths.ts` |
@@ -239,12 +243,12 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 应用图标 | 侧栏 / 关于 `AppIcon`；`public/icon.png`、`favicon.ico` | Renderer 自带图标资源；桌面运行时在 Windows 设置 `AppUserModelId`（`app-icon.ts` `resolveAppUserModelId`；`npm run preview` 经 `OMP_APP_USER_MODEL_ID` 用独立 `.preview` ID 与`Juling Harness (Preview).lnk`，不得与安装版共用——开始菜单里同 ID 的第二个快捷方式会让任务栏/通知变成该快捷方式的图标）并把 `resources/icon.ico` 注入窗口（任务栏/窗口身份）；安装包由 `packaging/electron-builder.yml` 将同一 ICO 写入 EXE，并创建带图标的桌面与开始菜单快捷方式 |
 | 系统通知 | — | `chrome-notify.ts` |
 | 系统托盘 / 关闭到托盘 | —（纯 Main 行为，无 Renderer 面，不进 preload/client-contract） | `tray.ts`（Electron-free，Main 注入 Tray/Menu/nativeImage：菜单文案 zh/en、左键打开、首隐气泡与 `%APPDATA%\juling-harness\tray-hint-shown` 标记、退出确认框文案）+ `main.ts`（close 事件拦截为 hide，托盘不可用时保持关窗即退出；`DesktopWindow.show()`）+ `composition.ts`（`requestQuit` 确认门：`host-composition.ts` `isBusy()` 以 residents 流式/压缩为准，回退当前会话 snapshot；`isQuitting` 注入窗口工厂放行真实退出） |
-| 外部 https 链接 | 启动提示 GitHub 卡；`ompHarnessChrome.openUrl` | `chrome-open-url.ts` → `shell.openExternal`（系统默认浏览器，不是 Electron 窗）；只接受 https |
+| 外部 https 链接 | 启动提示 GitHub 卡；`julingHarnessChrome.openUrl` | `chrome-open-url.ts` → `shell.openExternal`（系统默认浏览器，不是 Electron 窗）；只接受 https |
 | 操作者头像文件 | 首页弹窗 | `chrome-profile.ts` → `%APPDATA%\juling-harness\profile\`；升级从安装目录 `userdata\profile` 迁入；卸载 `customUnInstall` 删除 |
 | 应用更新（GitHub Release） | AppUpdateDialog、settings/appUpdate、settings/updates、settings/UpdateAutomationSettings、settings/UpdateSettings、settings/DesktopUpdateRecovery（更新与维护页）；预览 PREVIEW_APP_UPDATE / PREVIEW_DESKTOP_RECOVERY / PREVIEW_UPDATE_PREFS | Main update-coordinator / unified-updates-ipc 管理后台准备、持久化事务、统一重启；update-discovery 验签按组件/通道/架构发现；differential-artifact + electron-update-adapter 分块下载/全量回退及静默 NSIS；共享 v2 清单和 ZIP 在 runtime-installer。旧 chrome-updates 保留本地导入与诊断维护；新打包应用禁用旧在线 startApp/startRuntime。 |
 | Plan 另存为对话框 | `workbench/WorkbenchCanvas.tsx` `pickPlanSaveTarget` / `savePlanAndQuit`；`deck/PlanCard.tsx` 按钮 | `workspace-shell-shared.ts`、`workspace-shell-ipc.ts`、`plan-save-path.ts`（原生另存为，默认 `<工作区>/PLAN.md`，回传工作区相对路径；越界拒绝）→ Bridge `mode.plan.review.saveAndQuit` |
 | 设置页 | `SettingsPage.tsx`、`settings/{catalog,LocalSettings,SettingsPanels,ModelServicesSettings,UpdateSettings,SettingsScope,Runtime1844Rows,MemoryCredentialPane,UnsupportedSettings,tabs}.tsx` | 按用途分类和中英文／配置键搜索；本机偏好与 Runtime 配置分开，Runtime 默认保存到用户配置，可切换会话覆盖；未接入功能集中展示；预览只改演示状态 |
-| 背景（图片 / 视频 / 动图） | `background/BackgroundSettingsPane.tsx`、`AppBackgroundLayer.tsx`、`BackgroundProvider.tsx`、`backgroundLibrary.ts`；预览 `preview/backgroundPreview.ts` | 纯 Renderer 本地：偏好 `omp.background`、文件 IndexedDB `juling-harness-backgrounds`；`[data-backdrop]` 让结构壳、卡片和控件按层次透出（菜单 / 弹窗保留高不透明度与背景模糊）；`ompHarnessChrome.setTheme` 仅额外带标题栏 tint。不进 Host / client-contract |
+| 背景（图片 / 视频 / 动图） | `background/BackgroundSettingsPane.tsx`、`AppBackgroundLayer.tsx`、`BackgroundProvider.tsx`、`backgroundLibrary.ts`；预览 `preview/backgroundPreview.ts` | 纯 Renderer 本地：偏好 `omp.background`、文件 IndexedDB `juling-harness-backgrounds`；`[data-backdrop]` 让结构壳、卡片和控件按层次透出（菜单 / 弹窗保留高不透明度与背景模糊）；`julingHarnessChrome.setTheme` 仅额外带标题栏 tint。不进 Host / client-contract |
 | 字体与字号 | `settings/FontSettings.tsx`、`settings/typography.ts`、`styles/typography.css`；`terminalTheme.ts` | 外观与布局页三组独立字体与字号；本地设置、系统字体搜索／手填、预览示例隔离；xterm 原实例更新及虚拟行高重测；使用说明 `docs/fonts.md` |
 | 预测输入 | `composer/useWordPrediction.ts`、`settings/PredictionSettingsPane.tsx`；desktop `prediction.ts` | 原生 WordCompletionProvider；默认本地 n-gram，模型下载和外部历史显式选择；私有通道不进入 Bridge 事件 |
 | 标题图标与短码 | `history/useSessionTitles.ts`、`history/SessionTitleMark.tsx` | `session.titles.inspect`；原生当前/保存标题元数据；保留稳定会话身份与现有原生重新生成流程 |

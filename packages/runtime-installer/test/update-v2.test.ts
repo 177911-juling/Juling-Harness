@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { zipSync } from "fflate";
-import { createRuntimeArchive, extractRuntimeArchive, RUNTIME_ARCHIVE_FILES, runtimeArchiveFiles, runtimeEntrypointFor, UPDATE_PLATFORMS, updateSigningBytes, verifyUpdateManifest, type UpdateManifest, type UpdateFile } from "../src/index.js";
+import { canonicalUpdateJson, createRuntimeArchive, extractRuntimeArchive, RUNTIME_ARCHIVE_FILES, runtimeArchiveFiles, runtimeEntrypointFor, UPDATE_PLATFORMS, updateSigningBytes, verifyUpdateManifest, type UpdateManifest, type UpdateFile } from "../src/index.js";
 
 const pair = generateKeyPairSync("ed25519"), key = pair.publicKey.export({ type: "spki", format: "pem" });
 const file = (asset: string): UpdateFile => ({ asset, url: `https://github.com/owner/repo/releases/download/v1/${asset}`, size: 3, sha256: createHash("sha256").update("abc").digest("hex"), sha512: createHash("sha512").update("abc").digest("base64") });
@@ -35,29 +35,36 @@ async function archiveSource(root: string, platform: string, entrypoint: string)
   return source;
 }
 test("Runtime archive is deterministic and imports exact bytes", async () => {
-  const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-")), source = await archiveSource(root, "win32-x64", "omp.exe");
+  const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-")), source = await archiveSource(root, "win32-x64", "juling.exe");
   await createRuntimeArchive(source, join(root, "a.zip"));
   await createRuntimeArchive(source, join(root, "b.zip"));
   assert.deepEqual(await readFile(join(root, "a.zip")), await readFile(join(root, "b.zip")));
   // Golden bytes: the Windows archive layout must never move, or published blockmaps stop matching.
-  assert.equal(createHash("sha256").update(await readFile(join(root, "a.zip"))).digest("hex"), "ec4faef8361a16b40d06be8240de2eabdebef0f231739cd5001fce5668e83129");
+  assert.equal(createHash("sha256").update(await readFile(join(root, "a.zip"))).digest("hex"), "37e6d53926fa1f0bafe0aba257e6ba07d50590f3b549efb5dc14bb5387ac2c5e");
   await extractRuntimeArchive(join(root, "a.zip"), join(root, "out"));
   for (const name of RUNTIME_ARCHIVE_FILES) assert.deepEqual(await readFile(join(source, name)), await readFile(join(root, "out", name)));
 });
-test("a macOS Runtime archive carries omp and extracts it executable", async () => {
-  const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-darwin-")), source = await archiveSource(root, "darwin-arm64", "omp");
+test("a macOS Runtime archive carries juling and extracts it executable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-darwin-")), source = await archiveSource(root, "darwin-arm64", "juling");
+  await createRuntimeArchive(source, join(root, "a.zip"));
+  await extractRuntimeArchive(join(root, "a.zip"), join(root, "out"));
+  for (const name of runtimeArchiveFiles("juling")) assert.deepEqual(await readFile(join(source, name)), await readFile(join(root, "out", name)));
+  if (process.platform !== "win32") assert.equal((await stat(join(root, "out", "juling"))).mode & 0o777, 0o755);
+});
+test("a pre-rename macOS Runtime archive still extracts under its signed name", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-legacy-")), source = await archiveSource(root, "darwin-arm64", "omp");
   await createRuntimeArchive(source, join(root, "a.zip"));
   await extractRuntimeArchive(join(root, "a.zip"), join(root, "out"));
   for (const name of runtimeArchiveFiles("omp")) assert.deepEqual(await readFile(join(source, name)), await readFile(join(root, "out", name)));
   if (process.platform !== "win32") assert.equal((await stat(join(root, "out", "omp"))).mode & 0o777, 0o755);
 });
 test("a Linux Runtime archive preserves bytes without becoming a desktop update target", async () => {
-  const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-linux-")), source = await archiveSource(root, "linux-x64", "omp");
+  const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-linux-")), source = await archiveSource(root, "linux-x64", "juling");
   await createRuntimeArchive(source, join(root, "a.zip"));
   await extractRuntimeArchive(join(root, "a.zip"), join(root, "out"));
-  assert.deepEqual(await readFile(join(source, "omp")), await readFile(join(root, "out", "omp")));
+  assert.deepEqual(await readFile(join(source, "juling")), await readFile(join(root, "out", "juling")));
   assert.equal((UPDATE_PLATFORMS as readonly string[]).includes("linux-x64"), false);
-  if (process.platform !== "win32") assert.equal((await stat(join(root, "out", "omp"))).mode & 0o777, 0o755);
+  if (process.platform !== "win32") assert.equal((await stat(join(root, "out", "juling"))).mode & 0o777, 0o755);
 });
 test("Runtime archive entrypoint must agree with the manifest platform", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-mismatch-"));
@@ -76,11 +83,11 @@ test("Runtime archive entrypoint must agree with the manifest platform", async (
   }
 });
 test("platform table follows the artifact platform", () => {
-  assert.equal(runtimeEntrypointFor("win32-x64"), "omp.exe");
-  assert.equal(runtimeEntrypointFor("win32-arm64"), "omp.exe");
-  assert.equal(runtimeEntrypointFor("darwin-arm64"), "omp");
-  assert.equal(runtimeEntrypointFor("linux-x64"), "omp");
-  assert.equal(runtimeEntrypointFor("linux-arm64"), "omp");
+  assert.equal(runtimeEntrypointFor("win32-x64"), "juling.exe");
+  assert.equal(runtimeEntrypointFor("win32-arm64"), "juling.exe");
+  assert.equal(runtimeEntrypointFor("darwin-arm64"), "juling");
+  assert.equal(runtimeEntrypointFor("linux-x64"), "juling");
+  assert.equal(runtimeEntrypointFor("linux-arm64"), "juling");
   assert.deepEqual([...UPDATE_PLATFORMS], ["win32-x64", "win32-arm64", "darwin-arm64"]);
 });
 test("a macOS catalog ships the desktop as a zipped app and rejects the Windows installer", () => {
@@ -124,3 +131,30 @@ test("Runtime archive refuses path traversal, compressed entries and missing fil
     await assert.rejects(() => extractRuntimeArchive(path, join(root, name)), /archive/);
   }
 });
+
+test("a catalog signed before the Harness rename still verifies and normalizes", () => {
+  assertClassicDomain();
+});
+
+function assertClassicDomain(): void {
+  const file = {
+    asset: "Juling-Harness-Runtime-18.18.0-studio.1-windows-x64.zip",
+    url: "https://github.com/177911-juling/juling-harness/releases/download/v0.2.0/Juling-Harness-Runtime-18.18.0-studio.1-windows-x64.zip",
+    size: 1, sha256: "a".repeat(64), sha512: `${"A".repeat(86)}==`,
+  };
+  const raw = {
+    schema: 2, repo: "177911-juling/juling-harness", platform: "win32-x64",
+    generatedAt: "2026-11-13T00:00:00.000Z",
+    releaseNotesUrl: "https://github.com/177911-juling/juling-harness/releases/tag/v0.2.0",
+    runtime: {
+      version: "18.18.0-studio.1", sequence: 13, channel: "stable",
+      file, blockmap: { ...file, asset: `${file.asset}.blockmap`, url: `${file.url}.blockmap` },
+      minAppVersion: "0.1.5", studioProtocol: { min: 1, max: 1 },
+    },
+  };
+  const body = Buffer.from(`omp-studio-update-v2
+${canonicalUpdateJson(raw)}`);
+  const value = sign(null, body, pair.privateKey).toString("base64url");
+  const verified = verifyUpdateManifest({ manifest: raw, signature: { algorithm: "ed25519", keyId: "test", value } }, { test: key }, raw.repo, "win32-x64");
+  assert.deepEqual(verified.manifest.runtime?.harnessProtocol, { min: 1, max: 1 });
+}

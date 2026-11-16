@@ -3,12 +3,12 @@
  *
  * `runtime.install` copies a locally signed artifact into the Host-owned
  * Runtime tree and activates it. There is no downloader and no PATH /
- * system-omp fallback. Artifact lookup is Host-only; paths never enter
+ * system Runtime fallback. Artifact lookup is Host-only; paths never enter
  * ClientBootstrap.
  *
  * Unpackaged (`electron .`) keeps that tree under
  * `%APPDATA%\juling-harness\runtimes`. Packaged builds put the live
- * `omp.exe` at `$INSTDIR\runtime\versions\<ver>\` (`extraFiles` already
+ * `juling.exe` at `$INSTDIR\runtime\versions\<ver>\` (`extraFiles` already
  * uses the installer layout). First launch verifies and writes
  * `$INSTDIR\runtime\current.json`; diagnostics updates write the same
  * folder. Uninstall deletes that live Runtime with the app.
@@ -255,11 +255,11 @@ async function readTrustedKeysDirectory(
 
 export interface InstallerTrustedKeysOptions {
   /**
-   * Honour `OMP_RUNTIME_TRUSTED_PUBLIC_KEY` + `OMP_RUNTIME_SIGNING_KEY_ID`,
-   * which replace the whole trust root. Development only: packaged builds pass
-   * false, so an environment variable (a shell profile on macOS reaches the
-   * app through the login environment) can never make a foreign Runtime
-   * signature trusted.
+   * Honour `JULING_RUNTIME_TRUSTED_PUBLIC_KEY` + `JULING_RUNTIME_SIGNING_KEY_ID`
+   * (or the pre-rename `OMP_*` spellings), which replace the whole trust root.
+   * Development only: packaged builds pass false, so an environment variable
+   * (a shell profile on macOS reaches the app through the login environment)
+   * can never make a foreign Runtime signature trusted.
    */
   readonly environment?: boolean;
 }
@@ -268,8 +268,8 @@ export async function loadInstallerTrustedKeys(
   keysDirectory: string | readonly string[] = defaultRuntimeKeysDirectory(),
   options: InstallerTrustedKeysOptions = {},
 ): Promise<{ trustedKeys: Record<string, Buffer> } | undefined> {
-  const envPath = options.environment === false ? undefined : process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY?.trim();
-  const envId = options.environment === false ? undefined : process.env.OMP_RUNTIME_SIGNING_KEY_ID?.trim();
+  const envPath = options.environment === false ? undefined : (process.env.JULING_RUNTIME_TRUSTED_PUBLIC_KEY ?? process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY)?.trim();
+  const envId = options.environment === false ? undefined : (process.env.JULING_RUNTIME_SIGNING_KEY_ID ?? process.env.OMP_RUNTIME_SIGNING_KEY_ID)?.trim();
   if (envPath !== undefined && envPath.length > 0 && envId !== undefined && envId.length > 0) {
     return { trustedKeys: { [envId]: await readFile(envPath) } };
   }
@@ -326,7 +326,9 @@ export function collectManagedRuntimeArtifactRoots(options: {
 }
 
 function defaultArtifactRoots(platform: string, extra?: string): string[] {
-  const fromEnv = process.env.OMP_ARTIFACT_DIR;
+  // Canonical name first; the pre-rename one stays readable for existing shells
+  // and the e2e scripts that still export it.
+  const fromEnv = process.env.JULING_ARTIFACT_DIR ?? process.env.OMP_ARTIFACT_DIR;
   const resolvedExtra = extra ?? fromEnv;
   return collectManagedRuntimeArtifactRoots({
     platform,
@@ -581,7 +583,7 @@ export function createDesktopRuntimeInstallService(options: {
     try {
       if (!options.hasTrustedKey) {
         throw new Error(
-          "Managed Runtime install requires OMP_RUNTIME_TRUSTED_PUBLIC_KEY and OMP_RUNTIME_SIGNING_KEY_ID. Run npm run omp:keys to create a local signing key.",
+          "Managed Runtime install requires JULING_RUNTIME_TRUSTED_PUBLIC_KEY and JULING_RUNTIME_SIGNING_KEY_ID. Run npm run omp:keys to create a local signing key.",
         );
       }
       const selectedChannel = effectiveRuntimeChannel(channel);
@@ -592,7 +594,7 @@ export function createDesktopRuntimeInstallService(options: {
       if (artifactDirectory === undefined) {
         throw new Error(
           channel === undefined
-            ? "No managed Runtime artifact was found. Run npm run omp:build:host or set OMP_ARTIFACT_DIR."
+            ? "No managed Runtime artifact was found. Run npm run omp:build:host or set JULING_ARTIFACT_DIR."
             : `No managed Runtime artifact was found for the ${selectedChannel} channel.`,
         );
       }

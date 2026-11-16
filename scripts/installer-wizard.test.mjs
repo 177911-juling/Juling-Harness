@@ -26,7 +26,7 @@ test("the HTML wizard keeps its chosen directory after install-mode selection an
 
   // Compile the actual hooks with electron-builder's actual directory-reset
   // macro. The fixture writes only its result INI, never an app or registry key.
-  await writeFile(script, `
+  await writeFile(script, `﻿
 Unicode true
 OutFile "${setup}"
 RequestExecutionLevel user
@@ -74,7 +74,7 @@ Section
   WriteINIStr "$EXEDIR\\result.ini" "Result" "Dir" "$INSTDIR"
   WriteINIStr "$PLUGINSDIR\\finish.ini" "Install" "Run" "0"
 SectionEnd
-`);
+`, "utf16le");
   execFileSync(compiler.path, ["/V2", script], { env: { ...process.env, ...compiler.env }, windowsHide: true, timeout: 30_000 });
 
   // MUI starts copying automatically. Do not click its hidden Next button:

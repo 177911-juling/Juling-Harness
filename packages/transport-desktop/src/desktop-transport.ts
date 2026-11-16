@@ -1,6 +1,6 @@
 /**
  * Renderer-side Desktop transport: forwards typed envelopes between the
- * Renderer and the Desktop shell's `OmpHarnessDesktopApi` 1:1. Electron IPC
+ * Renderer and the Desktop shell's `JulingHarnessDesktopApi` 1:1. Electron IPC
  * already copies payloads, so nothing is cloned here.
  *
  * `close()` is idempotent and unsubscribes every active listener; no
@@ -22,7 +22,7 @@ import type {
   Unsubscribe,
 } from "@juling-harness/client-contract";
 
-import type { OmpHarnessDesktopApi } from "./desktop-api.js";
+import type { JulingHarnessDesktopApi } from "./desktop-api.js";
 
 class TransportClosedError extends Error {
   constructor() {
@@ -36,7 +36,7 @@ export class DesktopClientTransport implements ClientTransport {
   private closePromise: Promise<void> | null = null;
   private readonly subscriptions = new Set<Unsubscribe>();
 
-  constructor(private readonly api: OmpHarnessDesktopApi, private readonly contextId?: string) {}
+  constructor(private readonly api: JulingHarnessDesktopApi, private readonly contextId?: string) {}
   get supportsContexts(): boolean { return this.api.openContext !== undefined; }
 
   async openContext(scope: ClientContextScope): Promise<ClientTransport> {
@@ -96,6 +96,6 @@ export class DesktopClientTransport implements ClientTransport {
 }
 
 /** Create a renderer-side `ClientTransport` bound to a Desktop shell api. */
-export function createDesktopTransport(api: OmpHarnessDesktopApi): ClientTransport {
+export function createDesktopTransport(api: JulingHarnessDesktopApi): ClientTransport {
   return new DesktopClientTransport(api);
 }

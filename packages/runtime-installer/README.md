@@ -1,6 +1,6 @@
 # @juling-harness/runtime-installer
 
-Ed25519-signed, checksum-verified, versioned installation of managed OMP
+Ed25519-signed, checksum-verified, versioned installation of managed Juling
 Harness Runtimes with atomic activation, a pre-activation self-check, rollback,
 channel metadata, and reference-safe retention.
 

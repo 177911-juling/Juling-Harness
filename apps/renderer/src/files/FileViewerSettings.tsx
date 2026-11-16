@@ -7,14 +7,16 @@ import { readFileScope, saveFileScope, type FileScope } from "./filePreferences"
 import type { OfficeComponentState } from "../../../desktop/src/file-viewer-shared";
 
 export function FileViewerSettings() {
-  const { preview } = usePreviewMode(); const [scope, setScope] = useState(() => readFileScope(preview));
-  useEffect(() => setScope(readFileScope(preview)), [preview]);
-  return <SettingSection title="文件查看器"><SettingRow label="文件窗口默认归属" desc="适用于之后打开的文件。已有窗口可通过 Pin 菜单调整归属。" source="user"><AppSelect aria-label="文件窗口默认归属" value={scope} onChange={event => { const value = event.target.value as FileScope; setScope(value); saveFileScope(value, preview); }}><option value="conversation">跟随来源对话</option><option value="workspace">工作区共享</option></AppSelect></SettingRow><SettingRow label="保存方式" desc="Ctrl / Cmd + S 手动保存。磁盘文件被 Agent 或其他程序修改时提示处理冲突。" source="default"><span>手动保存</span></SettingRow></SettingSection>;
+  const { preview } = usePreviewMode();
+  const [scope, setScope] = useState(() => readFileScope(preview));
+  const [storageWarning, setStorageWarning] = useState(false);
+  useEffect(() => { setScope(readFileScope(preview)); setStorageWarning(false); }, [preview]);
+  return <SettingSection title="文件查看器"><SettingRow label="文件窗口默认归属" desc="适用于之后打开的文件。已有窗口可通过 Pin 菜单调整归属。" source="user"><AppSelect aria-label="文件窗口默认归属" value={scope} onChange={event => { const value = event.target.value as FileScope; setScope(value); setStorageWarning(!saveFileScope(value, preview)); }}><option value="conversation">跟随来源对话</option><option value="workspace">工作区共享</option></AppSelect>{storageWarning ? <small role="status">无法保存此偏好，本次会话内仍会生效。</small> : null}</SettingRow><SettingRow label="保存方式" desc="Ctrl / Cmd + S 手动保存。磁盘文件被 Agent 或其他程序修改时提示处理冲突。" source="default"><span>手动保存</span></SettingRow></SettingSection>;
 }
 export function OfficeComponentSettings() {
   const { preview, marks } = usePreviewMode();
   const [state, setState] = useState<OfficeComponentState>({ id: "office-preview", status: "not-installed" });
-  const api = globalThis.ompHarnessChrome?.files;
+  const api = globalThis.julingHarnessChrome?.files;
   const [error, setError] = useState("");
   useEffect(() => {
     if (preview) { setState(previewOfficeState()); return subscribePreviewOffice(() => setState(previewOfficeState())); }

@@ -14,7 +14,10 @@ export async function migrateLegacyRuntime(input: {
   const target = new RuntimeInstaller(input.userRuntimeRoot, { trustedKeys: input.trustedKeys });
   if (await target.currentManifest()) return; // Respect an existing verified per-user Runtime.
   await target.install(join(source.rootDirectory, "versions", current.manifest.runtimeVersion));
-  if (current.manifest.harnessProtocol.min <= HARNESS_PROTOCOL_VERSION && current.manifest.harnessProtocol.max >= HARNESS_PROTOCOL_VERSION) {
+  // A pre-rename artifact speaks the old `omp-studio` wire protocol, so it is
+  // kept as a signed rollback copy but never activated for a Harness desktop.
+  const renamed = !current.manifest.patchsetVersion.startsWith("studio.");
+  if (renamed && current.manifest.harnessProtocol.min <= HARNESS_PROTOCOL_VERSION && current.manifest.harnessProtocol.max >= HARNESS_PROTOCOL_VERSION) {
     await target.activate(current.manifest.runtimeVersion, input.activateOptions);
   }
   // Otherwise keep the old signed artifact for recovery; normal startup seeds

@@ -211,23 +211,24 @@ export class HarnessSessionBroker {
       const lease = await this.#leases.acquire({ sessionId, ownerId: this.#ownerId });
       let worker: SessionWorker | undefined;
       try {
-        worker = this.#workers.create({ sessionId, workspaceId: record.workspaceId, cwd: record.cwd });
+        const createdWorker = this.#workers.create({ sessionId, workspaceId: record.workspaceId, cwd: record.cwd });
+        worker = createdWorker;
         record.lease = lease;
         record.leaseEpoch = lease.leaseEpoch;
+        record.worker = createdWorker;
         if (lease.heartbeat !== undefined) {
           const heartbeat = () => {
             void Promise.resolve(lease.heartbeat!()).catch(() => {
-              this.#workerExited(record, "Session lease heartbeat failed");
+              this.#workerExited(record, "Session lease heartbeat failed", createdWorker);
             });
           };
           record.heartbeatTimer = setInterval(heartbeat, 10_000);
           record.heartbeatTimer.unref?.();
         }
-        record.worker = worker;
         this.#residentCount += 1;
         record.residency = "starting";
-        const unsubscribePublication = worker.onPublication?.((snapshot) => this.#acceptSnapshot(record, snapshot));
-        const unsubscribeExit = worker.onExit?.((reason) => this.#workerExited(record, reason));
+        const unsubscribePublication = createdWorker.onPublication?.((snapshot) => this.#acceptSnapshot(record, snapshot));
+        const unsubscribeExit = createdWorker.onExit?.((reason) => this.#workerExited(record, reason, createdWorker));
         record.unsubscribePublication = unsubscribePublication;
         record.unsubscribeExit = unsubscribeExit;
         await worker.start();
@@ -309,16 +310,20 @@ export class HarnessSessionBroker {
     record.brokerRevision += 1;
   }
 
-  #workerExited(record: MutableRecord, reason?: string): void {
-    if (record.residency === "hibernating" || record.residency === "dormant") return;
-    if (record.heartbeatTimer !== undefined) {
-      clearInterval(record.heartbeatTimer);
-      record.heartbeatTimer = undefined;
-    }
+  #workerExited(record: MutableRecord, reason: string | undefined, worker: SessionWorker): void {
+    if (record.worker !== worker || record.residency === "hibernating" || record.residency === "dormant") return;
+    // Publish the crash before queuing disposal so an immediate restart cannot
+    // take the online fast path while the exited Worker is still attached.
     record.residency = "crashed";
     record.execution = "interrupted";
     record.lastError = reason ?? "Runtime Worker exited unexpectedly";
     record.brokerRevision += 1;
+    void this.#enqueue(record, async () => {
+      // Exit and heartbeat can fail together. Only the Worker that observed the
+      // failure may be disposed; a late callback must not retire its replacement.
+      if (record.worker !== worker || record.residency === "hibernating" || record.residency === "dormant") return;
+      await this.#disposeWorker(record, worker);
+    }).catch(() => undefined);
   }
 
   async #disposeWorker(record: MutableRecord, worker: SessionWorker | undefined): Promise<void> {

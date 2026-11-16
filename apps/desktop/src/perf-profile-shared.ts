@@ -78,8 +78,8 @@ export interface PerfProfileApiIpc {
   removeListener(channel: string, listener: (event: unknown, payload: PerfProfileSnapshot | null | undefined) => void): void;
 }
 
-/** Read-only surface exposed by the preload as `window.ompHarnessPerf`. */
-export interface OmpHarnessPerfApi {
+/** Read-only surface exposed by the preload as `window.julingHarnessPerf`. */
+export interface JulingHarnessPerfApi {
   /**
    * Last snapshot Main knows about, read synchronously at preload time.
    * Null on the very first run (nothing cached yet). Safe for the first paint:
@@ -93,10 +93,10 @@ export interface OmpHarnessPerfApi {
 }
 
 /**
- * Build `window.ompHarnessPerf`. Frozen so the renderer cannot add fields, and
+ * Build `window.julingHarnessPerf`. Frozen so the renderer cannot add fields, and
  * deliberately read-only: there is no method that writes anything to Main.
  */
-export function createPerfProfileApi(ipc: PerfProfileApiIpc): OmpHarnessPerfApi {
+export function createPerfProfileApi(ipc: PerfProfileApiIpc): JulingHarnessPerfApi {
   let cached: PerfProfileSnapshot | null = null;
   try {
     // `sendSync` keeps this available before the first paint. It is one tiny
@@ -106,7 +106,7 @@ export function createPerfProfileApi(ipc: PerfProfileApiIpc): OmpHarnessPerfApi 
   } catch {
     cached = null;
   }
-  const api: OmpHarnessPerfApi = {
+  const api: JulingHarnessPerfApi = {
     cached,
     async probe() {
       const snapshot = await ipc.invoke(PERF_PROFILE_CHANNELS.probe);

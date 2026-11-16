@@ -222,7 +222,7 @@ if (new URLSearchParams(window.location.search).get("host") === "installer") { d
     document.getElementById("runCheckRow").hidden = isUninstall();
     document.getElementById("finishLink").hidden = isUninstall();
     document.getElementById("finishActions").hidden = isUninstall();
-    document.getElementById("f1Title").textContent = "内置 OMP 运行时";
+    document.getElementById("f1Title").textContent = "内置 Juling 运行时";
     document.getElementById("f1Desc").textContent = "首次启动自动校验，无需额外部署。";
     document.getElementById("f2Title").textContent = "原生 PTY 终端";
     document.getElementById("f2Desc").textContent = "直接使用当前电脑的 Shell。";
@@ -230,15 +230,15 @@ if (new URLSearchParams(window.location.search).get("host") === "installer") { d
     document.getElementById("f3Desc").textContent = "在工作台中配置模型、Agent 与 MCP。";
     var runtimeLabel = document.createElement("b");
     runtimeLabel.textContent = RUNTIME_VERSION;
-    document.getElementById("welcomeRuntime").replaceChildren("内置 OMP Runtime", document.createElement("br"), runtimeLabel);
-    document.getElementById("finishRuntime").textContent = "首次启动将校验并启用 Runtime";
+    document.getElementById("welcomeRuntime").replaceChildren("内置 Juling Runtime", document.createElement("br"), runtimeLabel);
+    document.getElementById("finishRuntime").textContent = "首次启动将校验并启用 Juling Runtime";
     document.getElementById("progressTitle").textContent = "正在安装 Juling Harness";
     document.getElementById("progressLede").textContent = "请稍候，正在将 Juling Harness 安装到你的计算机。";
     document.getElementById("sumK0").textContent = "安装位置";
     document.getElementById("sumK1").textContent = "产品版本";
     document.getElementById("sumV1").textContent = "Juling Harness " + PACKAGE_VERSION + " (" + ARCH + ")";
     document.getElementById("sumK2").textContent = "内置运行时";
-    document.getElementById("sumV2").textContent = "OMP Runtime " + RUNTIME_VERSION;
+    document.getElementById("sumV2").textContent = "Juling Runtime " + RUNTIME_VERSION;
     var welcomeChip = document.getElementById("welcomeChip");
     var finishChip = document.getElementById("finishChip");
     if (welcomeChip) welcomeChip.textContent = "v" + PACKAGE_VERSION + " · " + ARCH;
@@ -289,7 +289,7 @@ if (new URLSearchParams(window.location.search).get("host") === "installer") { d
       document.getElementById("f2Title").textContent = "删除快捷方式";
       document.getElementById("f2Desc").textContent = "开始菜单与桌面的 Juling Harness 快捷方式一并移除。";
       document.getElementById("f3Title").textContent = "删除头像，保留会话";
-      document.getElementById("f3Desc").textContent = "只清 %APPDATA%\\juling-harness\\profile；日志与会话不动。安装目录里的 omp.exe 随程序一起删除。";
+      document.getElementById("f3Desc").textContent = "只清 %APPDATA%\\juling-harness\\profile；日志与会话不动。安装目录里的 juling.exe 随程序一起删除。";
       document.getElementById("welcomeRuntime").innerHTML = "&gt;_ 将删除本机安装";
       document.getElementById("finishRuntime").innerHTML = "&gt;_ 会话与日志仍在 AppData";
       document.getElementById("progressTitle").textContent = "正在卸载 Juling Harness";
@@ -492,7 +492,7 @@ if (new URLSearchParams(window.location.search).get("host") === "installer") { d
     return [
       { t: .05, time: '10:24:01', msg: '准备安装到 ' + path, phase: '正在准备安装…', kind: 'ok' },
       { t: .25, time: '10:24:03', msg: '写入桌面程序与界面资源', phase: '正在写入程序文件…', file: 'resources/app.asar', kind: 'ok' },
-      { t: .6, time: '10:24:05', msg: '写入 OMP Runtime ' + RUNTIME_VERSION, file: 'runtime/versions/' + RUNTIME_VERSION + '/omp.exe', kind: 'hl' },
+      { t: .6, time: '10:24:05', msg: '写入 Juling Runtime ' + RUNTIME_VERSION, file: 'runtime/versions/' + RUNTIME_VERSION + '/juling.exe', kind: 'hl' },
       { t: .85, time: '10:24:07', msg: '应用快捷方式选择并写入卸载信息', phase: '正在完成安装…', file: '', kind: 'ok' },
       { t: 1, time: '10:24:08', msg: '安装完成', kind: 'done' }
     ];
@@ -682,7 +682,7 @@ if (new URLSearchParams(window.location.search).get("host") === "installer") { d
       alt.textContent = "取消";
     } else if (kind === "uninstall") {
       title.textContent = "确认卸载 Juling Harness？";
-      msg.textContent = "将删除程序文件（含安装目录里的 omp.exe）、开始菜单与桌面快捷方式，以及 %APPDATA%\\juling-harness\\profile（头像）。会话与日志会留在 AppData。";
+      msg.textContent = "将删除程序文件（含安装目录里的 juling.exe）、开始菜单与桌面快捷方式，以及 %APPDATA%\\juling-harness\\profile（头像）。会话与日志会留在 AppData。";
       ok.textContent = "卸载";
       alt.textContent = "取消";
     } else {
@@ -847,12 +847,12 @@ if (new URLSearchParams(window.location.search).get("host") === "installer") { d
       installerShell.finish({ run: run });
       return;
     }
-    var toast = document.getElementById("toast");
-    document.getElementById("toastMsg").textContent = isUninstall()
-      ? "卸载向导已退出"
-      : (run ? "正在启动 Juling Harness…" : "安装向导已退出");
-    toast.hidden = false;
-    setTimeout(function () { toast.hidden = true; stopSim(); closeInstallerShell(); }, 2000);
+    stopSim();
+    var appUrl = new URLSearchParams(window.location.search).get("appUrl");
+    if (!appUrl && window.location.protocol !== "file:") {
+      appUrl = "/preview-app-harness.html?preview=1&marks=off";
+    }
+    window.open(run && appUrl ? appUrl : "about:blank", "_self");
   });
 
   document.querySelectorAll(".js-next").forEach(function (b) {

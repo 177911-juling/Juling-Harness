@@ -198,7 +198,7 @@ type OptimisticPrompt = { readonly pending: PendingUser; readonly phase: PromptS
 let nextOptimisticPromptId = 1;
 
 const PROMPT_SEND_PHASE_LABEL: Record<PromptSendPhase, string> = {
-  starting: "Starting OMP",
+  starting: "Starting Juling",
   sending: "Sending",
   initiating: "Initiating",
 };
@@ -758,8 +758,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     if (optimistic === undefined) return;
     convoRef.current.trackPending(optimistic.pending);
   }, [convo.engine, optimisticPrompt?.pending.requestId]);
-  const selectedTargetRef = useRef({ selectedSessionId, selectedThreadId });
-  selectedTargetRef.current = { selectedSessionId, selectedThreadId };
+  const selectedTargetRef = useRef({ selectedSessionId, selectedThreadId, viewIdentity });
+  selectedTargetRef.current = { selectedSessionId, selectedThreadId, viewIdentity };
   const run = useCallback(async <T extends CommandName>(name: T, input: CommandInput<T>): Promise<boolean> => {
     const concurrent = isLiveSessionPreferenceCommand(name) || name === "interaction.respond";
     if (busy && !concurrent) return false;
@@ -850,7 +850,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       setRemotePlanPath("PLAN.md");
       return new Promise(resolve => setRemotePlanSave({ resolve }));
     }
-    const chrome = globalThis.ompHarnessChrome;
+    const chrome = globalThis.julingHarnessChrome;
     if (chrome?.pickPlanSavePath !== undefined) {
       if (activeWorkspace === undefined) {
         setStatusToast("没有可用的本地项目，无法选择保存位置");
@@ -1528,12 +1528,16 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   // 草稿恢复方式由调用方决定（输入框草稿回填 vs 排队条目回队）。
   const dispatchPrompt = async (payload: ComposerSnapshot, options?: { readonly asFollowUp?: boolean; readonly waitForReady?: boolean }): Promise<boolean> => {
     if (!promptDispatchGate.tryEnter()) return false;
+    // A fresh draft publishes its new session selection in React. Commit that
+    // ownership before capturing the target; Runtime readiness is awaited separately.
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     const plan = planComposerSend(payload, slashCatalog);
     let outboundPayload = payload;
     let optimisticRequestId: string | undefined;
     let readySessionId: SessionId | undefined;
-    const targetSessionId = selectedSessionId as SessionId | undefined;
-    const targetThreadId = selectedThreadId;
+    const targetSessionId = selectedTargetRef.current.selectedSessionId as SessionId | undefined;
+    const targetThreadId = selectedTargetRef.current.selectedThreadId;
+    const targetViewIdentity = selectedTargetRef.current.viewIdentity;
     setComposerSubmitted(true);
     try {
       if (plan.kind === "execute") {
@@ -1595,11 +1599,12 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
         if (!ready.ok) throw { code: "SESSION_CREATE_FAILED", message: ready.error };
         readySessionId = ready.sessionId;
         rememberSubmittedPrompt(readySessionId);
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        if (readySessionId !== undefined && targetSessionId === undefined) {
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        }
       }
       if (worktreeWait.current) {
         await worktreeWait.current.promise;
-        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
         const prepared = client.getState?.()?.entities.snapshot;
         if (prepared?.sessionId !== undefined && targetSessionId === undefined) {
           readySessionId = prepared.sessionId as SessionId;
@@ -1612,9 +1617,12 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
         ...(targetThreadId === undefined ? {} : { selectedThreadId: targetThreadId }),
       });
       const currentTarget = selectedTargetRef.current;
+      const expectedSessionId = targetSessionId ?? readySessionId;
+      const sameDraftAwaitingCreatedSelection = targetSessionId === undefined && readySessionId !== undefined && currentTarget.selectedSessionId === undefined;
       if (
-        currentTarget.selectedSessionId !== targetSessionId ||
-        currentTarget.selectedThreadId !== targetThreadId
+        (expectedSessionId !== undefined && currentTarget.selectedSessionId !== expectedSessionId && !sameDraftAwaitingCreatedSelection) ||
+        currentTarget.viewIdentity !== targetViewIdentity ||
+        (targetThreadId !== undefined && currentTarget.selectedThreadId !== targetThreadId)
       ) {
         throw { code: "STATE_VERSION_CONFLICT", message: "发送期间已切换会话，本次发送已取消，草稿已恢复。" };
       }
@@ -1694,17 +1702,32 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     const ready = composerPromptEnabled({ textReady: !snapshotIsEmpty(payload), sending, running: composerRunning, pendingInteraction: pendingInteraction !== null, promptChannelReady, sessionCreating, newConversation: !preview && isNewConversation });
     if (!ready && composerSlashExecute(payload, slashCatalog) === undefined) return;
     setComposerError(undefined);
+    const owner = { ...selectedTargetRef.current, draftOwner: composerOwner };
     replaceDraft(emptySnapshot());
     if (!preview && selectedSessionId === undefined && snapshot === undefined) {
       ensureNewSession?.();
     }
     if (!(await dispatchPrompt(payload, { waitForReady: waitForNewSession !== undefined }))) {
-      replaceDraft(payload);
+      restoreFailedDraft(owner, payload);
     }
+  };
+  const restoreFailedDraft = (
+    owner: { readonly selectedSessionId: string | undefined; readonly selectedThreadId: string | undefined; readonly viewIdentity: string | undefined; readonly draftOwner: SessionId | undefined },
+    payload: ComposerSnapshot,
+  ) => {
+    const current = selectedTargetRef.current;
+    if (current.selectedSessionId === owner.selectedSessionId && current.selectedThreadId === owner.selectedThreadId && current.viewIdentity === owner.viewIdentity) {
+      replaceDraft(payload);
+      return;
+    }
+    // Navigation has already restored the new owner's editor. File the failed
+    // payload only under its captured owner; never through the current editor.
+    if (owner.draftOwner !== undefined) onComposerDraftChange?.(owner.draftOwner, payload);
   };
   const steerPastApproval = async (payload: ComposerSnapshot) => {
     if (sending) return;
     setComposerError(undefined);
+    const owner = { ...selectedTargetRef.current, draftOwner: composerOwner };
     replaceDraft(emptySnapshot());
     setSending(true);
     try {
@@ -1721,7 +1744,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       });
       await waitReceipt(client, handle.requestId);
     } catch (error) {
-      replaceDraft(payload);
+      restoreFailedDraft(owner, payload);
       setComposerError(hostErrorMessage(error, "纠偏失败"));
     } finally {
       setSending(false);
@@ -1731,9 +1754,10 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     if (!followUpEnabled || promptDispatchGate.busy) return;
     setComposerError(undefined);
     const payload = composerInputRef.current?.getSnapshot() ?? draftLive.current;
+    const owner = { ...selectedTargetRef.current, draftOwner: composerOwner };
     replaceDraft(emptySnapshot());
     if (!(await dispatchPrompt(payload, { asFollowUp: true }))) {
-      replaceDraft(payload);
+      restoreFailedDraft(owner, payload);
     }
   };
   const takeComposerSnapshot = (): ComposerSnapshot => composerInputRef.current?.getSnapshot() ?? draftLive.current;

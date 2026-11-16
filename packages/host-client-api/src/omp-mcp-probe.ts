@@ -177,7 +177,7 @@ async function probeHttp(spec: McpConnectSpec, timeoutMs: number): Promise<strin
     throw new Error("远程服务器未配置地址");
   }
   if (looksLikeOAuthOnly(spec)) {
-    throw new Error("该服务器需要认证，请在 OMP 中完成 /mcp reauth。");
+    throw new Error("该服务器需要认证，请在 Juling 中完成 /mcp reauth。");
   }
   const init = await httpRpc(url, spec.headers, 1, "initialize", {
     protocolVersion: PROTOCOL_VERSION,

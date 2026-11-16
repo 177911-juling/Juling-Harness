@@ -177,7 +177,7 @@ test("a file path is not treated as a workspace cwd", async () => {
 async function writeLiveRuntime(root: string, version: string): Promise<string> {
   const versionDirectory = join(root, "versions", version);
   await mkdir(versionDirectory, { recursive: true });
-  const entrypoint = join(versionDirectory, "omp.exe");
+  const entrypoint = join(versionDirectory, "juling.exe");
   await writeFile(entrypoint, "omp");
   const manifestText = `${JSON.stringify({
     runtimeVersion: version,
@@ -189,13 +189,13 @@ async function writeLiveRuntime(root: string, version: string): Promise<string> 
     capabilityHash: "capability-fixture",
     commandManifestHash: "command-fixture",
     platform: "win32-x64",
-    entrypoint: "omp.exe",
+    entrypoint: "juling.exe",
     channel: "stable",
   })}\n`;
   const checksumsText = `${JSON.stringify({
     algorithm: "sha256",
     files: {
-      "omp.exe": createHash("sha256").update("omp").digest("hex"),
+      "juling.exe": createHash("sha256").update("omp").digest("hex"),
       "runtime-manifest.json": createHash("sha256").update(manifestText).digest("hex"),
     },
   })}\n`;
@@ -222,7 +222,7 @@ async function writeLiveRuntime(root: string, version: string): Promise<string> 
   return entrypoint;
 }
 
-test("launch spawns omp.exe from runtimeInstallDirectory, not the profile runtimes tree", async () => {
+test("launch spawns juling.exe from runtimeInstallDirectory, not the profile runtimes tree", async () => {
   const profile = await mkdtemp(join(tmpdir(), "omp-rs-profile-"));
   const install = await mkdtemp(join(tmpdir(), "omp-rs-install-"));
   const workspace = await mkdtemp(join(tmpdir(), "omp-rs-ws-"));
@@ -266,7 +266,7 @@ test("classifyLaunchFailure maps handshake timeout, spawn, and early exit", () =
   const earlyExit = classifyLaunchFailure(new Error("Runtime process exited before ready"));
   assert.equal(earlyExit.code, "exited-before-ready");
 
-  const spawn = classifyLaunchFailure(Object.assign(new Error("spawn omp.exe ENOENT"), { code: "ENOENT" }));
+  const spawn = classifyLaunchFailure(Object.assign(new Error("spawn juling.exe ENOENT"), { code: "ENOENT" }));
   assert.equal(spawn.code, "spawn-failed");
 
   const generic = classifyLaunchFailure(new Error("bridge refused the handshake"));

@@ -29,10 +29,10 @@
 //
 // Entrypoint naming
 // -----------------
-// The managed Runtime CLI is `omp.exe` on Windows and `omp` on macOS, chosen
-// from the artifact platform (never the build machine) through the shared
-// table in target-platform.mjs. `juling-harness.exe` is reserved for the desktop
-// application and is rejected here.
+// The managed Runtime CLI is `juling.exe` on Windows and `juling` on macOS and
+// Linux, chosen from the artifact platform (never the build machine) through the
+// shared table in target-platform.mjs. `juling-harness.exe` is reserved for the
+// desktop application and is rejected here.
 
 import { createHash, sign as signPayload } from "node:crypto";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -394,7 +394,7 @@ export function defaultBinaryPath() {
     "packages",
     "coding-agent",
     "dist",
-    process.platform === "win32" ? "omp.exe" : "omp",
+    runtimeEntrypointFor(`${process.platform}-${process.arch}`),
   );
 }
 

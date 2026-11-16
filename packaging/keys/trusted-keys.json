@@ -3,6 +3,8 @@
   "activeKeyId": "juling-harness-release-2026b",
   "keys": {
     "juling-harness-release-2026a": "juling-harness-release-2026a.pem",
-    "juling-harness-release-2026b": "juling-harness-release-2026b.pem"
+    "juling-harness-release-2026b": "juling-harness-release-2026b.pem",
+    "omp-studio-release-2026a": "juling-harness-release-2026a.pem",
+    "omp-studio-release-2026b": "juling-harness-release-2026b.pem"
   }
 }

@@ -103,7 +103,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  (globalThis as { ompHarnessChrome?: unknown }).ompHarnessChrome = undefined;
+  (globalThis as { julingHarnessChrome?: unknown }).julingHarnessChrome = undefined;
 });
 
 describe("AppBackgroundLayer", () => {
@@ -206,7 +206,7 @@ describe("AppBackgroundLayer", () => {
 
   it("sends a caption tint only when the whole app is covered", async () => {
     const setTheme = vi.fn(async () => undefined);
-    (globalThis as { ompHarnessChrome?: unknown }).ompHarnessChrome = { setTheme };
+    (globalThis as { julingHarnessChrome?: unknown }).julingHarnessChrome = { setTheme };
     renderLayer({ settings: settings({ scope: "app" }) });
     await waitFor(() => expect(setTheme).toHaveBeenCalled());
     const [theme, tint] = setTheme.mock.calls[0] as unknown as [string, { color: string; symbolColor: string } | undefined];

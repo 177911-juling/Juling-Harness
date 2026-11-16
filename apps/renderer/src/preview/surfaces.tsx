@@ -466,7 +466,7 @@ export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes
         <button type="button" className="btn small outline" disabled={shared.busy} onClick={() => void shared.execute({ kind: "pull", strategy: "ff-only" })}>Pull</button>
         <button type="button" className="btn small outline" disabled={shared.busy} onClick={() => void shared.execute({ kind: "push" })}>Push</button>
       </div>
-      {marks ? <div className="git-notice" role="status">演示仓库状态（omp-web / main）。预览模式下不执行任何 Git 操作。</div> : null}
+      {marks ? <div className="git-notice" role="status">演示仓库状态（juling-web / main）。预览模式下不执行任何 Git 操作。</div> : null}
       <div className="git-actions">
         <GitMoreActionsMenu />
         {marks ? <span className="tiny muted">演示</span> : null}

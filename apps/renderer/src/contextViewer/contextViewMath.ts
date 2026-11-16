@@ -9,6 +9,7 @@ import type {
 /** Category tint for dots and meter segments; never used for text. */
 export const CATEGORY_TINT: Record<ContextCategoryId, string> = {
   "system-prompt": "var(--tint-indigo)",
+  "instruction-files": "var(--tint-green)",
   skills: "var(--tint-teal)",
   "built-in-tools": "var(--tint-orange)",
   "custom-tools": "var(--tint-violet)",

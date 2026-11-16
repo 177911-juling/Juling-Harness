@@ -10,7 +10,7 @@ import { LocalCredentialVault } from "./remote/local-vault.js";
 import { connectRemoteServices } from "./remote/connected-services.js";
 import { timeTravelService } from "./time-travel-service.js";
 import { RuntimeInstaller } from "@juling-harness/runtime-installer";
-import { defaultOmpAgentDir } from "@juling-harness/harness-host";
+import { AGENT_HOME_DIR_NAME, defaultOmpAgentDir, migrateLegacyAgentHome } from "@juling-harness/harness-host";
 import { DesktopPrediction, registerPredictionIpc } from "./prediction.js";
 import { registerSkillshareTokenIpc } from "./chrome-skillshare.js";
 import { DesktopLiveAudio, registerLiveAudioIpc } from "./live-audio.js";
@@ -195,7 +195,18 @@ async function offerMoveToApplications(): Promise<boolean> {
 }
 
 export async function main(): Promise<void> {
-  const migrationIndex = process.argv.indexOf("--omp-migrate-runtime");
+  // One-time `~/.omp` → `~/.juling` agent-home migration. It never throws: a
+  // failed move/copy leaves the legacy tree in place and keeps it as the root.
+  const agentHome = await migrateLegacyAgentHome();
+  if (agentHome.error !== undefined) {
+    console.log(`[juling-harness] agent home migration failed: ${agentHome.error}`);
+  }
+  if (agentHome.root !== join(homedir(), AGENT_HOME_DIR_NAME)) {
+    const legacyAgentDir = join(agentHome.root, "agent");
+    process.env.JULING_CODING_AGENT_DIR = legacyAgentDir;
+    process.env.JULING_AGENT_DIR = legacyAgentDir;
+  }
+  const migrationIndex = process.argv.indexOf("--juling-migrate-runtime");
   if (migrationIndex !== -1) {
     const legacyInstallRoot = process.argv[migrationIndex + 1];
     // Only the Windows installer migrates a legacy per-machine Runtime.
@@ -641,7 +652,13 @@ export async function main(): Promise<void> {
       onClosed: contents => desktopConversationViews.remove(contents),
       onWillClose: child => managedBrowser?.detachWindow(child),
     });
-    managedBrowser = new DesktopManagedBrowser({ directory: join(activeProfileDirectory(), "browser"), downloadsDirectory: app.getPath("downloads"), windowFor: floatingWindows.windowFor });
+    let downloadsDirectory: string;
+    try {
+      downloadsDirectory = app.getPath("downloads");
+    } catch {
+      downloadsDirectory = join(activeProfileDirectory(), "browser", "downloads");
+    }
+    managedBrowser = new DesktopManagedBrowser({ directory: join(activeProfileDirectory(), "browser"), downloadsDirectory, windowFor: floatingWindows.windowFor });
     new ManagedBrowserRelay({ manager: managedBrowser, directory: activeMediaDirectory });
     window.on("close", () => { if (context.isQuitting()) managedBrowser?.detachWindow(window as BrowserWindow); });
     const isTrustedSender = (sender: { getURL(): string }) => (sender === window.webContents || floatingWindows.owns(sender)) && isTrustedRendererUrl(sender.getURL(), allowedOrigin);
@@ -741,18 +758,13 @@ export async function main(): Promise<void> {
     const refreshConversationVisibility = () => { const visible = windowSurface.isVisible() && !windowSurface.isMinimized(); desktopConversationViews.setVisible(window.webContents, visible); dictationAudio.setVisible(window.webContents.id, visible); if (!visible) { liveAudio.disposeWindow(window.webContents.id); browserObservation.disposeWindow(window.webContents.id); prediction.disposeWindow(window.webContents.id); } };
     const resetConversationVisibility = () => desktopConversationViews.reset(window.webContents);
     const retainDictation = () => dictationAudio.retainWindow(window.webContents.id);
-    const cancelRemotePreparation = () => { void remoteIpc.cancelPending().catch(() => {}); };
-    const cancelRemoteNavigation = (_event: unknown, _url: string, isInPlace: boolean, isMainFrame: boolean) => { if (isMainFrame && !isInPlace) cancelRemotePreparation(); };
     const removeConversationVisibility = () => desktopConversationViews.remove(window.webContents);
     window.on("show", refreshConversationVisibility);
     window.on("hide", refreshConversationVisibility);
     window.on("minimize", refreshConversationVisibility);
     window.on("restore", refreshConversationVisibility);
     window.webContents.on("did-start-navigation", resetConversationVisibility);
-    window.webContents.on("did-start-navigation", cancelRemoteNavigation);
-    window.webContents.on("render-process-gone", cancelRemotePreparation);
     window.webContents.on("render-process-gone", retainDictation);
-    window.webContents.on("destroyed", cancelRemotePreparation);
     window.webContents.on("destroyed", removeConversationVisibility);
     ipcMain.handle(CONVERSATION_VIEW_CHANNEL, ({ sender }, input: unknown) =>
       !sender.isDestroyed() && isTrustedLocalSender(sender) && desktopConversationViews.report(sender, input));
@@ -1070,10 +1082,7 @@ export async function main(): Promise<void> {
         window.removeListener("minimize", refreshConversationVisibility);
         window.removeListener("restore", refreshConversationVisibility);
         window.webContents.removeListener("did-start-navigation", resetConversationVisibility);
-        window.webContents.removeListener("did-start-navigation", cancelRemoteNavigation);
-        window.webContents.removeListener("render-process-gone", cancelRemotePreparation);
         window.webContents.removeListener("render-process-gone", retainDictation);
-        window.webContents.removeListener("destroyed", cancelRemotePreparation);
         window.webContents.removeListener("destroyed", removeConversationVisibility);
         removeConversationVisibility();
         disposeProfile();

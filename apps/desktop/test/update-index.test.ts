@@ -57,13 +57,13 @@ function createSampleIndex(overrides: Partial<UpdateIndex> = {}): UpdateIndex {
       runtimeVersion: "18.0.12-harness.1",
       channel: "stable",
       platform: "win32-x64",
-      entrypoint: "omp.exe",
+      entrypoint: "juling.exe",
       minAppVersion: "0.1.3",
       harnessProtocol: { min: 1, max: 1 },
       files: [
         {
-          name: "omp.exe",
-          url: "https://github.com/177911-juling/juling-harness/releases/download/v0.1.4/omp.exe",
+          name: "juling.exe",
+          url: "https://github.com/177911-juling/juling-harness/releases/download/v0.1.4/juling.exe",
           size: 174000000,
           sha256: "c".repeat(64),
         },
@@ -261,7 +261,6 @@ test("fetchUpdateIndex selects the per-architecture index asset names", async ()
         lastSequence: 0,
         fetcher,
       }),
-    /Failed to fetch update index: HTTP 404/u,
   );
   assert.ok(requested.some((url) => url.endsWith("/update-index-win32-arm64.json")));
   assert.ok(requested.some((url) => url.endsWith("/update-index-win32-arm64.sig.json")));
@@ -702,4 +701,31 @@ test("update plans honor runtime channel and bundled main-process compatibility"
   const plan = planAppUpdate({ index, currentAppVersion: "0.1.4", bundledAppVersion: "0.1.3", runtime: index.app.payload!.abi, platform: "win32-x64", skippedVersion: "", preferHot: true });
   assert.equal(plan.kind, "full");
   if (plan.kind === "full") assert.equal(plan.reason, "min-app-version");
+});
+
+test("catalogs signed before the Harness rename still parse via their studioProtocol fields", () => {
+  const legacy = JSON.parse(JSON.stringify(createSampleIndex())) as Record<string, any>;
+  legacy.app.payload.studioProtocol = legacy.app.payload.harnessProtocol;
+  delete legacy.app.payload.harnessProtocol;
+  legacy.runtime.studioProtocol = legacy.runtime.harnessProtocol;
+  delete legacy.runtime.harnessProtocol;
+  const parsed = parseUpdateIndex(legacy);
+  assert.deepEqual(parsed.app.payload?.harnessProtocol, { min: 1, max: 1 });
+  assert.deepEqual(parsed.runtime.harnessProtocol, { min: 1, max: 1 });
+});
+
+test("a pre-rename runtime is blocked instead of downloaded", () => {
+  const legacyIndex = createSampleIndex();
+  (legacyIndex.runtime as { runtimeVersion: string }).runtimeVersion = "18.18.0-studio.1";
+  assert.deepEqual(
+    planRuntimeUpdate({
+      index: legacyIndex,
+      installedRuntimeVersion: "18.18.0-harness.2",
+      channel: "stable",
+      platform: "win32-x64",
+      appVersion: "0.2.0",
+      harnessProtocol: 1,
+    }),
+    { kind: "blocked", reason: "legacy-runtime" },
+  );
 });

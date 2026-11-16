@@ -27,7 +27,7 @@ test("win32 prefers an existing per-user VS Code executable", async () => {
       exists: (path) => path === code,
     });
     assert.ok(command);
-    assert.equal(command.label, "Visual Harness Code");
+    assert.equal(command.label, "Visual Studio Code");
     assert.deepEqual([...command.argsFor("D:/repo")], ["D:/repo"]);
   } finally {
     await rm(local, { recursive: true, force: true });
@@ -57,8 +57,8 @@ test("darwin picks the first existing app CLI", () => {
 
 test("darwin also finds ~/Applications bundles, Insiders and CLI shims on the login PATH, one per editor", () => {
   const files = new Set([
-    "/Users/dev/Applications/Visual Harness Code - Insiders.app/Contents/Resources/app/bin/code-insiders",
-    "/Applications/Visual Harness Code.app/Contents/Resources/app/bin/code",
+    "/Users/dev/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders",
+    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
     "/opt/homebrew/bin/cursor",
     "/opt/homebrew/bin/code",
   ]);
@@ -71,7 +71,7 @@ test("darwin also finds ~/Applications bundles, Insiders and CLI shims on the lo
   assert.deepEqual(
     commands.map((command) => [command.id, command.label, command.file]),
     [
-      ["vscode", "Visual Harness Code", "/Applications/Visual Harness Code.app/Contents/Resources/app/bin/code"],
+      ["vscode", "Visual Studio Code", "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"],
       ["cursor", "Cursor", "/opt/homebrew/bin/cursor"],
     ],
   );
@@ -81,7 +81,7 @@ test("darwin also finds ~/Applications bundles, Insiders and CLI shims on the lo
     homedir: "/Users/dev",
     exists: (path) => path.includes("Insiders"),
   });
-  assert.equal(insidersOnly[0]?.label, "Visual Harness Code - Insiders");
+  assert.equal(insidersOnly[0]?.label, "Visual Studio Code - Insiders");
 });
 
 test("linux defaults to the VS Code PATH command", () => {
@@ -99,10 +99,10 @@ test("externalEditorCommandForPath launches a picked Windows executable with the
 });
 
 test("externalEditorCommandForPath routes a picked macOS app through open -a", () => {
-  const command = externalEditorCommandForPath("/Applications/Visual Harness Code.app", { platform: "darwin" });
-  assert.equal(command.label, "Visual Harness Code");
+  const command = externalEditorCommandForPath("/Applications/Visual Studio Code.app", { platform: "darwin" });
+  assert.equal(command.label, "Visual Studio Code");
   assert.equal(command.file, "/usr/bin/open");
-  assert.deepEqual([...command.argsFor("/Users/dev/repo")], ["-a", "/Applications/Visual Harness Code.app", "/Users/dev/repo"]);
+  assert.deepEqual([...command.argsFor("/Users/dev/repo")], ["-a", "/Applications/Visual Studio Code.app", "/Users/dev/repo"]);
 });
 
 test("command shape is stable for launching", () => {
@@ -127,7 +127,7 @@ test("listExternalEditorCommands returns one entry per installed family on win32
     exists: (path) => path === code || path === cursor || path === windsurf,
   });
   assert.deepEqual(commands.map((command) => command.id), ["vscode", "cursor", "windsurf"]);
-  assert.deepEqual(commands.map((command) => command.label), ["Visual Harness Code", "Cursor", "Windsurf"]);
+  assert.deepEqual(commands.map((command) => command.label), ["Visual Studio Code", "Cursor", "Windsurf"]);
   assert.equal(commands[0]?.file, code);
 });
 
@@ -141,7 +141,7 @@ test("listExternalEditorCommands deduplicates the first hit per family", () => {
   });
   assert.equal(commands.length, 1);
   assert.equal(commands[0]?.id, "vscode");
-  assert.equal(commands[0]?.label, "Visual Harness Code - Insiders");
+  assert.equal(commands[0]?.label, "Visual Studio Code - Insiders");
 });
 
 test("listExternalEditorCommands returns PATH families on linux", () => {

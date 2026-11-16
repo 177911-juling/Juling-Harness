@@ -36,10 +36,10 @@
 }
 
 :is(.tabs, .mc-tabs, .workspace-tabs, .sd-tabs, .cap-side, .skillshare-tabs, .dk-head-chips)[role="tablist"] > [role="tab"]:is(.active, [aria-selected="true"]) {
-  background: var(--surface);
-  border-color: var(--border);
-  color: var(--text);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+  box-shadow: none;
 }
 
 :is(.tabs, .mc-tabs, .workspace-tabs, .sd-tabs, .cap-side, .skillshare-tabs, .dk-head-chips)[role="tablist"] > [role="tab"]:focus-visible {

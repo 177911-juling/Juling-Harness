@@ -1,3 +1,4 @@
+import { MAX_IMAGE_ATTACHMENT_BYTES } from "@juling-harness/harness-protocol";
 import type { IconName } from "../icons";
 import type { ComposerChip, ComposerChipKind, PromptImage } from "./types";
 import { isImageMimeType } from "./types";
@@ -40,9 +41,17 @@ function mimeFromFile(file: File): PromptImage["mimeType"] | null {
   return null;
 }
 
+export class ImageAttachmentBudgetError extends Error {
+  constructor() {
+    super(`图片超过附件预算（最大 ${Math.floor(MAX_IMAGE_ATTACHMENT_BYTES / 1024)} KiB），请压缩或缩小图片后重试。`);
+    this.name = "ImageAttachmentBudgetError";
+  }
+}
+
 export async function fileToPromptImage(file: File): Promise<PromptImage | null> {
   const mimeType = mimeFromFile(file);
   if (mimeType === null) return null;
+  if (file.size > MAX_IMAGE_ATTACHMENT_BYTES) throw new ImageAttachmentBudgetError();
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   let binary = "";

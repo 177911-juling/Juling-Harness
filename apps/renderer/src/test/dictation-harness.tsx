@@ -96,7 +96,7 @@ const api: DictationAudioApi = {
   },
   onDictationAudio: listener => { events.add(listener); return () => { events.delete(listener); }; },
 };
-Object.defineProperty(globalThis, "ompHarnessChrome", { configurable: true, value: { ...api, platform: "win32" } });
+Object.defineProperty(globalThis, "julingHarnessChrome", { configurable: true, value: { ...api, platform: "win32" } });
 Object.defineProperty(navigator.mediaDevices, "getUserMedia", { configurable: true, value: async () => {
   if (new URLSearchParams(location.search).has("denyMicrophone")) throw new DOMException("Permission denied", "NotAllowedError");
   const context = new AudioContext({ sampleRate: 16000 });

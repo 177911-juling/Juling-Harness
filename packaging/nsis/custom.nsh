@@ -1,4 +1,4 @@
-; OMP Studio NSIS hooks (electron-builder `nsis.include`).
+; Juling Harness NSIS hooks (electron-builder `nsis.include`).
 ;
 ; LogicLib is required for ${If}/${EndIf} macros. electron-builder injects
 ; this file in the shared header *before* MUI2.nsh (which normally provides
@@ -14,14 +14,14 @@
 ; 握手 INI 留在该次 NSIS 的 $PLUGINSDIR，宿主通过 PID 握手绑定。
 ;
 ; 范围
-;   - 当前用户（perMachine: false），默认 %LOCALAPPDATA%\Programs\OMP Studio。
+;   - 当前用户（perMachine: false），默认 %LOCALAPPDATA%\Programs\Juling Harness。
 ; 目录（浏览/手输的是选中文件夹，写入的是解析后的安装根）
-;   - 末级已是 OMP Studio，或路径里已有本应用 exe / 卸载器 → 原样使用
+;   - 末级已是 Juling Harness，或路径里已有本应用 exe / 卸载器 → 原样使用
 ;   - 升级 / 修复 / 降级：锁定上次 InstallLocation
 ;   - 盘符根、Program Files / 桌面 / 文档等容器、已存在且非空的目录
-;     → 追加 \OMP Studio（避免卸到盘根，也避免和别人的文件混在一起）
+;     → 追加 \Juling Harness（避免卸到盘根，也避免和别人的文件混在一起）
 ;   - 空目录、尚不存在的路径 → 原样作为安装根，由安装过程创建
-;   - 连续的 \OMP Studio\OMP Studio 会收成一层
+;   - 连续的 \Juling Harness\Juling Harness 会收成一层
 ; 版本
 ;   - 旧版本 → 原地更新；升级时留下 $INSTDIR\userdata 供首次启动把头像迁到 AppData
 ;   - 相同版本 → 确认后修复覆盖程序文件（静默 /S 默认修复）
@@ -33,7 +33,7 @@
 ;   - 桌面：全新安装默认创建；升级沿用用户已有图标状态
 ;     （createDesktopShortcut: true，不要改 always）
 ; 头像
-;   - 现写 %APPDATA%\omp-studio\profile\（覆盖，无历史）
+;   - 现写 %APPDATA%\juling-harness\profile\（覆盖，无历史）
 ;   - 仅真卸载时删除该目录，并清掉旧版 $INSTDIR\userdata
 ;
 ; 卸载注意（electron-builder 会在升级时先跑旧版 Uninstall 段）：
@@ -61,7 +61,7 @@
   !define MUI_CUSTOMFUNCTION_GUIINIT ompHideNsisUi
 !endif
 
-!define OMP_PRODUCT_DIR "OMP Studio"
+!define OMP_PRODUCT_DIR "Juling Harness"
 
 !ifndef BUILD_UNINSTALLER
 Function ompHideNsisUi
@@ -164,7 +164,7 @@ FunctionEnd
   ${AndIf} $ompExistingVersion != ""
     ${VersionCompare} "${VERSION}" "$ompExistingVersion" $R0
     ${if} $R0 == 0
-      MessageBox MB_YESNO|MB_ICONQUESTION "已安装相同版本$\r$\n$\r$\n本机已安装 OMP Studio $ompExistingVersion。修复会覆盖程序文件；AppData 中的会话与头像文件保留（头像仍是覆盖写入）。$\r$\n$\r$\n是否修复当前安装？" /SD IDYES IDYES omp_custom_init_done
+      MessageBox MB_YESNO|MB_ICONQUESTION "已安装相同版本$\r$\n$\r$\n本机已安装 Juling Harness $ompExistingVersion。修复会覆盖程序文件；AppData 中的会话与头像文件保留（头像仍是覆盖写入）。$\r$\n$\r$\n是否修复当前安装？" /SD IDYES IDYES omp_custom_init_done
       Quit
     ${elseif} $R0 == 2
       MessageBox MB_YESNO|MB_ICONEXCLAMATION "确认降级？$\r$\n$\r$\n已安装 $ompExistingVersion，继续将覆盖为 ${VERSION}。用户数据会保留，但新版本写入的配置可能无法被旧版本读取。$\r$\n$\r$\n仍然降级？" /SD IDNO IDYES omp_custom_init_done
@@ -487,7 +487,7 @@ FunctionEnd
       ${If} $ompExistingVersion != ""
         ${VersionCompare} "${VERSION}" "$ompExistingVersion" $R5
         ${If} $R5 == 0
-          MessageBox MB_OKCANCEL|MB_ICONQUESTION "已安装 OMP Studio $ompExistingVersion。继续将修复程序文件，保留会话与设置。" IDOK omp_native_version_done
+          MessageBox MB_OKCANCEL|MB_ICONQUESTION "已安装 Juling Harness $ompExistingVersion。继续将修复程序文件，保留会话与设置。" IDOK omp_native_version_done
           Quit
         ${ElseIf} $R5 == 2
           MessageBox MB_YESNO|MB_ICONEXCLAMATION "已安装较新版本 $ompExistingVersion，当前安装包为 ${VERSION}。降级可能无法读取新版配置。$\r$\n$\r$\n仍然降级？" IDYES omp_native_version_done
@@ -581,7 +581,7 @@ FunctionEnd
 !macroend
 
 ; Steal InstFiles PRE so electron-builder's StrContains append cannot
-; re-nest an empty custom folder that does not contain "OMP Studio".
+; re-nest an empty custom folder that does not contain "Juling Harness".
 !macro customPageAfterChangeDir
   ; The fallback directory page runs after PAGE_INSTALL_MODE, so its choice
   ; cannot be reset by multi-user initialization. HTML and updates skip it.
@@ -628,7 +628,7 @@ FunctionEnd
   File /r "${BUILD_RESOURCES_DIR}\installer-host\*.*"
   ExecWait '"$PLUGINSDIR\omp-maintenance\OmpInstallerUi.exe" --wait-install-root "$INSTDIR"' $R0
   ${If} $R0 != 0
-    MessageBox MB_OK|MB_ICONEXCLAMATION "请从托盘菜单退出此安装的 OMP Studio，再重试。安装程序不会强制终止任务。" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "请从托盘菜单退出此安装的 Juling Harness，再重试。安装程序不会强制终止任务。" /SD IDOK
     Abort
   ${EndIf}
   WriteINIStr "$PLUGINSDIR\status.ini" "Setup" "Phase" "files"
@@ -661,7 +661,7 @@ FunctionEnd
     ${if} $installMode == "all"
       SetShellVarContext current
     ${endif}
-    RMDir /r "$APPDATA\omp-studio\profile"
+    RMDir /r "$APPDATA\juling-harness\profile"
     ${if} $installMode == "all"
       SetShellVarContext all
     ${endif}
@@ -679,11 +679,11 @@ FunctionEnd
     ExecWait '"$PLUGINSDIR\omp-maintenance\OmpInstallerUi.exe" --migrate-machine "$ompLegacyMachineDir" "$INSTDIR"' $R0
     ${If} $R0 == 11
       ; 注册表残留但卸载程序已缺失：重新运行安装包必然同样失败，只能引导人工清理。
-      MessageBox MB_OK|MB_ICONEXCLAMATION "检测到旧全机版本的安装记录残留，但其卸载程序已缺失，无法自动迁移。$\r$\n$\r$\n请打开「设置 → 应用 → 安装的应用」移除残留的 OMP Studio 条目；若无法移除，请删除注册表项 HKLM\${INSTALL_REGISTRY_KEY} 和 HKLM\${UNINSTALL_REGISTRY_KEY}，然后重新运行安装包。" /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "检测到旧全机版本的安装记录残留，但其卸载程序已缺失，无法自动迁移。$\r$\n$\r$\n请打开「设置 → 应用 → 安装的应用」移除残留的 Juling Harness 条目；若无法移除，请删除注册表项 HKLM\${INSTALL_REGISTRY_KEY} 和 HKLM\${UNINSTALL_REGISTRY_KEY}，然后重新运行安装包。" /SD IDOK
       SetErrorLevel 20
       Quit
     ${ElseIf} $R0 != 0
-      MessageBox MB_OK|MB_ICONEXCLAMATION "当前用户版本已安装，但旧全机版本尚未移除。请关闭所有 OMP 任务后重新运行安装包完成迁移。" /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "当前用户版本已安装，但旧全机版本尚未移除。请关闭所有 Juling 任务后重新运行安装包完成迁移。" /SD IDOK
       SetErrorLevel 20
       Quit
     ${EndIf}
@@ -706,12 +706,12 @@ FunctionEnd
   ${EndIf}
   ReadINIStr $R8 "$PLUGINSDIR\options.ini" "Install" "Desktop"
   ${If} $R8 == "0"
-    Delete "$DESKTOP\OMP Studio.lnk"
+    Delete "$DESKTOP\Juling Harness.lnk"
   ${ElseIf} $R8 == "1"
-    IfFileExists "$DESKTOP\OMP Studio.lnk" omp_desktop_done
-      CreateShortCut "$DESKTOP\OMP Studio.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 "" "" "${APP_DESCRIPTION}"
+    IfFileExists "$DESKTOP\Juling Harness.lnk" omp_desktop_done
+      CreateShortCut "$DESKTOP\Juling Harness.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 "" "" "${APP_DESCRIPTION}"
       ClearErrors
-      WinShell::SetLnkAUMI "$DESKTOP\OMP Studio.lnk" "${APP_ID}"
+      WinShell::SetLnkAUMI "$DESKTOP\Juling Harness.lnk" "${APP_ID}"
     omp_desktop_done:
   ${EndIf}
   Call ompWriteDone

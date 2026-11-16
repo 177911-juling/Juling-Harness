@@ -39,15 +39,15 @@ const TOOL_LABELS: Record<string, string> = {
 };
 
 const TOOL_TITLES: Record<string, string> = {
-  bash: "OMP 想要执行 Bash 命令",
-  write: "OMP 想要写入文件",
-  edit: "OMP 想要编辑文件",
-  ast_edit: "OMP 想要做 AST 编辑",
-  eval: "OMP 想要执行代码",
-  computer: "OMP 想要操作桌面",
-  browser: "OMP 想要操作浏览器",
-  debug: "OMP 想要使用调试器",
-  github: "OMP 想要调用 GitHub",
+  bash: "Juling 想要执行 Bash 命令",
+  write: "Juling 想要写入文件",
+  edit: "Juling 想要编辑文件",
+  ast_edit: "Juling 想要做 AST 编辑",
+  eval: "Juling 想要执行代码",
+  computer: "Juling 想要操作桌面",
+  browser: "Juling 想要操作浏览器",
+  debug: "Juling 想要使用调试器",
+  github: "Juling 想要调用 GitHub",
 };
 
 function toolKey(value: string | undefined): string {

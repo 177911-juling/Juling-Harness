@@ -28,7 +28,8 @@ Windows 安装器使用 WebView2 显示 720 × 480 的四步向导，NSIS 负责
 
 ### 数据与卸载
 
-程序目录包含桌面程序、公钥与随包提供的签名 Runtime。活跃 Runtime 位于 `%LOCALAPPDATA%juling-harnessuntimes`，会话、日志和设置位于 `%APPDATA%juling-harness`；详见 [更新系统](../docs/updates.md)。
+程序目录包含桌面程序、公钥与随包提供的签名 Runtime。活跃 Runtime 位于 `%LOCALAPPDATA%juling-harness
+untimes`，会话、日志和设置位于 `%APPDATA%juling-harness`；详见 [更新系统](../docs/updates.md)。
 
 真实卸载使用 electron-builder 的原生 MUI2 卸载器：删除程序目录、快捷方式、头像目录和旧版安装目录内的 `userdata`；保留会话、日志及外置 Runtime。升级调用旧卸载器时保留头像与 `userdata`，供迁移使用。
 
@@ -90,7 +91,7 @@ npm run pack:mac:audit            # 单独重跑审计
 
 - **配置在代码里派生**：`scripts/mac-bundle.mjs` 读 `electron-builder.yml`、生成 mac 配置，yml 本身不改，Windows 打包输入逐字节不变。根级 `extraFiles`（Runtime 与公钥）改走 `extraResources`，落在 `Contents/Resources/`。`Contents/` 下任何非标准条目都不在签名封印内，bundle 会被判为“已损坏”。
 - **签名由 pack-mac 自己做**：用 `@electron/osx-sign` 执行 `codesign --sign -`，不走 electron-builder 的证书查找——它按子串匹配 `-`，在开发机上可能挑中真证书。ad hoc 期间不开 hardened runtime（库验证会拒绝 ad hoc 框架），也不打时间戳。`packaging/mac/entitlements.mac*.plist` 已经嵌入，等换成 Developer ID 签名才生效。
-- **Runtime 不重签**：签名时整棵跳过 `Contents/Resources/runtime/**`。`omp` 保留上游构建时的签名与 entitlements，字节由 `checksums.json` 和 Ed25519 签名覆盖，审计会用包内公钥复验。
+- **Runtime 不重签**：签名时整棵跳过 `Contents/Resources/runtime/**`。`juling` 保留上游构建时的签名与 entitlements，字节由 `checksums.json` 和 Ed25519 签名覆盖，审计会用包内公钥复验。
 - **隐私用途字符串**：`Info.plist` 写明麦克风、本地网络、Apple 事件、文稿 / 桌面 / 下载、可移除宗卷与网络宗卷的用途，中文放在 `zh_CN.lproj/InfoPlist.strings`。缺了麦克风说明，首次录音时 TCC 会直接结束进程。
 - **首次打开**：ad hoc 包没有公证。macOS 15 起要到“系统设置 › 隐私与安全性”点“仍要打开”，或执行 `xattr -dr com.apple.quarantine "/Applications/Juling Harness.app"`。首启会把 Runtime 从包内复制到 `~/Library/Application Support/juling-harness/runtimes/`，并清除副本继承的 quarantine 标记（`apps/desktop/src/platform/quarantine.ts`）；包本身不动。
 - **ad hoc 的代价**：每次更新后签名身份都会变，麦克风、文件夹、本地网络授权会重新询问，钥匙串也会再次请求授权。换成 Developer ID 签名并公证后，这些都会解决。

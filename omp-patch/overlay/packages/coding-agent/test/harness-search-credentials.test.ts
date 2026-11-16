@@ -19,6 +19,7 @@ async function setup() {
 	const refreshes: string[] = [];
 	const session = {
 		sessionId: "chat",
+		refreshScopedModels: async () => {},
 		modelRegistry: {
 			authStorage: auth,
 			refreshProvider: async (provider: string) => {

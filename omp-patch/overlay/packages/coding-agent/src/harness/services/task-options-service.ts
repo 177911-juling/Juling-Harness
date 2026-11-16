@@ -3,7 +3,7 @@ import { formatModelStringWithRouting } from "../../config/model-resolver";
 import type { AgentSession } from "../../session/agent-session";
 import { discoverAgents } from "../../task/discovery";
 import { assertPerCallModelApproved, parentModelGrantPattern, PerCallModelError } from "../../task/model-approval";
-import { cfgTaskFile, cfgTaskMaxEffort, perCallModelEnabled } from "../../task/settings";
+import { cfgTaskMaxEffort, perCallModelEnabled } from "../../task/settings";
 import { SessionControlError } from "./session-control-service";
 
 /** The same grants used by task dispatch, including project narrowing and exact selector rules. */
@@ -41,7 +41,6 @@ export async function readHarnessTaskOptions(session: AgentSession, definition: 
 				}))
 		: [];
 	return {
-		fileEnabled: cfgTaskFile.get(session.settings),
 		modelSelection: allowed,
 		maxEffort: cfgTaskMaxEffort.get(session.settings),
 		models,

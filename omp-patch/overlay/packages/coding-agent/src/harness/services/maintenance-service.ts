@@ -98,7 +98,9 @@ export class HarnessMaintenanceService {
 	) {
 		this.#files =
 			files ??
-			(process.env.JULING_HARNESS_MEDIA_ROOT ? new HarnessMediaFiles(process.env.JULING_HARNESS_MEDIA_ROOT) : undefined);
+			(process.env.JULING_HARNESS_MEDIA_ROOT
+				? new HarnessMediaFiles(process.env.JULING_HARNESS_MEDIA_ROOT)
+				: undefined);
 	}
 	dispose(): void {
 		this.#disposed = true;

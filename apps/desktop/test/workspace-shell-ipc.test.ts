@@ -134,7 +134,7 @@ function register(actions: Partial<{
       }),
       listFileOpeners: actions.listFileOpeners ?? (async () => {
         calls.openerListCalls.push(1);
-        return [{ id: "vscode", name: "Visual Harness Code" }];
+        return [{ id: "vscode", name: "Visual Studio Code" }];
       }),
     },
   });
@@ -303,7 +303,7 @@ describe("registerWorkspaceShellIpc", () => {
   test("fileOpeners requires the workspace payload and returns the opener list", async () => {
     const shell = register();
     const openers = await shell.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpeners, makeSender(), { workspaceId: "ws-x" });
-    assert.deepEqual(openers, [{ id: "vscode", name: "Visual Harness Code" }]);
+    assert.deepEqual(openers, [{ id: "vscode", name: "Visual Studio Code" }]);
     assert.deepEqual(shell.calls.openerListCalls, [1]);
     assert.deepEqual(shell.calls.resolveCalls, []);
     await assert.rejects(

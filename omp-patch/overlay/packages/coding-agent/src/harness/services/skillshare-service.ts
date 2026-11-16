@@ -275,7 +275,7 @@ export class HarnessSkillshareService {
 										selected.provenance.verified
 											? `Verified ${selected.provenance.verified.repository} @ ${selected.provenance.verified.sha}`
 											: selected.provenance.reported
-												? `Reported OMP ${selected.provenance.reported.ompVersion}`
+												? `Reported Juling ${selected.provenance.reported.ompVersion}`
 												: "No verified provenance",
 										2000,
 									),
