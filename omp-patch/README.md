@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The Runtime pin is `can1357/oh-my-pi` `v18.20.2` at commit `7c49c11aa5bbaf3f418406583096168ad5b8c6dc`. The current Harness revision is recorded in `patches/series.json`; this release line continues at `18.20.2-harness.10`. See the [18.20.2 migration report](../docs/migrations/omp-18.20.2.md) for interface changes and validation; the previous [18.19.0 migration report](../docs/migrations/omp-18.19.0.md) retains the earlier development revisions.
+The Runtime pin is `can1357/oh-my-pi` `v18.20.2` at commit `7c49c11aa5bbaf3f418406583096168ad5b8c6dc`. The current Harness revision is recorded in `patches/series.json`; this release line continues at `18.20.2-harness.11`. See the [18.20.2 migration report](../docs/migrations/omp-18.20.2.md) for interface changes and validation; the previous [18.19.0 migration report](../docs/migrations/omp-18.19.0.md) retains the earlier development revisions.
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Harness repository.
 

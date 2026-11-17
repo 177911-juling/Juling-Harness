@@ -254,6 +254,7 @@ export const SEAM_GROUPS = Object.freeze([
       "packages/tui/src/terminal-capabilities.ts",
       "packages/tui/src/apps/ps-top.ts",
       "packages/tui/src/apps/debug/protocol-probe.ts",
+      "packages/coding-agent/test/plan-autosave.test.ts",
     ],
   },
 ]);

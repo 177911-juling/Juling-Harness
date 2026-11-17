@@ -1,7 +1,7 @@
 {
   "upstreamCommit": "7c49c11aa5bbaf3f418406583096168ad5b8c6dc",
-  "patchsetVersion": "harness.10",
-  "patchsetDigest": "sha256:dff671cc8e48fe272f402c206eeb2a21ca3396b3f5c3feb13ba8d496c1c93f7f",
+  "patchsetVersion": "harness.11",
+  "patchsetDigest": "sha256:07eb5c3b61df8249da825a811c3d38623a80e43eae3383c063a2e1e3b59faa19",
   "patches": [
     "0001-harness-cli-entry.patch",
     "0002-harness-session-runtime.patch",
