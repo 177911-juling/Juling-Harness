@@ -14,8 +14,8 @@ export function getNativeToolGallery(zh = isZh()): readonly { readonly [key: str
       kind: "think", name: "Think", status: "done", dur: "8s",
       preview: zh ? "先按 TUI 分型画每张展开卡，Plan 不再单独占一行。" : "Render each expanded card by TUI variant; Plan no longer occupies a separate row.",
       full: zh
-        ? "对话只保留文本块和工具批次。\nThinking 进链，限高往上滚。\n每张工具卡对齐 OMP 原生 renderer，没有 renderer 的走 Args + Output 默认卡。"
-        : "Conversation keeps only text blocks and tool batches.\nThinking enters the chain and scrolls within its height cap.\nEach tool card aligns with native OMP renderers, falling back to Args + Output when none exists.",
+        ? "对话只保留文本块和工具批次。\nThinking 进链，限高往上滚。\n每张工具卡对齐 Juling 原生 renderer，没有 renderer 的走 Args + Output 默认卡。"
+        : "Conversation keeps only text blocks and tool batches.\nThinking enters the chain and scrolls within its height cap.\nEach tool card aligns with native Juling renderers, falling back to Args + Output when none exists.",
     },
     {
       kind: "read", name: "Read", target: "src/tools/builtin-names.ts", status: "done", dur: "0.2s",

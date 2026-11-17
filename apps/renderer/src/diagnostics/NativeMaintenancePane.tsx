@@ -691,7 +691,7 @@ export function NativeMaintenancePane({
             className="modal"
             role="dialog"
             aria-modal="true"
-            aria-label={zh ? "确认 OMP 数据清理" : "Confirm OMP data cleanup"}
+            aria-label={zh ? "确认 Juling 数据清理" : "Confirm Juling data cleanup"}
             onClick={(event) => event.stopPropagation()}
           >
             <header className="modal-head">
@@ -702,8 +702,8 @@ export function NativeMaintenancePane({
             <div className="modal-body">
               <p>
                 {zh
-                  ? "原生清理器会在当前 Runtime 的 OMP 数据目录内，按预览范围重新检查文件与活动会话。"
-                  : "The native collector rechecks files and live sessions in this Runtime's OMP data directory, within the previewed scope."}
+                  ? "原生清理器会在当前 Runtime 的 Juling 数据目录内，按预览范围重新检查文件与活动会话。"
+                  : "The native collector rechecks files and live sessions in this Runtime's Juling data directory, within the previewed scope."}
               </p>
               {plan.summary.rows.length ? <p>{plan.summary.rows.map(row => label(row.category)).join(" · ")}</p> : null}
               {plan.summary.rows.some(row => row.category === "blobs" || row.category === "stale") ? <p>{zh

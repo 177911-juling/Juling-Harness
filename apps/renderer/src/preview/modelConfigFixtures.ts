@@ -111,7 +111,7 @@ export const MODEL_API_TYPES: ReadonlyArray<{ id: ModelApiKind | string; label: 
 
 export function getModelAuthTypes(zh = isZh()): ReadonlyArray<{ id: ModelAuthType; label: string; hint: string }> {
   return [
-    { id: "oauth", label: "OMP Login / OAuth", hint: zh ? "用 omp login 写入本机凭据" : "Write local credentials with omp login" },
+    { id: "oauth", label: "Juling Login / OAuth", hint: zh ? "用 juling login 写入本机凭据" : "Write local credentials with juling login" },
     { id: "api-key", label: "API Key", hint: zh ? "密钥写入 models.yml" : "Write secret to models.yml" },
     { id: "env", label: "Environment Variable", hint: zh ? "从环境变量读取，不写密钥" : "Read from environment variable without saving secrets" },
     { id: "command", label: "External Command", hint: zh ? "用命令取密，Secret 不落盘" : "Fetch secret via command without writing to disk" },
@@ -274,7 +274,7 @@ export function createPreviewModelConfig(zh = isZh()): ModelConfigReadModel {
     ],
     generatedModelsYml: "providers:\n  anthropic:\n    api: anthropic-messages\n",
     generatedConfigYml: "modelRoles:\n  default: anthropic/claude-sonnet-4.5\n",
-    runtimeEffectHint: zh ? "改动只作用于当前页面，尚未写入本机 OMP 配置。" : "Changes apply to this view only and are not written to local OMP config.",
+    runtimeEffectHint: zh ? "改动只作用于当前页面，尚未写入本机 Juling 配置。" : "Changes apply to this view only and are not written to local Juling config.",
     loginAvailable: true,
     ompAvailable: true,
     modelRoleStorage: "project",

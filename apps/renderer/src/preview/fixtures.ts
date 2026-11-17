@@ -521,7 +521,7 @@ export function getPreviewProblems(zh = isZh()): PreviewProblem[] {
     { sev: "error", src: "Preview", msg: "Failed to resolve import \"@earendil-works/pi-mermaid\"", file: "components/MermaidBlock.tsx", line: 12 },
     { sev: "warn", src: "ESLint", msg: "'onDrag' is defined but never used", file: "components/MermaidBlock.tsx", line: 204 },
     { sev: "warn", src: "ESLint", msg: "React Hook useCallback has a missing dependency", file: "hooks/useCodeTheme.ts", line: 31 },
-    { sev: "info", src: zh ? "OMP 诊断" : "OMP Diagnostics", msg: zh ? 'RPC capability "preview.dom" 协商成功 (v2)' : 'RPC capability "preview.dom" negotiated (v2)', file: null, line: null },
+    { sev: "info", src: zh ? "Juling 诊断" : "Juling Diagnostics", msg: zh ? 'RPC capability "preview.dom" 协商成功 (v2)' : 'RPC capability "preview.dom" negotiated (v2)', file: null, line: null },
     { sev: "warn", src: "Git", msg: zh ? "config.yml 未被跟踪，可能被意外提交" : "config.yml is untracked and could be committed accidentally", file: "config.yml", line: null },
     { sev: "error", src: "Vitest", msg: zh ? "切换会话后阅读位置未恢复：expected scrollTop 842, received 0" : "Reading position not restored after session switch: expected scrollTop 842, received 0", file: "tests/conversation-workspace-restore-reading-position.test.tsx", line: 128 },
     { sev: "info", src: zh ? "文档" : "Docs", msg: zh ? "检查记录含中文和空格文件名，等待补充 macOS 验收结果" : "Notes include UTF-8 & spaced filename; waiting on macOS sign-off", file: zh ? "docs/上游同步检查记录 v0.8.1.md" : "docs/upstream sync notes v0.8.1.md", line: 24 },
@@ -589,7 +589,7 @@ export const PREVIEW_HISTORY: PreviewHistoryRow[] = getPreviewHistory();
 export function getPreviewTimeTravel(zh = isZh()): PreviewTtNode[] {
   return zh ? [
     { kind: "user", title: "用户请求", detail: "整理上游同步过程为文档，并验证类型检查", time: "14:02" },
-    { kind: "plan", title: "OMP 计划", detail: "4 步：阅读 docs → 整理三阶段 → 新建文档 → 运行验证", time: "14:03" },
+    { kind: "plan", title: "Juling 计划", detail: "4 步：阅读 docs → 整理三阶段 → 新建文档 → 运行验证", time: "14:03" },
     { kind: "tool", title: "工具执行", detail: "Read ×3 · Grep ×1 · Write UPSTREAM-SYNC.md · Edit README.md", time: "14:04" },
     { kind: "file", title: "文件变化", detail: "+2 文件（docs/UPSTREAM-SYNC.md +214 · README.md +3/-1）", time: "14:04" },
     { kind: "test", title: "测试 / 检查", detail: "npm run typecheck → 1 个错误（TS2322）", time: "14:05" },
@@ -599,7 +599,7 @@ export function getPreviewTimeTravel(zh = isZh()): PreviewTtNode[] {
     { kind: "checkpoint", title: "Checkpoint #13", detail: "4 文件 · +221/-5 · 0 错误", time: "14:09", restorable: true },
   ] : [
     { kind: "user", title: "User prompt", detail: "Document the upstream sync process and verify typecheck", time: "14:02" },
-    { kind: "plan", title: "OMP Plan", detail: "4 steps: read docs → outline three phases → write doc → verify", time: "14:03" },
+    { kind: "plan", title: "Juling Plan", detail: "4 steps: read docs → outline three phases → write doc → verify", time: "14:03" },
     { kind: "tool", title: "Tool execution", detail: "Read ×3 · Grep ×1 · Write UPSTREAM-SYNC.md · Edit README.md", time: "14:04" },
     { kind: "file", title: "File changes", detail: "+2 files (docs/UPSTREAM-SYNC.md +214 · README.md +3/-1)", time: "14:04" },
     { kind: "test", title: "Tests / checks", detail: "npm run typecheck → 1 error (TS2322)", time: "14:05" },
@@ -790,7 +790,7 @@ export const PREVIEW_STATS_TOTALS = {
 } as const;
 
 /**
- * Preview-mode OMP Logs rows for one session: runtime attach, snapshot, session
+ * Preview-mode Juling Logs rows for one session: runtime attach, snapshot, session
  * open, the first prompt, a plan review whose approval lease expires, then the
  * rejected `interaction.respond` receipt that follows it. Cursors are contiguous
  * (no gap, so no resync banner) and time gaps stay between 36 ms and 3 s.

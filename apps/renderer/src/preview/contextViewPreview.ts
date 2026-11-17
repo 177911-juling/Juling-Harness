@@ -17,7 +17,7 @@ const THINKING_B = { id: "assistant-thinking/6/0", label: "Message 6", tokens: 7
 function buildEntries(zh: boolean): Record<ContextCategoryId, ContextEntrySummary[]> {
   return {
     "system-prompt": [
-      ENTRY({ id: "system-prompt/0", label: "System Block 1", tokens: 12_000, preview: "You are a coding agent running inside the OMP runtime…" }, zh),
+      ENTRY({ id: "system-prompt/0", label: "System Block 1", tokens: 12_000, preview: "You are a coding agent running inside the Juling runtime…" }, zh),
       ENTRY({ id: "system-prompt/1", label: "System Block 2", tokens: 1_000, preview: "## Additional effective policy\n\nAn extension updated one source block after the prompt build." }, zh),
     ],
     "instruction-files": [
@@ -59,7 +59,7 @@ function buildEntries(zh: boolean): Record<ContextCategoryId, ContextEntrySummar
   };
 }
 
-const SOURCE_TEXT = "You are a coding agent running inside the OMP runtime…\n\n[Shown in Instruction Files: .omp/project.md]\n\n[Shown in Skills: repo-conventions]\n\nAdditional effective policy stays in this block.";
+const SOURCE_TEXT = "You are a coding agent running inside the Juling runtime…\n\n[Shown in Instruction Files: .omp/project.md]\n\n[Shown in Skills: repo-conventions]\n\nAdditional effective policy stays in this block.";
 const SOURCE_MARKERS: ContextViewSourceMarker[] = [
   { label: "[Shown in Instruction Files: .omp/project.md]", category: "instruction-files" as const, entryId: "instruction-files/project" },
   { label: "[Shown in Skills: repo-conventions]", category: "skills" as const, entryId: "skills/conventions" },

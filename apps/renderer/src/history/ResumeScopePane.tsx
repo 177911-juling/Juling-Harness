@@ -28,7 +28,7 @@ export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
   const language = useRef(zh);
   language.current = zh;
   const [opened, setOpened] = useState(false);
-  // A missing override asks OMP for its configured default, rather than guessing it in the UI.
+  // A missing override asks Juling for its configured default, rather than guessing it in the UI.
   const [scope, setScope] = useState<"directory" | "repo">();
   const [resolvedScope, setResolvedScope] = useState<"directory" | "repo">("repo");
   const [rows, setRows] = useState<SessionResumeRow[]>([]);
@@ -39,7 +39,7 @@ export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
   const [loading, setLoading] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [error, setError] = useState("");
-  /** The recorded directory is gone: OMP needs an explicit workspace to continue in. */
+  /** The recorded directory is gone: Juling needs an explicit workspace to continue in. */
   const [placement, setPlacement] = useState<{ sessionId: string; recordedCwd: string }>();
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceRecord[]>([]);
   const [executionWorkspaceId, setExecutionWorkspaceId] = useState("");
@@ -164,7 +164,7 @@ export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
           <div className="resume-placement-copy">
             <b>{zh ? "原记录目录已不可用" : "The recorded directory is unavailable"}</b>
             <code title={activePlacement.recordedCwd}>{activePlacement.recordedCwd}</code>
-            <p>{zh ? "OMP 不会把记录目录当作执行目录。选择一个工作区，会话会在那里继续读写文件；对话记录本身不变。" : "OMP never treats the recorded directory as the execution directory. Pick a workspace and the session reads and writes files there; the conversation itself stays unchanged."}</p>
+            <p>{zh ? "Juling 不会把记录目录当作执行目录。选择一个工作区，会话会在那里继续读写文件；对话记录本身不变。" : "Juling never treats the recorded directory as the execution directory. Pick a workspace and the session reads and writes files there; the conversation itself stays unchanged."}</p>
           </div>
           <AppSelect className="select" aria-label={zh ? "继续执行的工作区" : "Execution workspace"} value={executionWorkspaceId} disabled={resuming} onChange={event => setExecutionWorkspaceId(event.target.value)}>
             <option value="">{zh ? "选择工作区…" : "Choose a workspace…"}</option>

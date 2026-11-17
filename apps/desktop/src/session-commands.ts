@@ -120,7 +120,7 @@ export function createWorkspaceSessionCatalog(
 ): HostSessionCatalogProvider {
   // Bootstrap, the expanded sidebar project and title reconciliation can ask
   // for the same workspace simultaneously. One scan already walks the global
-  // OMP sessions tree, so duplicate scans only add Main-process/FS pressure.
+  // Juling sessions tree, so duplicate scans only add Main-process/FS pressure.
   const scans = new Map<string, Promise<HostCatalogEntry[]>>();
   const scan = (cwd: string): Promise<HostCatalogEntry[]> => {
     const key = process.platform === "win32" ? cwd.toLowerCase() : cwd;
@@ -183,7 +183,7 @@ export function createDesktopSemanticCommands(options: {
   readonly bindings?: { readonly unbind: (threadId: ThreadId) => Promise<void> | void };
   /** Durable session-lease store; stale lease files are removed with the session. */
   readonly leaseStore?: { readonly removeForSession: (sessionId: string) => Promise<void> | void };
-  /** Resolves the OMP agent dir holding the global pin file. */
+  /** Resolves the Juling agent dir holding the global pin file. */
   readonly agentDir?: () => string;
   readonly switchSession?: DesktopRuntimeSessionPort["switchSession"];
   readonly synchronizeSessionIdentity?: DesktopRuntimeSessionPort["synchronizeSessionIdentity"];
@@ -235,7 +235,7 @@ export function createDesktopSemanticCommands(options: {
               // idempotent at the product command boundary.
               if ((error as { readonly code?: string })?.code !== "SESSION_ALREADY_ARCHIVED") throw error;
             }
-            return { applied: true, runtimeEffect: "immediate", message: "Session archived to the OMP cold archive" };
+            return { applied: true, runtimeEffect: "immediate", message: "Session archived to the Juling cold archive" };
           },
           unarchive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
             const sessionId = await resolveCatalogSessionId(options, threadId);

@@ -148,9 +148,9 @@ export function getPreviewMcpRuntime(zh = isZh()): McpRuntimeStatus {
     settled: false,
     total: 3,
     servers: [
-      { name: "filesystem", state: "ready", transport: "stdio", source: { providerName: "OMP", level: "project" }, tools: 11, toolInfo: buildFilesystemTools(zh) },
-      { name: "github", state: "pending", transport: "http", source: { providerName: "OMP", level: "user" }, tools: 0 },
-      { name: "docs", state: "failed", transport: "sse", source: { providerName: "OMP", level: "project" }, tools: 0, error: zh ? "连接超时：文档服务未在等待期限内响应。" : "Connection timed out: docs server did not respond before deadline." },
+      { name: "filesystem", state: "ready", transport: "stdio", source: { providerName: "Juling", level: "project" }, tools: 11, toolInfo: buildFilesystemTools(zh) },
+      { name: "github", state: "pending", transport: "http", source: { providerName: "Juling", level: "user" }, tools: 0 },
+      { name: "docs", state: "failed", transport: "sse", source: { providerName: "Juling", level: "project" }, tools: 0, error: zh ? "连接超时：文档服务未在等待期限内响应。" : "Connection timed out: docs server did not respond before deadline." },
     ],
   };
 }

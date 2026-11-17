@@ -52,7 +52,7 @@ it("previews cleanup, confirms it explicitly, and exports locally without any re
   expect(screen.queryByRole("button", { name: "确认清理…" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "扫描并预览" }));
   fireEvent.click(await screen.findByRole("button", { name: "确认清理…" }));
-  expect(screen.getByRole("dialog", { name: "确认 OMP 数据清理" })).toBeTruthy();
+  expect(screen.getByRole("dialog", { name: "确认 Juling 数据清理" })).toBeTruthy();
   expect(client.command).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "执行清理" }));
   await screen.findByText("演示清理完成，未修改任何文件。");
@@ -92,7 +92,7 @@ it("scans and applies replay stripping separately from the four storage categori
   expect(screen.queryByRole("button", { name: "确认清理…" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "扫描并预览" }));
   fireEvent.click(await screen.findByRole("button", { name: "确认清理…" }));
-  const confirm = screen.getByRole("dialog", { name: "确认 OMP 数据清理" });
+  const confirm = screen.getByRole("dialog", { name: "确认 Juling 数据清理" });
   expect(within(confirm).getByText(/空闲至少 12 天/)).toBeTruthy();
   expect(within(confirm).queryByText(/删除无引用附件/)).toBeNull();
   fireEvent.click(within(confirm).getByRole("button", { name: "执行清理" }));

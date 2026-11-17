@@ -328,7 +328,7 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
       <b>{tr("选择性提交暂不可用", "Selective commit unavailable")}</b>
       <p>{!client || !sessionId || !available
         ? tr("连接 Runtime 并打开一个会话后，可按改动归属挑选本次提交的文件与片段。", "Connect a Runtime and open a session to pick files and hunks by ownership.")
-        : tr("当前 Runtime 未提供原生选择性提交（需要 OMP 18.20.2 或更高）。普通 Git 提交不受影响。", "This Runtime does not offer native selective commit (OMP 18.20.2 or newer). Regular Git commits are unaffected.")}</p>
+        : tr("当前 Runtime 未提供原生选择性提交（需要 Juling 18.20.2 或更高）。普通 Git 提交不受影响。", "This Runtime does not offer native selective commit (Juling 18.20.2 or newer). Regular Git commits are unaffected.")}</p>
     </div>;
   } else if (!draft) {
     body = <div className="scm-empty">

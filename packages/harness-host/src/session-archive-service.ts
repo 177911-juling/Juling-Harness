@@ -232,7 +232,7 @@ export class HarnessSessionArchiveService {
     const metadata = await lstat(lockPath).catch(() => undefined);
     if (metadata === undefined) return;
     if (this.#now().getTime() - metadata.mtimeMs < this.#gcLockStaleMs) {
-      throw new SessionArchiveServiceError("GC_LOCK_HELD", "omp gc appears to be running; retry after it finishes");
+      throw new SessionArchiveServiceError("GC_LOCK_HELD", "juling gc appears to be running; retry after it finishes");
     }
   }
 
