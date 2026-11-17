@@ -2308,16 +2308,17 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       }
     },
     onSelectPreviewThread: (id) => {
+      const hit = findPreviewThread(id, zh);
+      // The dock document and the single-window state both drive the canvas;
+      // update the shared selection even when a floating document opens.
+      setPreviewThreadId(id);
+      if (hit) setPreviewProjectId(hit.project.id);
       if (mdi) {
-        const hit = findPreviewThread(id, zh);
         if (hit) mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: hit.project.id, previewProjectId: hit.project.id, previewThreadId: id });
         go("workbench");
         return;
       }
-      setPreviewThreadId(id);
-      const hit = findPreviewThread(id, zh);
       if (hit) {
-        setPreviewProjectId(hit.project.id);
         setSelectedProject({ id: hit.project.id, name: hit.project.name });
         setExplorerOpen(true);
         setProjectListExpanded(true);

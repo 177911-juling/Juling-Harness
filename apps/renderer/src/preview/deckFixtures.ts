@@ -114,6 +114,49 @@ export function getPreviewDeckItems(zh = isZh()): readonly PreviewDeckItem[] {
             "Wire the toggle into the Preview panel afterward and verify that Ask inertia questions stay queued behind this plan.",
           ].join("\n"),
     },
+  {
+    kind: "ask",
+    id: "preview:deck:ask:inertia",
+    meta: "preview 子 Agent · 14:08",
+    question: {
+      id: "inertia",
+      question: "缩放交互确认：拖拽平移是否需要惯性？",
+      header: "惯性",
+      acceptImages: true,
+      recommended: 0,
+      options: [
+        {
+          label: "需要惯性",
+          description: "松手后继续滑行，大图定位更轻松。",
+          preview: "velocity *= 0.92; pan += velocity",
+        },
+        {
+          label: "不需要",
+          description: "松手即停，像素级对齐更稳。",
+        },
+        {
+          label: "做成设置项",
+          description: "默认关闭，Preview 面板里可打开。",
+        },
+      ],
+    },
+  },
+  {
+    kind: "ask",
+    id: "preview:deck:ask:default",
+    meta: "preview 子 Agent · 14:08",
+    question: {
+      id: "default",
+      question: "如果做成设置项，**默认值**怎么定？",
+      header: "默认",
+      acceptImages: true,
+      recommended: 1,
+      options: [
+        { label: "默认开", description: "新会话直接带惯性。" },
+        { label: "默认关", description: "保持现在的精确拖拽。" },
+      ],
+    },
+  },
     {
       kind: "form",
       id: "preview:deck:form:inertia",

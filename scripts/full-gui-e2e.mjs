@@ -84,7 +84,10 @@ try{
  // Packaged Electron must see the same existing directories as the Host.
  const roaming=process.platform==='win32'?join(isolatedHome,'AppData','Roaming'):join(temp,'roaming');
  const local=process.platform==='win32'?join(isolatedHome,'AppData','Local'):join(temp,'local');
- await Promise.all([roaming,local].map(path=>mkdir(path,{recursive:true})));
+ // Electron resolves these known folders through USERPROFILE on Windows; a
+ // missing Desktop/Documents/Downloads makes `app.getPath()` throw at startup.
+ const shellFolders=process.platform==='win32'?['Desktop','Documents','Downloads','Music','Pictures','Videos'].map(name=>join(isolatedHome,name)):[];
+ await Promise.all([roaming,local,...shellFolders].map(path=>mkdir(path,{recursive:true})));
  report.platform=platform;
  if(process.platform==='darwin'&&process.env.OMP_E2E_PACKAGED_EXE){
   const paths=resolveDesktopPaths({platform:'darwin',homedir:isolatedHome});
@@ -221,13 +224,14 @@ try{
   await capture((preview?'preview-':'real-')+route);report.checks.push((preview?'preview':'real')+' '+route);
  }
  const previewUrl=new URL(page.url());previewUrl.search='?preview=1';await page.evaluate(()=>localStorage.setItem('omp.lastRoute','workbench'));await page.goto(previewUrl.href);
- await page.getByText('Mermaid 全屏缩放计划与交互确认',{exact:true}).first().click();
+ await page.locator('#projectList .thread').filter({hasText:'Mermaid 全屏缩放计划与交互确认'}).first().click();
  const deck=page.getByRole('region',{name:'待处理的审批与提问（演示）'});
  await deck.getByRole('button',{name:'Approve and execute',exact:true}).click();
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5V8AAAAASUVORK5CYII=','base64');
  await deck.locator('.ask-field input[type=file]').first().setInputFiles({name:'answer.png',mimeType:'image/png',buffer:png});
  const answerField=deck.getByRole('group',{name:'回答 / Answer',exact:true});await answerField.getByRole('button',{name:'预览图1',exact:true}).waitFor();
  await deck.getByRole('textbox',{name:'备注 / Note',exact:true}).fill('First question note');
+ await page.waitForTimeout(450); // let the card swap animation settle before measuring
  const deckBox=await deck.boundingBox();const nextBox=await deck.getByRole('button',{name:'下一个请求',exact:true}).boundingBox();
  if(!deckBox||!nextBox||nextBox.x<deckBox.x-1||nextBox.x+nextBox.width>deckBox.x+deckBox.width+1||nextBox.y<deckBox.y-1)throw Error(`Ask navigation is outside the visible deck: ${JSON.stringify({deckBox,nextBox})}`);
  await deck.getByRole('button',{name:'下一个请求',exact:true}).click();
@@ -293,7 +297,7 @@ try{
 }catch(error){report.status='failed';report.error=String(error);process.exitCode=1;if(page)await capture('failure').catch(()=>{});}
 finally{
  if(app){let timer;const child=app.process();try{await Promise.race([app.close().catch(error=>{report.status='failed';report.cleanupError=String(error);process.exitCode=1;}),new Promise(resolve=>{timer=setTimeout(()=>{report.status='failed';report.cleanupError='Electron did not close within 10 seconds';process.exitCode=1;child.kill('SIGKILL');resolve();},10000);})]);}finally{clearTimeout(timer);}}
- if(report.status==='passed'&&report.worktreeExitPath){if(existsSync(report.worktreeExitPath)){report.status='failed';report.cleanupError='Native clean-worktree exit policy did not remove the isolated checkout';process.exitCode=1;}else report.checks.push('native clean-worktree exit cleanup');}
+ if(report.status==='passed'&&report.worktreeExitPath){let remaining=true;for(let attempt=0;attempt<20&&remaining;attempt++){remaining=existsSync(report.worktreeExitPath);if(remaining)await new Promise(resolve=>setTimeout(resolve,250));}if(remaining){report.status='failed';report.cleanupError='Native clean-worktree exit policy did not remove the isolated checkout';process.exitCode=1;}else report.checks.push('native clean-worktree exit cleanup');}
  if(report.status==='failed')report.predictionDiagnostics=await predictionDiagnostics(temp);
  await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 }
