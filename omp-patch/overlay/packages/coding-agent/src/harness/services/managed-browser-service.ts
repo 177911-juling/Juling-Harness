@@ -152,7 +152,10 @@ export class HarnessManagedBrowserService {
 	pageForTarget(targetId: string): { pageId: string; documentId?: string } | undefined {
 		const target = this.#server?.bridge.listTargets().find(row => row.id === targetId);
 		return target?.harnessPageId
-			? { pageId: target.harnessPageId, ...(target.harnessDocumentId ? { documentId: target.harnessDocumentId } : {}) }
+			? {
+					pageId: target.harnessPageId,
+					...(target.harnessDocumentId ? { documentId: target.harnessDocumentId } : {}),
+				}
 			: undefined;
 	}
 	#nativeTab(sessionId: string, pageId: string): TabSession | undefined {

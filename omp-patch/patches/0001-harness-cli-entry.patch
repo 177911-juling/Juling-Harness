@@ -319,7 +319,7 @@ index 92665e141c..ad12652e17 100644
  		this.writeValue(setting, value, "override");
  		this.#softPins.add(setting);
 diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
-index eb3870fbb6..36cae7f9a3 100644
+index eb3870fbb6..f774f0c323 100644
 --- a/packages/coding-agent/src/main.ts
 +++ b/packages/coding-agent/src/main.ts
 @@ -1,3 +1,4 @@
@@ -561,7 +561,7 @@ index eb3870fbb6..36cae7f9a3 100644
  		if (!isInteractive) {
  			stopPendingStartupComposer();
  		}
-@@ -1988,8 +2039,12 @@ export async function runRootCommand(
+@@ -1988,8 +2039,15 @@ export async function runRootCommand(
  			process.stderr.write(`${chalk.red(`Error: ${message}`)}\n`);
  			process.exit(1);
  		}
@@ -569,13 +569,16 @@ index eb3870fbb6..36cae7f9a3 100644
  		const settingsInstance = await settingsPromise;
 +		if (isHarnessHost) {
 +			applyHarnessDefaults(settingsInstance);
-+			const stopMemoryCredential = await bindHarnessHindsightCredential(settingsInstance, parsedArgs.bridgeTokenFile);
++			const stopMemoryCredential = await bindHarnessHindsightCredential(
++				settingsInstance,
++				parsedArgs.bridgeTokenFile,
++			);
 +			postmortem.register("harness-memory-credential", stopMemoryCredential);
 +		}
  		if (parsedArgs.approvalMode) {
  			// Runtime override (not persisted): every `tools.approvalMode` read downstream
  			// sees this value. The wrapper still honours --auto-approve / --yolo on top of it.
-@@ -2233,6 +2288,9 @@ export async function runRootCommand(
+@@ -2233,6 +2291,9 @@ export async function runRootCommand(
  		}
  		// Only createSessionManager's implicit auto-resume promotes continue here.
  		const autoResumed = !explicitSessionSelection && parsedArgs.continue === true;
@@ -585,7 +588,7 @@ index eb3870fbb6..36cae7f9a3 100644
  
  		if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager && !parsedArgs.noSession) {
  			const previousCwd = cwd;
-@@ -2406,11 +2464,12 @@ export async function runRootCommand(
+@@ -2406,11 +2467,12 @@ export async function runRootCommand(
  			);
  			options.authStorage = authStorage;
  			options.modelRegistry = modelRegistry;
@@ -601,7 +604,7 @@ index eb3870fbb6..36cae7f9a3 100644
  			options.deferSkillDescriptionCompression = isInteractive;
  			options.settings = settingsInstance;
  			options.telemetry = startupTelemetry;
-@@ -2524,8 +2583,11 @@ export async function runRootCommand(
+@@ -2524,8 +2586,11 @@ export async function runRootCommand(
  			// input; the first request waits for them instead. Kept eager when argv may
  			// carry extension flags (they must parse now), `--tools` must validate
  			// extension tools, or a restored transcript needs extension renderers.
@@ -613,7 +616,7 @@ index eb3870fbb6..36cae7f9a3 100644
  				parsedArgs.unrecognizedFlags.length === 0 &&
  				!parsedArgs.tools?.length &&
  				!(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || parsedArgs.restore || foreignSource);
-@@ -2746,8 +2808,8 @@ export async function runRootCommand(
+@@ -2746,8 +2811,8 @@ export async function runRootCommand(
  			// runInteractiveMode calls it once init has painted. None feeds the first
  			// prompt: fallback-chain validation and the startup changelog only add header
  			// rows, and the background refresh already raced the first prompt when it ran earlier.
@@ -624,7 +627,7 @@ index eb3870fbb6..36cae7f9a3 100644
  					void resolveStartupChangelogForDisplay({
  						mode: cfgStartupChangelogMode.get(settingsInstance),
  						currentVersion: VERSION,
-@@ -2774,10 +2836,7 @@ export async function runRootCommand(
+@@ -2774,10 +2839,7 @@ export async function runRootCommand(
  					);
  				}
  			};
@@ -636,7 +639,7 @@ index eb3870fbb6..36cae7f9a3 100644
  
  			if (modelFallbackMessage) {
  				notifs.push({ kind: "warn", message: modelFallbackMessage });
-@@ -2891,32 +2950,124 @@ export async function runRootCommand(
+@@ -2891,32 +2953,124 @@ export async function runRootCommand(
  				try {
  					stopStartupWatchdog();
  					logger.endTiming();
@@ -784,7 +787,7 @@ index eb3870fbb6..36cae7f9a3 100644
  				// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.
  				stopStartupWatchdog();
  				// PI_TIMING prints the tree after the run; otherwise stop recording now so a
-@@ -2939,6 +3090,8 @@ export async function runRootCommand(
+@@ -2939,6 +3093,8 @@ export async function runRootCommand(
  				await disposeSessionQuietly(session);
  				stopThemeWatcher();
  				await postmortem.quit(exitCode);

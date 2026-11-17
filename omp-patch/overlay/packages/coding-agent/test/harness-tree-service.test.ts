@@ -167,10 +167,12 @@ describe("WP-034 HarnessTreeService", () => {
 				getCwd: () => process.cwd(),
 			},
 		} as unknown as AgentSession;
-		await expect(new HarnessTreeService(session).navigate("cmd-1", { targetId: "ask-result" })).rejects.toMatchObject({
-			code: "INTERACTION_REQUIRED",
-			details: { toolCallId: "ask-call" },
-		});
+		await expect(new HarnessTreeService(session).navigate("cmd-1", { targetId: "ask-result" })).rejects.toMatchObject(
+			{
+				code: "INTERACTION_REQUIRED",
+				details: { toolCallId: "ask-call" },
+			},
+		);
 	});
 
 	test("refuses to navigate while streaming without calling navigateTree", async () => {

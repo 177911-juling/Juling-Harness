@@ -1189,7 +1189,8 @@ async function initializeHarnessExtensions(session: AgentSession, runtime: Harne
 		mode: "rpc",
 		...(uiContext ? { uiContext } : {}),
 		onShutdown: () => runtime.requestShutdown(),
-		reportSendError: (action, error) => logger.warn("Harness extension send failed", { action, error: error.message }),
+		reportSendError: (action, error) =>
+			logger.warn("Harness extension send failed", { action, error: error.message }),
 		reportRuntimeError: error => logger.warn("Harness extension runtime failed", { error }),
 	});
 }
@@ -1197,7 +1198,10 @@ async function initializeHarnessExtensions(session: AgentSession, runtime: Harne
 function createHarnessMainWorkerSupervisor(
 	slot: HarnessSessionSlot,
 	runtime: HarnessHostRuntime,
-	options: Pick<HarnessHostModeDependencies, "recreateSession" | "workerIdleSleepMs" | "workerIdleRecycleMs" | "nowMs">,
+	options: Pick<
+		HarnessHostModeDependencies,
+		"recreateSession" | "workerIdleSleepMs" | "workerIdleRecycleMs" | "nowMs"
+	>,
 ): HarnessMainWorkerSupervisor {
 	const sleepMs = options.workerIdleSleepMs ?? 3 * 60_000;
 	const recycleMs = options.workerIdleRecycleMs ?? 5 * 60_000;

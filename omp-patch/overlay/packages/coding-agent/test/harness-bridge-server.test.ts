@@ -323,7 +323,9 @@ describe("WP-011 Harness Bridge runtime server", () => {
 			const helloFrame = receiveFrame(socket);
 			sendHello(socket, "locale");
 			const hello = (await helloFrame).body as HarnessHelloResponse;
-			expect(hello.capabilityManifest.capabilities.some(capability => capability.id === "harness.locale")).toBe(true);
+			expect(hello.capabilityManifest.capabilities.some(capability => capability.id === "harness.locale")).toBe(
+				true,
+			);
 			socket.write(encodeHarnessFrame("locale-en", hello.runtimeEpoch, { type: "harness.locale", locale: "en" }));
 			const english = await exchangeSnapshot(socket, "snapshot-en");
 			await started;

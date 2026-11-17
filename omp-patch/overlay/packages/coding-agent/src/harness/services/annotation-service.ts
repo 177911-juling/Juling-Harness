@@ -152,10 +152,16 @@ export class HarnessAnnotationService {
 			prompts.push(
 				operation.action === "review" && source.kind === "diff"
 					? buildReviewPrompt(
-							createResolvedReviewTarget("uncommitted", "Harness annotated snapshot", source.text, "No changes", {
-								contextInstruction:
-									"The operator annotated the captured source version. Check for drift before applying changes.",
-							}),
+							createResolvedReviewTarget(
+								"uncommitted",
+								"Harness annotated snapshot",
+								source.text,
+								"No changes",
+								{
+									contextInstruction:
+										"The operator annotated the captured source version. Check for drift before applying changes.",
+								},
+							),
 							feedback,
 						)
 					: feedback,

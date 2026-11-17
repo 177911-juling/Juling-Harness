@@ -152,7 +152,9 @@ describe("WP-044 Harness command manifest", () => {
 			title: "Harness fallback",
 			source: "auto",
 		});
-		expect(setCalls).toEqual([{ title: "Harness fallback", source: "auto", trigger: "harness-provisional-fallback" }]);
+		expect(setCalls).toEqual([
+			{ title: "Harness fallback", source: "auto", trigger: "harness-provisional-fallback" },
+		]);
 	});
 
 	test("does not overwrite an existing auto or user session title", async () => {

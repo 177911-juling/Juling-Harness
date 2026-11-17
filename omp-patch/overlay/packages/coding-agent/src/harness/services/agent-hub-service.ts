@@ -220,7 +220,11 @@ export interface HarnessAgentSpawnerPort {
 
 /** Raw page from the native incremental transcript reader (offsets are internal). */
 export interface HarnessTranscriptReaderPort {
-	read(args: { agentId: string; offset: number; limit: number }): Promise<{ messages: HarnessMessage[]; eof: boolean }>;
+	read(args: {
+		agentId: string;
+		offset: number;
+		limit: number;
+	}): Promise<{ messages: HarnessMessage[]; eof: boolean }>;
 }
 
 export type HarnessDestructiveAction = { kind: "release"; agentId: string; generation: number; risk: "destructive" };

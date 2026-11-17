@@ -140,12 +140,20 @@ export class HarnessIdaDetailsService {
 			if (this.session.sessionId !== operation.sessionId)
 				throw new SessionControlError("COMMAND_BLOCKED", "The active session changed before IDA execution");
 			if (operation.kind === "ida.close") {
-				await database.request("save", { harnessBackup: backup }, { signal: controller.signal, timeoutMs: 120_000 });
+				await database.request(
+					"save",
+					{ harnessBackup: backup },
+					{ signal: controller.signal, timeoutMs: 120_000 },
+				);
 				await database.close({ save: true });
 				return { closed: true, backup };
 			}
 			if (operation.kind === "ida.save") {
-				await database.request("save", { harnessBackup: backup }, { signal: controller.signal, timeoutMs: 120_000 });
+				await database.request(
+					"save",
+					{ harnessBackup: backup },
+					{ signal: controller.signal, timeoutMs: 120_000 },
+				);
 				return { saved: true, backup };
 			}
 			const result = await database.request<{ output: string; value: string | null; error: string | null }>(

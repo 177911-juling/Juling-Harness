@@ -550,7 +550,8 @@ describe("WP-021/022/023/024/025 Harness Bridge dispatcher", () => {
 	test("tree navigation receives the arbiter command id used by remote interactions", async () => {
 		const { dispatcher, frames, request, serviceCalls } = fixture();
 		await dispatcher.dispatch(request("tree-navigate", { kind: "session.tree.navigate", targetId: "entry-1" }));
-		const accepted = frames.find(frame => (frame.body as HarnessReceipt).status === "accepted")?.body as HarnessReceipt;
+		const accepted = frames.find(frame => (frame.body as HarnessReceipt).status === "accepted")
+			?.body as HarnessReceipt;
 		expect(serviceCalls).toContain(`session.tree.navigate:${accepted.commandId}`);
 		expect((frames.at(-1)!.body as HarnessReceipt).status).toBe("completed");
 	});
@@ -558,7 +559,8 @@ describe("WP-021/022/023/024/025 Harness Bridge dispatcher", () => {
 	test("tree branch receives the arbiter command id and returns the new session fill-back", async () => {
 		const { dispatcher, frames, request, serviceCalls } = fixture();
 		await dispatcher.dispatch(request("tree-branch", { kind: "session.tree.branch", targetId: "entry-1" }));
-		const accepted = frames.find(frame => (frame.body as HarnessReceipt).status === "accepted")?.body as HarnessReceipt;
+		const accepted = frames.find(frame => (frame.body as HarnessReceipt).status === "accepted")
+			?.body as HarnessReceipt;
 		expect(serviceCalls).toContain(`session.tree.branch:${accepted.commandId}`);
 		expect((frames.at(-1)!.body as HarnessReceipt).status).toBe("completed");
 		expect((frames.at(-1)!.body as HarnessReceipt).result).toEqual({

@@ -282,7 +282,10 @@ export class HarnessBrowserObservationService {
 		const release = this.retainHost?.();
 		try {
 			// Native discovery does not initialize an embedded relay or a second page.
-			this.#nativeWebMcp ??= new HarnessManagedBrowserService(this.session, { enabled: false, directory: undefined });
+			this.#nativeWebMcp ??= new HarnessManagedBrowserService(this.session, {
+				enabled: false,
+				directory: undefined,
+			});
 			return operation.kind === "browser.webmcp.list"
 				? await this.#nativeWebMcp.webMcpList(operation.sessionId, operation.pageId, operation.options)
 				: await this.#nativeWebMcp.webMcpInvoke(operation);

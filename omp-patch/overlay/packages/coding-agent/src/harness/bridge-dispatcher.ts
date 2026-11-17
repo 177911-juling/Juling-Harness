@@ -859,7 +859,10 @@ export class HarnessBridgeDispatcher {
 
 	async #executePermissionOperation(operation: HarnessRequest["operation"]): Promise<unknown> {
 		if (operation.kind !== "permissions.mode.set") {
-			throw new HarnessRuntimeCommandError("COMMAND_BLOCKED", "Operation is not registered with the Runtime arbiter");
+			throw new HarnessRuntimeCommandError(
+				"COMMAND_BLOCKED",
+				"Operation is not registered with the Runtime arbiter",
+			);
 		}
 		return await this.#permissions.setMode(operation.mode, operation.persist);
 	}

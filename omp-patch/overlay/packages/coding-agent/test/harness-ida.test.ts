@@ -109,7 +109,7 @@ print('fence and exactly-once execution passed')
 			"python",
 			"-c",
 			script,
-			new URL("../src/ida/worker.py", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
+			decodeURIComponent(new URL("../src/ida/worker.py", import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, "$1"),
 		],
 		{ stdout: "pipe", stderr: "pipe" },
 	);

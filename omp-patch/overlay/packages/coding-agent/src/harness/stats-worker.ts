@@ -189,36 +189,39 @@ export class HarnessStatsService {
 		const retryHashes = input.action === "retry" ? [...this.#failedHashes] : undefined;
 		if (input.action !== "start")
 			return withStatsSyncLock(getStatsDbPath(), () =>
-				withHarnessStatsFilter({ ...dimensions, ...(retryHashes ? { proseHashes: retryHashes } : {}) }, async () => {
-					if (this.#analysisTask)
-						return { available: false, reason: "A Judge analysis is still running or stopping" };
-					this.#refreshJudge();
-					const estimate = await estimateFrustrationRun(range ?? "all");
-					if (!estimate.available)
-						return { available: false, reason: "Configure an available Judge model to analyze frustration" };
-					const id = randomUUID();
-					const expiresAt = Date.now() + 300000;
-					if (this.#quotes.size >= 10) this.#quotes.clear();
-					this.#quotes.set(id, {
-						filter: structuredClone(input.filter),
-						fingerprint: this.#fingerprint(range),
-						expiresAt,
-						judge: estimate.judge,
-						priced: estimate.cost > 0,
-						...(retryHashes ? { hashes: retryHashes } : {}),
-					});
-					return {
-						available: true,
-						quote: {
-							id,
-							filter: input.filter,
-							messages: estimate.messages,
-							cost: estimate.cost > 0 ? estimate.cost : null,
-							judge: estimate.judge,
+				withHarnessStatsFilter(
+					{ ...dimensions, ...(retryHashes ? { proseHashes: retryHashes } : {}) },
+					async () => {
+						if (this.#analysisTask)
+							return { available: false, reason: "A Judge analysis is still running or stopping" };
+						this.#refreshJudge();
+						const estimate = await estimateFrustrationRun(range ?? "all");
+						if (!estimate.available)
+							return { available: false, reason: "Configure an available Judge model to analyze frustration" };
+						const id = randomUUID();
+						const expiresAt = Date.now() + 300000;
+						if (this.#quotes.size >= 10) this.#quotes.clear();
+						this.#quotes.set(id, {
+							filter: structuredClone(input.filter),
+							fingerprint: this.#fingerprint(range),
 							expiresAt,
-						},
-					};
-				}),
+							judge: estimate.judge,
+							priced: estimate.cost > 0,
+							...(retryHashes ? { hashes: retryHashes } : {}),
+						});
+						return {
+							available: true,
+							quote: {
+								id,
+								filter: input.filter,
+								messages: estimate.messages,
+								cost: estimate.cost > 0 ? estimate.cost : null,
+								judge: estimate.judge,
+								expiresAt,
+							},
+						};
+					},
+				),
 			);
 		const quote = this.#quotes.get(input.quoteId!);
 		this.#quotes.delete(input.quoteId!);

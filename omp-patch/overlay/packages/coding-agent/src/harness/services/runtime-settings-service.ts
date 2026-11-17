@@ -334,7 +334,9 @@ export interface HarnessRuntimeSettingsSnapshot extends Required<GuiSettingsSnap
 }
 
 export interface HarnessRuntimeSettingsActivation {
-	sources?: Partial<Record<HarnessRuntimeSettingKey, "env" | "runtime" | "overlay" | "project" | "global" | "default">>;
+	sources?: Partial<
+		Record<HarnessRuntimeSettingKey, "env" | "runtime" | "overlay" | "project" | "global" | "default">
+	>;
 	configured: Partial<HarnessRuntimeSettingsSnapshot>;
 	restartRequired: HarnessRuntimeSettingKey[];
 	hindsightCredential?: {
