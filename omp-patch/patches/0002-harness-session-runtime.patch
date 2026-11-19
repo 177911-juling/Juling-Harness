@@ -176,7 +176,7 @@ index 987d50d8dc..8d6dee86ed 100644
  	identity: OAuthAccountIdentity,
  	limits: UsageLimit[] | undefined,
 diff --git a/packages/coding-agent/src/export/html/viewer.generated.json b/packages/coding-agent/src/export/html/viewer.generated.json
-index 04a1c4a429..890071d5de 100644
+index 04a1c4a429..7bfedcc95f 100644
 --- a/packages/coding-agent/src/export/html/viewer.generated.json
 +++ b/packages/coding-agent/src/export/html/viewer.generated.json
 @@ -1,5 +1,5 @@
@@ -184,9 +184,9 @@ index 04a1c4a429..890071d5de 100644
 -	"file": "export-viewer-a453a3a5e3536ca377898ca37e9f1569acd5841d7a9fdfbe04a1e705bbdc4bbe.js",
 -	"integrity": "sha256-pFOjpeNTbKN3iYyjfp8VaazVhB16n9++BKHnBbvcS74=",
 -	"size": 793212
-+	"file": "export-viewer-d8f37495676ec448acf0f056195d9c223fa907da9e994e4bc6efbe3fe33ad22b.js",
-+	"integrity": "sha256-2PN0lWduxEis8PBWGV2cIj+pB9qemU5Lxu++P+M60is=",
-+	"size": 796026
++	"file": "export-viewer-3a5c21387690d329e22b0d0f2f868cfa8b61c52b5d4dbb0f17ebca0fbade0954.js",
++	"integrity": "sha256-OlwhOHaQ0yniKw0PL4aM+othxStdTbsPF+vKD7reCVQ=",
++	"size": 795920
  }
 diff --git a/packages/coding-agent/src/if-bench/runner.ts b/packages/coding-agent/src/if-bench/runner.ts
 index 6125f06216..20286af1da 100644
@@ -724,7 +724,7 @@ index 9cb6ca36cc..b0281f1a3c 100644
  	readonly agent: AgentViewLoop;
  	/** Agent loop state (same object as `agent.state`). */
 diff --git a/packages/coding-agent/src/session/agent-session-types.ts b/packages/coding-agent/src/session/agent-session-types.ts
-index f03708235d..dba02af3d1 100644
+index f03708235d..e819195a27 100644
 --- a/packages/coding-agent/src/session/agent-session-types.ts
 +++ b/packages/coding-agent/src/session/agent-session-types.ts
 @@ -47,12 +47,14 @@ import type { SecretObfuscator } from "../secrets/obfuscator";
@@ -787,7 +787,7 @@ index f03708235d..dba02af3d1 100644
  	attribution?: MessageAttribution;
  	/** Called synchronously with the messages pushed onto the steering queue. See {@link PromptOptions.onPromptQueued}. */
 diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
-index 4446c01159..54857e78a9 100644
+index 4446c01159..81eea4aee0 100644
 --- a/packages/coding-agent/src/session/agent-session.ts
 +++ b/packages/coding-agent/src/session/agent-session.ts
 @@ -143,6 +143,7 @@ import { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
@@ -2048,7 +2048,7 @@ index 516f36838d..aa6fd777c4 100644
  	}
  
 diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/coding-agent/src/session/session-manager.ts
-index 5835039797..cfceed6717 100644
+index 5835039797..53a469513e 100644
 --- a/packages/coding-agent/src/session/session-manager.ts
 +++ b/packages/coding-agent/src/session/session-manager.ts
 @@ -1,3 +1,5 @@

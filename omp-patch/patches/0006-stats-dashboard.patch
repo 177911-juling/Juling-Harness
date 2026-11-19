@@ -43,7 +43,7 @@ index d1769bb654..39782412e1 100644
  	const { closable } = await fetchJson<{ closable: boolean }>(`${API_BASE}/close`, { signal });
  	return closable;
 diff --git a/packages/stats/src/client/app/CloseButton.tsx b/packages/stats/src/client/app/CloseButton.tsx
-index 81bc586ef2..a1aa0041ad 100644
+index 81bc586ef2..522bb66b6b 100644
 --- a/packages/stats/src/client/app/CloseButton.tsx
 +++ b/packages/stats/src/client/app/CloseButton.tsx
 @@ -1,11 +1,12 @@
@@ -60,12 +60,18 @@ index 81bc586ef2..a1aa0041ad 100644
   * or Ctrl+C with nothing selected, as in the terminal it covers. Renders
   * nothing anywhere else.
   */
-@@ -25,9 +26,9 @@ export function CloseButton() {
+@@ -25,9 +26,15 @@ export function CloseButton() {
  
  	if (!closable) return null;
  	return (
 -		<button type="button" className="btn" data-variant="ghost" onClick={close} title="Close the dashboard (Esc)">
-+		<button type="button" className="btn" data-variant="ghost" onClick={close} title={t("Close the dashboard (Esc)", "关闭统计面板（Esc）")}>
++		<button
++			type="button"
++			className="btn"
++			data-variant="ghost"
++			onClick={close}
++			title={t("Close the dashboard (Esc)", "关闭统计面板（Esc）")}
++		>
  			<X size={15} />
 -			Close
 +			{t("Close", "关闭")}
@@ -73,7 +79,7 @@ index 81bc586ef2..a1aa0041ad 100644
  		</button>
  	);
 diff --git a/packages/stats/src/client/app/LiveChip.tsx b/packages/stats/src/client/app/LiveChip.tsx
-index bf98a5b84a..a9cebc712c 100644
+index bf98a5b84a..0240107080 100644
 --- a/packages/stats/src/client/app/LiveChip.tsx
 +++ b/packages/stats/src/client/app/LiveChip.tsx
 @@ -2,6 +2,7 @@ import { RefreshCw } from "lucide-react";
@@ -103,7 +109,7 @@ index bf98a5b84a..a9cebc712c 100644
  				{sync.total > 0 && (
  					<span className="live-chip-count">
  						{formatInteger(sync.current)}/{formatInteger(sync.total)}
-@@ -31,33 +32,33 @@ export function LiveChip() {
+@@ -31,33 +32,35 @@ export function LiveChip() {
  				)}
  			</>
  		);
@@ -126,7 +132,9 @@ index bf98a5b84a..a9cebc712c 100644
 -				<span>Indexing</span>
 -				<span className="live-chip-count">{formatInteger(indexingHours)}h left</span>
 +				<span>{t("Indexing", "建立索引")}</span>
-+				<span className="live-chip-count">{zh ? `剩余 ${formatInteger(indexingHours)} 小时` : `${formatInteger(indexingHours)}h left`}</span>
++				<span className="live-chip-count">
++					{zh ? `剩余 ${formatInteger(indexingHours)} 小时` : `${formatInteger(indexingHours)}h left`}
++				</span>
  			</>
  		);
 -		title = "Building hourly rollups; older ranges fill in as it goes";
@@ -145,7 +153,7 @@ index bf98a5b84a..a9cebc712c 100644
  	}
  
  	return (
-@@ -89,9 +90,10 @@ function useNow(intervalMs: number | null): number {
+@@ -89,9 +92,10 @@ function useNow(intervalMs: number | null): number {
  
  function ago(ms: number): string {
  	const s = Math.max(0, Math.round(ms / 1000));
@@ -159,7 +167,7 @@ index bf98a5b84a..a9cebc712c 100644
  	return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
  }
 diff --git a/packages/stats/src/client/app/Shell.tsx b/packages/stats/src/client/app/Shell.tsx
-index 53f3d9519b..e484e96559 100644
+index 53f3d9519b..1bf14f957b 100644
 --- a/packages/stats/src/client/app/Shell.tsx
 +++ b/packages/stats/src/client/app/Shell.tsx
 @@ -1,6 +1,8 @@
@@ -171,7 +179,7 @@ index 53f3d9519b..e484e96559 100644
  import { useLiveStatus } from "../data/live";
  import type { TimeRange } from "../types";
  import { Segmented } from "../ui";
-@@ -53,31 +55,22 @@ export function Shell({ section, onSectionChange, range, onRangeChange, children
+@@ -53,31 +55,27 @@ export function Shell({ section, onSectionChange, range, onRangeChange, children
  					data-variant="ghost"
  					data-icon="true"
  					onClick={() => setMenuOpen(true)}
@@ -204,11 +212,16 @@ index 53f3d9519b..e484e96559 100644
  						<LiveChip />
  					</span>
 -					<Segmented options={RANGE_OPTIONS} value={range} onChange={onRangeChange} aria-label="Time range" />
-+					<Segmented options={RANGE_OPTIONS} value={range} onChange={onRangeChange} aria-label={t("Time range", "时间范围")} />
++					<Segmented
++						options={RANGE_OPTIONS}
++						value={range}
++						onChange={onRangeChange}
++						aria-label={t("Time range", "时间范围")}
++					/>
  					<ThemeToggle />
  					<CloseButton />
  				</div>
-@@ -93,7 +86,7 @@ export function Shell({ section, onSectionChange, range, onRangeChange, children
+@@ -93,7 +91,7 @@ export function Shell({ section, onSectionChange, range, onRangeChange, children
  			</header>
  
  			{menuOpen && <div className="drawer-scrim" onClick={() => setMenuOpen(false)} role="presentation" />}
@@ -217,7 +230,7 @@ index 53f3d9519b..e484e96559 100644
  				{NAV.map(group => (
  					<div key={group.heading} className="nav-group">
  						<div className="nav-heading">{group.heading}</div>
-@@ -115,10 +108,10 @@ export function Shell({ section, onSectionChange, range, onRangeChange, children
+@@ -115,10 +113,10 @@ export function Shell({ section, onSectionChange, range, onRangeChange, children
  				))}
  				<div className="sidebar-foot micro">
  					<span>
@@ -324,10 +337,10 @@ index 1bb857b293..0d96edfb51 100644
  ];
 diff --git a/packages/stats/src/client/brand.ts b/packages/stats/src/client/brand.ts
 new file mode 100644
-index 0000000000..8560316178
+index 0000000000..bc22880b1a
 --- /dev/null
 +++ b/packages/stats/src/client/brand.ts
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,10 @@
 +/**
 + * Dashboard brand.
 + *
@@ -336,7 +349,8 @@ index 0000000000..8560316178
 + * instead of a side file the archive would not carry.
 + */
 +export const BRAND_NAME = "Juling Harness";
-+export const BRAND_MARK = "data:image/png;base64,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";
++export const BRAND_MARK =
++	"data:image/png;base64,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";
 diff --git a/packages/stats/src/client/charts/Chart.tsx b/packages/stats/src/client/charts/Chart.tsx
 index 258cd2e5c8..4c48ce4b04 100644
 --- a/packages/stats/src/client/charts/Chart.tsx
@@ -368,7 +382,7 @@ index 258cd2e5c8..4c48ce4b04 100644
  						</div>
  					)}
 diff --git a/packages/stats/src/client/data/formatters.ts b/packages/stats/src/client/data/formatters.ts
-index ac3440d097..5a04a1eba7 100644
+index ac3440d097..6a4ddd4049 100644
 --- a/packages/stats/src/client/data/formatters.ts
 +++ b/packages/stats/src/client/data/formatters.ts
 @@ -1,4 +1,5 @@
@@ -377,7 +391,7 @@ index ac3440d097..5a04a1eba7 100644
  import type { MessageStats } from "../types";
  
  /**
-@@ -72,10 +73,10 @@ export function formatDurationMs(value: number | null, digits?: number): string
+@@ -72,10 +73,15 @@ export function formatDurationMs(value: number | null, digits?: number): string
  
  /** Wall-clock length: seconds below a minute, then `17m 41s` / `2h 05m`. */
  export function formatElapsed(ms: number): string {
@@ -386,19 +400,29 @@ index ac3440d097..5a04a1eba7 100644
  	const totalMin = Math.floor(ms / 60_000);
 -	if (totalMin < 60) return `${totalMin}m ${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}s`;
 -	return `${Math.floor(totalMin / 60)}h ${String(totalMin % 60).padStart(2, "0")}m`;
-+	if (totalMin < 60) return zh ? `${totalMin} 分 ${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")} 秒` : `${totalMin}m ${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}s`;
-+	return zh ? `${Math.floor(totalMin / 60)} 小时 ${String(totalMin % 60).padStart(2, "0")} 分` : `${Math.floor(totalMin / 60)}h ${String(totalMin % 60).padStart(2, "0")}m`;
++	if (totalMin < 60)
++		return zh
++			? `${totalMin} 分 ${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")} 秒`
++			: `${totalMin}m ${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}s`;
++	return zh
++		? `${Math.floor(totalMin / 60)} 小时 ${String(totalMin % 60).padStart(2, "0")} 分`
++		: `${Math.floor(totalMin / 60)}h ${String(totalMin % 60).padStart(2, "0")}m`;
  }
  
  export function formatTokensPerSecond(value: number | null): string {
-@@ -84,12 +85,20 @@ export function formatTokensPerSecond(value: number | null): string {
+@@ -84,12 +90,25 @@ export function formatTokensPerSecond(value: number | null): string {
  }
  
  export function formatRelativeTime(timestamp: number): string {
 -	return formatDistanceToNow(new Date(timestamp), { addSuffix: true });
 +	if (!zh) return formatDistanceToNow(new Date(timestamp), { addSuffix: true });
 +	const diffMs = timestamp - Date.now();
-+	const units: ReadonlyArray<[Intl.RelativeTimeFormatUnit, number]> = [["day", 86_400_000], ["hour", 3_600_000], ["minute", 60_000], ["second", 1000]];
++	const units: ReadonlyArray<[Intl.RelativeTimeFormatUnit, number]> = [
++		["day", 86_400_000],
++		["hour", 3_600_000],
++		["minute", 60_000],
++		["second", 1000],
++	];
 +	for (const [unit, size] of units) {
 +		if (Math.abs(diffMs) >= size || unit === "second") {
 +			return new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" }).format(Math.round(diffMs / size), unit);
@@ -415,7 +439,7 @@ index ac3440d097..5a04a1eba7 100644
  
  /** Project folder as stored by ingest (`/work-pi/`), without the slashes. */
 diff --git a/packages/stats/src/client/data/range.ts b/packages/stats/src/client/data/range.ts
-index a792715d8c..5ef0e72b4f 100644
+index a792715d8c..eac540faf9 100644
 --- a/packages/stats/src/client/data/range.ts
 +++ b/packages/stats/src/client/data/range.ts
 @@ -5,6 +5,7 @@
@@ -445,13 +469,14 @@ index a792715d8c..5ef0e72b4f 100644
  };
  
  const MAX_BUCKETS = 1500;
-@@ -42,14 +43,14 @@ export function rangeMeta(range: TimeRange): RangeMeta {
+@@ -42,14 +43,15 @@ export function rangeMeta(range: TimeRange): RangeMeta {
  
  /** Tick/tooltip label for a bucket start, precise enough for the bucket size. */
  export function formatBucket(timestamp: number, bucketMs: number): string {
 -	if (bucketMs < DAY_MS) return format(new Date(timestamp), bucketMs < HOUR_MS ? "HH:mm" : "MMM d HH:mm");
 -	return format(new Date(timestamp), "MMM d");
-+	if (bucketMs < DAY_MS) return format(new Date(timestamp), bucketMs < HOUR_MS ? "HH:mm" : zh ? "M月d日 HH:mm" : "MMM d HH:mm");
++	if (bucketMs < DAY_MS)
++		return format(new Date(timestamp), bucketMs < HOUR_MS ? "HH:mm" : zh ? "M月d日 HH:mm" : "MMM d HH:mm");
 +	return format(new Date(timestamp), zh ? "M月d日" : "MMM d");
  }
  
@@ -464,7 +489,7 @@ index a792715d8c..5ef0e72b4f 100644
  
  /**
 diff --git a/packages/stats/src/client/data/series.ts b/packages/stats/src/client/data/series.ts
-index 69911bf78e..7a04bc7a21 100644
+index 69911bf78e..4195e5b24c 100644
 --- a/packages/stats/src/client/data/series.ts
 +++ b/packages/stats/src/client/data/series.ts
 @@ -4,6 +4,7 @@
@@ -475,12 +500,17 @@ index 69911bf78e..7a04bc7a21 100644
  import { OTHER_COLOR, SERIES_COLORS } from "./colors";
  
  /**
-@@ -98,7 +99,7 @@ export function pivotSeries<P extends { timestamp: number }>(
+@@ -98,7 +99,12 @@ export function pivotSeries<P extends { timestamp: number }>(
  	if (tail.length > 0) {
  		const other = Array.from({ length: opts.buckets.length }, () => 0);
  		for (const entry of tail) for (let i = 0; i < other.length; i++) other[i] += entry.values[i];
 -		series.push({ key: "__other__", label: `Other (${tail.length})`, color: OTHER_COLOR, values: other });
-+		series.push({ key: "__other__", label: t(`Other (${tail.length})`, `其他（${tail.length}）`), color: OTHER_COLOR, values: other });
++		series.push({
++			key: "__other__",
++			label: t(`Other (${tail.length})`, `其他（${tail.length}）`),
++			color: OTHER_COLOR,
++			values: other,
++		});
  	}
  	return series;
  }
@@ -531,10 +561,10 @@ index d68b7fb4e4..3d6b208fb8 100644
  		.trim()
 diff --git a/packages/stats/src/client/i18n.ts b/packages/stats/src/client/i18n.ts
 new file mode 100644
-index 0000000000..16351e2d45
+index 0000000000..cb9d984f5a
 --- /dev/null
 +++ b/packages/stats/src/client/i18n.ts
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,30 @@
 +/**
 + * Dashboard language.
 + *
@@ -546,10 +576,13 @@ index 0000000000..16351e2d45
 + */
 +
 +function detectLanguage(): "zh" | "en" {
-+	const query = typeof globalThis.location === "object" && globalThis.location !== null ? globalThis.location.search : "";
++	// Browser-only globals; the stats bundle compiles without the DOM lib, so
++	// name the two fields this probe needs instead of an inline cast.
++	const scope = globalThis as unknown as { location?: { search?: string }; navigator?: { language?: string } };
++	const query = scope.location?.search ?? "";
 +	const requested = new URLSearchParams(query).get("lang");
 +	if (requested !== null) return requested.toLowerCase().startsWith("zh") ? "zh" : "en";
-+	const preferred = typeof navigator === "object" && navigator !== null ? (navigator.language ?? "") : "";
++	const preferred = scope.navigator?.language ?? "";
 +	return preferred.toLowerCase().startsWith("zh") ? "zh" : "en";
 +}
 +
@@ -589,7 +622,7 @@ index 23fa5a0743..4b25609248 100644
  const root = document.getElementById("root");
  if (!root) throw new Error("missing #root");
 diff --git a/packages/stats/src/client/routes/CostsRoute.tsx b/packages/stats/src/client/routes/CostsRoute.tsx
-index e365c15261..b7825de111 100644
+index e365c15261..a205ded315 100644
 --- a/packages/stats/src/client/routes/CostsRoute.tsx
 +++ b/packages/stats/src/client/routes/CostsRoute.tsx
 @@ -8,6 +8,7 @@ import { useQuery } from "../data/query";
@@ -674,7 +707,7 @@ index e365c15261..b7825de111 100644
  						/>
  					}
  					stale={query.stale}
-@@ -118,11 +131,11 @@ export function CostsRoute({ active, range }: CostsRouteProps) {
+@@ -118,11 +131,13 @@ export function CostsRoute({ active, range }: CostsRouteProps) {
  										height={280}
  										format={v => formatCost(v, Number.isInteger(v) ? 0 : 2)}
  										formatTooltip={v => formatCost(v)}
@@ -684,11 +717,13 @@ index e365c15261..b7825de111 100644
  											view.unpricedPerDay[i] > 0 ? (
  												<div className="chart-tooltip-row chart-tooltip-total">
 -													<span className="chart-tooltip-label">Unpriced requests</span>
-+													<span className="chart-tooltip-label">{t("Unpriced requests", "未定价请求")}</span>
++													<span className="chart-tooltip-label">
++														{t("Unpriced requests", "未定价请求")}
++													</span>
  													<span className="chart-tooltip-value">
  														{formatInteger(view.unpricedPerDay[i])}
  													</span>
-@@ -146,7 +159,12 @@ export function CostsRoute({ active, range }: CostsRouteProps) {
+@@ -146,7 +161,12 @@ export function CostsRoute({ active, range }: CostsRouteProps) {
  					</QueryView>
  				</Card>
  
@@ -702,7 +737,7 @@ index e365c15261..b7825de111 100644
  					<QueryView query={query} skeleton={<ChartSkeleton height={280} />} isEmpty={isEmpty} empty={empty}>
  						{() => view && <ComponentBreakdown summary={view.summary} />}
  					</QueryView>
-@@ -155,8 +173,11 @@ export function CostsRoute({ active, range }: CostsRouteProps) {
+@@ -155,8 +175,11 @@ export function CostsRoute({ active, range }: CostsRouteProps) {
  
  			<Card
  				index={3}
@@ -716,7 +751,7 @@ index e365c15261..b7825de111 100644
  				stale={query.stale}
  				flush
  			>
-@@ -244,36 +265,53 @@ function CostStats({ view, stale }: { view: CostsView; stale: boolean }) {
+@@ -244,36 +267,53 @@ function CostStats({ view, stale }: { view: CostsView; stale: boolean }) {
  		<div data-stale={stale}>
  			<StatGrid min={180}>
  				<Stat
@@ -784,7 +819,7 @@ index e365c15261..b7825de111 100644
  				/>
  			</StatGrid>
  		</div>
-@@ -301,15 +339,17 @@ function ComponentBreakdown({ summary }: { summary: CostSummaryView }) {
+@@ -301,15 +341,17 @@ function ComponentBreakdown({ summary }: { summary: CostSummaryView }) {
  					</div>
  				))}
  				<div className="costs-component-row costs-component-total">
@@ -805,7 +840,7 @@ index e365c15261..b7825de111 100644
  				</p>
  			)}
  		</div>
-@@ -327,7 +367,7 @@ function buildCostColumns(view: CostsView): Column<CostModelRow>[] {
+@@ -327,7 +369,7 @@ function buildCostColumns(view: CostsView): Column<CostModelRow>[] {
  	return [
  		{
  			key: "model",
@@ -814,7 +849,7 @@ index e365c15261..b7825de111 100644
  			sort: row => row.model,
  			render: row => (
  				<LabelCell
-@@ -339,15 +379,15 @@ function buildCostColumns(view: CostsView): Column<CostModelRow>[] {
+@@ -339,15 +381,15 @@ function buildCostColumns(view: CostsView): Column<CostModelRow>[] {
  		},
  		{
  			key: "requests",
@@ -833,7 +868,7 @@ index e365c15261..b7825de111 100644
  			align: "right",
  			sort: row => row.cost,
  			render: row => (
-@@ -361,15 +401,15 @@ function buildCostColumns(view: CostsView): Column<CostModelRow>[] {
+@@ -361,15 +403,15 @@ function buildCostColumns(view: CostsView): Column<CostModelRow>[] {
  		},
  		{
  			key: "share",
@@ -852,7 +887,7 @@ index e365c15261..b7825de111 100644
  			width: 150,
  			render: row =>
  				row.cost > 0 ? (
-@@ -383,8 +423,8 @@ function buildCostColumns(view: CostsView): Column<CostModelRow>[] {
+@@ -383,8 +425,8 @@ function buildCostColumns(view: CostsView): Column<CostModelRow>[] {
  		...componentColumns,
  		{
  			key: "perRequest",
@@ -863,7 +898,7 @@ index e365c15261..b7825de111 100644
  			align: "right",
  			sort: row => (row.requests > row.unpricedRequests ? row.cost / (row.requests - row.unpricedRequests) : -1),
  			render: row => (
-@@ -397,8 +437,8 @@ function buildCostColumns(view: CostsView): Column<CostModelRow>[] {
+@@ -397,8 +439,8 @@ function buildCostColumns(view: CostsView): Column<CostModelRow>[] {
  		},
  		{
  			key: "unpriced",
@@ -875,7 +910,7 @@ index e365c15261..b7825de111 100644
  			sort: row => row.unpricedRequests,
  			render: row =>
 diff --git a/packages/stats/src/client/routes/ErrorsRoute.tsx b/packages/stats/src/client/routes/ErrorsRoute.tsx
-index 500d4b719b..e9bbbe954e 100644
+index 500d4b719b..6e793ef327 100644
 --- a/packages/stats/src/client/routes/ErrorsRoute.tsx
 +++ b/packages/stats/src/client/routes/ErrorsRoute.tsx
 @@ -14,6 +14,7 @@ import {
@@ -1117,12 +1152,14 @@ index 500d4b719b..e9bbbe954e 100644
  			align: "right",
  			width: 120,
  			sort: group => group.count,
-@@ -343,15 +389,17 @@ function SignatureDetail({ group, onRequestClick }: { group: ErrorGroupView; onR
+@@ -343,15 +389,19 @@ function SignatureDetail({ group, onRequestClick }: { group: ErrorGroupView; onR
  	const latestId = group.latest.id;
  	return (
  		<div className="errors-detail">
 -			<pre className="code-block errors-detail-message">{group.latest.errorMessage ?? "Unknown error"}</pre>
-+			<pre className="code-block errors-detail-message">{group.latest.errorMessage ?? t("Unknown error", "未知错误")}</pre>
++			<pre className="code-block errors-detail-message">
++				{group.latest.errorMessage ?? t("Unknown error", "未知错误")}
++			</pre>
  			<div className="errors-detail-meta">
  				<span className="muted">
 -					{formatInteger(group.count)} failures · first {formatTimestamp(group.firstSeen)} · last{" "}
@@ -1139,7 +1176,7 @@ index 500d4b719b..e9bbbe954e 100644
  					</button>
  				)}
  			</div>
-@@ -370,7 +418,7 @@ function SignatureDetail({ group, onRequestClick }: { group: ErrorGroupView; onR
+@@ -370,7 +420,7 @@ function SignatureDetail({ group, onRequestClick }: { group: ErrorGroupView; onR
  const FAILURE_COLUMNS: readonly Column<MessageStats>[] = [
  	{
  		key: "time",
@@ -1148,7 +1185,7 @@ index 500d4b719b..e9bbbe954e 100644
  		width: 120,
  		sort: row => row.timestamp,
  		render: row => (
-@@ -381,23 +429,23 @@ const FAILURE_COLUMNS: readonly Column<MessageStats>[] = [
+@@ -381,23 +431,23 @@ const FAILURE_COLUMNS: readonly Column<MessageStats>[] = [
  	},
  	{
  		key: "model",
@@ -1176,7 +1213,7 @@ index 500d4b719b..e9bbbe954e 100644
  		sort: row => row.folder,
  		render: row => (
  			<span className="mono muted" title={row.folder}>
-@@ -407,15 +455,15 @@ const FAILURE_COLUMNS: readonly Column<MessageStats>[] = [
+@@ -407,15 +457,15 @@ const FAILURE_COLUMNS: readonly Column<MessageStats>[] = [
  	},
  	{
  		key: "tokens",
@@ -1196,7 +1233,7 @@ index 500d4b719b..e9bbbe954e 100644
  		sort: row => row.usage.cost.total,
  		render: row => <span className="num">{formatMessageCost(row, 4)}</span>,
 diff --git a/packages/stats/src/client/routes/FrustrationRoute.tsx b/packages/stats/src/client/routes/FrustrationRoute.tsx
-index 29bd339491..b3025fbf59 100644
+index 29bd339491..00e434fc88 100644
 --- a/packages/stats/src/client/routes/FrustrationRoute.tsx
 +++ b/packages/stats/src/client/routes/FrustrationRoute.tsx
 @@ -11,6 +11,7 @@ import { SERIES_COLORS } from "../data/colors";
@@ -1230,7 +1267,7 @@ index 29bd339491..b3025fbf59 100644
  						<ChartSkeleton height={340} />
  						<TableSkeleton rows={6} />
  					</Card>
-@@ -138,33 +142,42 @@ function FrustrationSummary({ overall }: { overall: FrustrationCounts }) {
+@@ -138,33 +142,39 @@ function FrustrationSummary({ overall }: { overall: FrustrationCounts }) {
  	return (
  		<StatGrid min={170}>
  			<Stat
@@ -1271,10 +1308,7 @@ index 29bd339491..b3025fbf59 100644
 +				title={t("Messages annoyed at the assistant", "对助手感到烦躁的消息")}
  				value={rate(overall.atAssistant, overall.messages)}
 -				hint={`${formatInteger(overall.atAssistant)} messages`}
-+				hint={t(
-+					`${formatInteger(overall.atAssistant)} messages`,
-+					`${formatInteger(overall.atAssistant)} 条消息`,
-+				)}
++				hint={t(`${formatInteger(overall.atAssistant)} messages`, `${formatInteger(overall.atAssistant)} 条消息`)}
  			/>
  			<Stat
 -				label="Angry"
@@ -1287,7 +1321,7 @@ index 29bd339491..b3025fbf59 100644
  			/>
  		</StatGrid>
  	);
-@@ -188,8 +201,10 @@ interface JudgePanelProps {
+@@ -188,8 +198,10 @@ interface JudgePanelProps {
  	onRunChanged: () => void;
  }
  
@@ -1300,7 +1334,7 @@ index 29bd339491..b3025fbf59 100644
  
  function JudgePanel({ active, range, judgeAvailable, job, onRunStarted, onRunChanged }: JudgePanelProps) {
  	const [modalOpen, setModalOpen] = useState(false);
-@@ -265,10 +280,10 @@ function JudgePanel({ active, range, judgeAvailable, job, onRunStarted, onRunCha
+@@ -265,10 +277,10 @@ function JudgePanel({ active, range, judgeAvailable, job, onRunStarted, onRunCha
  	const quote = estimate.status === "ready" ? estimate.estimate : null;
  	const primaryAction =
  		estimate.status === "loading"
@@ -1313,7 +1347,7 @@ index 29bd339491..b3025fbf59 100644
  						onClick: proceed,
  						disabled: starting || quote.messages === 0,
  					}
-@@ -279,10 +294,13 @@ function JudgePanel({ active, range, judgeAvailable, job, onRunStarted, onRunCha
+@@ -279,10 +291,13 @@ function JudgePanel({ active, range, judgeAvailable, job, onRunStarted, onRunCha
  			index={1}
  			title={
  				<>
@@ -1329,7 +1363,7 @@ index 29bd339491..b3025fbf59 100644
  			actions={
  				<button
  					type="button"
-@@ -295,11 +313,14 @@ function JudgePanel({ active, range, judgeAvailable, job, onRunStarted, onRunCha
+@@ -295,11 +310,14 @@ function JudgePanel({ active, range, judgeAvailable, job, onRunStarted, onRunCha
  						!judgeAvailable
  							? UNAVAILABLE_HINT
  							: running
@@ -1347,7 +1381,7 @@ index 29bd339491..b3025fbf59 100644
  				</button>
  			}
  		>
-@@ -317,7 +338,12 @@ function JudgePanel({ active, range, judgeAvailable, job, onRunStarted, onRunCha
+@@ -317,7 +335,12 @@ function JudgePanel({ active, range, judgeAvailable, job, onRunStarted, onRunCha
  				)}
  			</div>
  
@@ -1361,7 +1395,7 @@ index 29bd339491..b3025fbf59 100644
  				<EstimateBody estimate={estimate} />
  				{startError && (
  					<p className="micro tone-bad" role="alert">
-@@ -334,45 +360,62 @@ function JobBadge({ job, judgeAvailable }: { job: FrustrationJobStatus; judgeAva
+@@ -334,45 +357,62 @@ function JobBadge({ job, judgeAvailable }: { job: FrustrationJobStatus; judgeAva
  		case "running":
  			return (
  				<Badge tone="ok">
@@ -1438,7 +1472,7 @@ index 29bd339491..b3025fbf59 100644
  			</p>
  		</>
  	);
-@@ -393,7 +436,10 @@ function JudgeProgress({
+@@ -393,7 +433,10 @@ function JudgeProgress({
  		<div className="stack frustration-progress">
  			<div className="row frustration-progress-head">
  				<span className="num">
@@ -1450,7 +1484,7 @@ index 29bd339491..b3025fbf59 100644
  				</span>
  				<span className="num dim">{formatPercent(share)}</span>
  				<span className="frustration-spacer" />
-@@ -405,7 +451,7 @@ function JudgeProgress({
+@@ -405,7 +448,7 @@ function JudgeProgress({
  					onClick={onCancel}
  					disabled={cancelling}
  				>
@@ -1459,7 +1493,7 @@ index 29bd339491..b3025fbf59 100644
  				</button>
  			</div>
  			<div
-@@ -418,32 +464,54 @@ function JudgeProgress({
+@@ -418,32 +461,54 @@ function JudgeProgress({
  				<div className="meter-fill frustration-progress-fill" style={{ width: `${share * 100}%` }} />
  			</div>
  			<div className="row micro muted frustration-progress-meta">
@@ -1523,7 +1557,7 @@ index 29bd339491..b3025fbf59 100644
  				</p>
  			);
  		case "running":
-@@ -451,25 +519,38 @@ function JudgeResultLine({ job }: { job: FrustrationJobStatus }) {
+@@ -451,25 +516,38 @@ function JudgeResultLine({ job }: { job: FrustrationJobStatus }) {
  		case "done":
  			return (
  				<p className="muted">
@@ -1569,7 +1603,7 @@ index 29bd339491..b3025fbf59 100644
  				</p>
  			);
  	}
-@@ -533,9 +614,9 @@ function layerColor(hue: string, layer: Layer): string {
+@@ -533,9 +611,9 @@ function layerColor(hue: string, layer: Layer): string {
   * differences draws each bar to the `annoyed` height with the subsets inside.
   */
  const LAYERS = [
@@ -1582,7 +1616,7 @@ index 29bd339491..b3025fbf59 100644
  ] as const;
  type Layer = (typeof LAYERS)[number]["key"];
  
-@@ -588,11 +669,11 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
+@@ -588,11 +666,11 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
  
  	const classOptions = useMemo(
  		() => [
@@ -1596,7 +1630,7 @@ index 29bd339491..b3025fbf59 100644
  			})),
  		],
  		[classes],
-@@ -612,7 +693,7 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
+@@ -612,7 +690,7 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
  				existing.messages += row.messages;
  				continue;
  			}
@@ -1605,7 +1639,7 @@ index 29bd339491..b3025fbf59 100644
  			byKey.set(key, {
  				key,
  				label: activeClass === ALL_CLASSES ? `${row.modelClass} · ${family}` : family,
-@@ -638,8 +719,11 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
+@@ -638,8 +716,11 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
  
  	if (models.length === 0) {
  		return (
@@ -1619,7 +1653,7 @@ index 29bd339491..b3025fbf59 100644
  			</Card>
  		);
  	}
-@@ -650,15 +734,18 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
+@@ -650,15 +731,18 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
  		<>
  			<Card
  				index={2}
@@ -1641,7 +1675,7 @@ index 29bd339491..b3025fbf59 100644
  							options={classOptions}
  							value={activeClass}
  							onChange={setSelectedClass}
-@@ -676,16 +763,27 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
+@@ -676,16 +760,27 @@ function FrustrationModelsSection({ models, stale }: { models: FrustrationModelS
  							onToggle={toggleFamily}
  						/>
  						<span className="frustration-spacer" />
@@ -1673,7 +1707,7 @@ index 29bd339491..b3025fbf59 100644
  						</label>
  					</div>
  					<EncodingKey hasRegexRows={hasRegexRows} />
-@@ -703,28 +801,32 @@ function EncodingKey({ hasRegexRows }: { hasRegexRows: boolean }) {
+@@ -703,28 +798,32 @@ function EncodingKey({ hasRegexRows }: { hasRegexRows: boolean }) {
  		<div className="legend frustration-key">
  			<span className="legend-item">
  				<span className="swatch frustration-key-swatch" data-variant="angry" />
@@ -1713,7 +1747,7 @@ index 29bd339491..b3025fbf59 100644
  		</div>
  	);
  }
-@@ -764,7 +866,7 @@ function FrustrationChart({
+@@ -764,7 +863,7 @@ function FrustrationChart({
  		}
  		out.push({
  			key: "trend",
@@ -1722,7 +1756,7 @@ index 29bd339491..b3025fbf59 100644
  			color: "var(--ink-1)",
  			values: rows.map(row => percent(row.atAssistant, row.messages)),
  			kind: "line",
-@@ -777,7 +879,7 @@ function FrustrationChart({
+@@ -777,7 +876,7 @@ function FrustrationChart({
  	if (rows.length === 0) {
  		return (
  			<div className="frustration-chart-empty">
@@ -1731,7 +1765,7 @@ index 29bd339491..b3025fbf59 100644
  			</div>
  		);
  	}
-@@ -791,18 +893,21 @@ function FrustrationChart({
+@@ -791,18 +890,21 @@ function FrustrationChart({
  			format={v => `${v}%`}
  			formatTooltip={v => `${v.toFixed(1)}%`}
  			showTotal={false}
@@ -1757,7 +1791,7 @@ index 29bd339491..b3025fbf59 100644
  						</div>
  					</div>
  				);
-@@ -824,7 +929,7 @@ function FrustrationTable({
+@@ -824,7 +926,7 @@ function FrustrationTable({
  		(): Column<FrustrationModelStats>[] => [
  			{
  				key: "model",
@@ -1766,7 +1800,7 @@ index 29bd339491..b3025fbf59 100644
  				sort: row => row.label,
  				render: row => (
  					<span className="row" title={row.key}>
-@@ -838,29 +943,32 @@ function FrustrationTable({
+@@ -838,29 +940,32 @@ function FrustrationTable({
  			},
  			{
  				key: "ids",
@@ -1804,7 +1838,7 @@ index 29bd339491..b3025fbf59 100644
  							<span className="num dim">{rate(row.judged, row.messages)}</span>
  						</span>
  					) : (
-@@ -869,33 +977,42 @@ function FrustrationTable({
+@@ -869,33 +974,42 @@ function FrustrationTable({
  			},
  			{
  				key: "annoyed",
@@ -1853,7 +1887,7 @@ index 29bd339491..b3025fbf59 100644
  						{rate(row.angry, row.messages)}
  					</span>
  				),
-@@ -907,8 +1024,11 @@ function FrustrationTable({
+@@ -907,8 +1021,11 @@ function FrustrationTable({
  	return (
  		<Card
  			index={3}
@@ -1867,7 +1901,7 @@ index 29bd339491..b3025fbf59 100644
  			flush
  			stale={stale}
  		>
-@@ -917,7 +1037,7 @@ function FrustrationTable({
+@@ -917,7 +1034,7 @@ function FrustrationTable({
  				rowKey={row => row.key}
  				columns={columns}
  				dense
@@ -2066,7 +2100,7 @@ index 0a31d5bc16..06cd424615 100644
  		sort: row => row.reductionPercent ?? -1,
  		render: row => (
 diff --git a/packages/stats/src/client/routes/ModelsRoute.tsx b/packages/stats/src/client/routes/ModelsRoute.tsx
-index 1b30d57950..0b13e7475e 100644
+index 1b30d57950..15f2ca456d 100644
 --- a/packages/stats/src/client/routes/ModelsRoute.tsx
 +++ b/packages/stats/src/client/routes/ModelsRoute.tsx
 @@ -22,6 +22,7 @@ import {
@@ -2172,7 +2206,7 @@ index 1b30d57950..0b13e7475e 100644
  									}
  								/>
  							</StatGrid>
-@@ -131,11 +157,14 @@ export function ModelsRoute({ active, range }: ModelsRouteProps) {
+@@ -131,11 +157,11 @@ export function ModelsRoute({ active, range }: ModelsRouteProps) {
  
  			<Card
  				index={1}
@@ -2182,15 +2216,12 @@ index 1b30d57950..0b13e7475e 100644
  					mode === "share"
 -						? `Each model's share of requests per ${bucketWord}`
 -						: `Requests per ${bucketWord}, stacked by model`
-+						? t(
-+								`Each model's share of requests per ${bucketWord}`,
-+								`按 ${bucketWord}统计的各模型请求占比`,
-+							)
++						? t(`Each model's share of requests per ${bucketWord}`, `按 ${bucketWord}统计的各模型请求占比`)
 +						: t(`Requests per ${bucketWord}, stacked by model`, `按模型堆叠的 ${bucketWord}请求数`)
  				}
  				actions={
  					<Segmented
-@@ -143,7 +172,7 @@ export function ModelsRoute({ active, range }: ModelsRouteProps) {
+@@ -143,7 +169,7 @@ export function ModelsRoute({ active, range }: ModelsRouteProps) {
  						options={SHARE_OPTIONS}
  						value={mode}
  						onChange={setMode}
@@ -2199,21 +2230,18 @@ index 1b30d57950..0b13e7475e 100644
  					/>
  				}
  				stale={query.stale}
-@@ -181,8 +210,11 @@ export function ModelsRoute({ active, range }: ModelsRouteProps) {
+@@ -181,8 +207,8 @@ export function ModelsRoute({ active, range }: ModelsRouteProps) {
  
  			<Card
  				index={2}
 -				title="All models"
 -				description="Click a row for latency and throughput over time"
 +				title={t("All models", "全部模型")}
-+				description={t(
-+					"Click a row for latency and throughput over time",
-+					"点击行查看延迟与吞吐随时间的变化",
-+				)}
++				description={t("Click a row for latency and throughput over time", "点击行查看延迟与吞吐随时间的变化")}
  				stale={query.stale}
  				flush
  			>
-@@ -330,7 +362,7 @@ function buildModelColumns(view: ModelsView, expandedKey: string | null, bucketW
+@@ -330,7 +356,7 @@ function buildModelColumns(view: ModelsView, expandedKey: string | null, bucketW
  		},
  		{
  			key: "model",
@@ -2222,7 +2250,7 @@ index 1b30d57950..0b13e7475e 100644
  			sort: row => row.model,
  			render: row => (
  				<LabelCell
-@@ -342,7 +374,7 @@ function buildModelColumns(view: ModelsView, expandedKey: string | null, bucketW
+@@ -342,7 +368,7 @@ function buildModelColumns(view: ModelsView, expandedKey: string | null, bucketW
  		},
  		{
  			key: "requests",
@@ -2231,7 +2259,7 @@ index 1b30d57950..0b13e7475e 100644
  			align: "right",
  			sort: row => row.totalRequests,
  			render: row => (
-@@ -356,16 +388,19 @@ function buildModelColumns(view: ModelsView, expandedKey: string | null, bucketW
+@@ -356,16 +382,16 @@ function buildModelColumns(view: ModelsView, expandedKey: string | null, bucketW
  		},
  		{
  			key: "cost",
@@ -2248,14 +2276,11 @@ index 1b30d57950..0b13e7475e 100644
 -			header: "Tokens",
 -			title: "Uncached input + cache reads + cache writes + output",
 +			header: t("Tokens", "Token"),
-+			title: t(
-+				"Uncached input + cache reads + cache writes + output",
-+				"未缓存输入 + 缓存读取 + 缓存写入 + 输出",
-+			),
++			title: t("Uncached input + cache reads + cache writes + output", "未缓存输入 + 缓存读取 + 缓存写入 + 输出"),
  			align: "right",
  			sort: row => sumConversationTokens(row),
  			render: row => {
-@@ -379,22 +414,27 @@ function buildModelColumns(view: ModelsView, expandedKey: string | null, bucketW
+@@ -379,22 +405,27 @@ function buildModelColumns(view: ModelsView, expandedKey: string | null, bucketW
  		},
  		{
  			key: "cache",
@@ -2287,7 +2312,7 @@ index 1b30d57950..0b13e7475e 100644
  						<Badge tone={errorRateTone(row.errorRate)} mono>
  							{formatErrorRate(row.errorRate)}
  						</Badge>
-@@ -403,24 +443,24 @@ function buildModelColumns(view: ModelsView, expandedKey: string | null, bucketW
+@@ -403,24 +434,24 @@ function buildModelColumns(view: ModelsView, expandedKey: string | null, bucketW
  		},
  		{
  			key: "tps",
@@ -2318,7 +2343,7 @@ index 1b30d57950..0b13e7475e 100644
  			width: 112,
  			render: row => {
  				const key = modelKey(row.model, row.provider);
-@@ -457,14 +497,14 @@ function ModelDetail({
+@@ -457,14 +488,14 @@ function ModelDetail({
  	const series: ChartSeries[] = [
  		{
  			key: "tps",
@@ -2335,7 +2360,7 @@ index 1b30d57950..0b13e7475e 100644
  			color: OTHER_COLOR,
  			kind: points.length > 1 ? "line" : "bars",
  			axis: "right",
-@@ -477,23 +517,28 @@ function ModelDetail({
+@@ -477,23 +508,28 @@ function ModelDetail({
  		<div className="models-detail">
  			<div className="models-detail-facts">
  				<div>
@@ -2369,7 +2394,7 @@ index 1b30d57950..0b13e7475e 100644
  								value: (
  									<span className={model.cacheSavings < 0 ? "tone-bad" : undefined}>
  										{formatPercent(model.cacheSavings)}
-@@ -502,42 +547,58 @@ function ModelDetail({
+@@ -502,42 +538,58 @@ function ModelDetail({
  							},
  							{
  								key: "premium",
@@ -2428,9 +2453,8 @@ index 1b30d57950..0b13e7475e 100644
  				</div>
  				<div className="micro dim">
 -					First seen {formatRelativeTime(model.firstTimestamp)} · last seen{" "}
--					{formatRelativeTime(model.lastTimestamp)}
-+					{t("First seen", "首次出现")} {formatRelativeTime(model.firstTimestamp)} ·{" "}
-+					{t("last seen", "最近出现")} {formatRelativeTime(model.lastTimestamp)}
++					{t("First seen", "首次出现")} {formatRelativeTime(model.firstTimestamp)} · {t("last seen", "最近出现")}{" "}
+ 					{formatRelativeTime(model.lastTimestamp)}
  				</div>
  			</div>
  			<div className="models-detail-chart">
@@ -2441,7 +2465,7 @@ index 1b30d57950..0b13e7475e 100644
  					</div>
  					<Legend
  						items={series.map(s => ({ key: s.key, label: s.label, color: s.color }))}
-@@ -546,7 +607,10 @@ function ModelDetail({
+@@ -546,7 +598,10 @@ function ModelDetail({
  					/>
  				</div>
  				{points.length === 0 ? (
@@ -2453,7 +2477,7 @@ index 1b30d57950..0b13e7475e 100644
  				) : (
  					<TimeChart
  						buckets={points.map(p => p.timestamp)}
-@@ -560,7 +624,7 @@ function ModelDetail({
+@@ -560,7 +615,7 @@ function ModelDetail({
  						formatRight={v => `${Number(v.toFixed(2))}s`}
  						tooltipExtra={i => (
  							<div className="chart-tooltip-row chart-tooltip-total">
@@ -2462,7 +2486,7 @@ index 1b30d57950..0b13e7475e 100644
  								<span className="chart-tooltip-value">{formatInteger(points[i].requests)}</span>
  							</div>
  						)}
-@@ -572,9 +636,9 @@ function ModelDetail({
+@@ -572,9 +627,9 @@ function ModelDetail({
  }
  
  function bucketName(bucketMs: number): string {
@@ -2476,7 +2500,7 @@ index 1b30d57950..0b13e7475e 100644
  
  function sumValues(values: readonly (number | null)[]): number {
 diff --git a/packages/stats/src/client/routes/OverviewRoute.tsx b/packages/stats/src/client/routes/OverviewRoute.tsx
-index bb0ee960c4..a9b0fe3733 100644
+index bb0ee960c4..7690db6f3d 100644
 --- a/packages/stats/src/client/routes/OverviewRoute.tsx
 +++ b/packages/stats/src/client/routes/OverviewRoute.tsx
 @@ -17,6 +17,7 @@ import { useQuery } from "../data/query";
@@ -2523,7 +2547,7 @@ index bb0ee960c4..a9b0fe3733 100644
  ] as const;
  
  export function OverviewRoute({ active, range, onRequestClick }: OverviewRouteProps) {
-@@ -86,73 +91,107 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+@@ -86,73 +91,128 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
  	const chartSeries =
  		metric === "requests"
  			? [
@@ -2609,10 +2633,7 @@ index bb0ee960c4..a9b0fe3733 100644
 -								label="Cache rate"
 -								title="Cache reads ÷ (uncached input + cache reads)"
 +								label={t("Cache rate", "缓存命中率")}
-+								title={t(
-+									"Cache reads ÷ (uncached input + cache reads)",
-+									"缓存读取 ÷（未缓存输入 + 缓存读取）",
-+								)}
++								title={t("Cache reads ÷ (uncached input + cache reads)", "缓存读取 ÷（未缓存输入 + 缓存读取）")}
  								value={formatPercent(overall.cacheRate)}
 -								hint={`${formatPercent(overall.cacheSavings)} saved`}
 +								hint={t(
@@ -2638,26 +2659,50 @@ index bb0ee960c4..a9b0fe3733 100644
 -							<Stat size="sm" label="Cache read" value={formatCompact(overall.totalCacheReadTokens)} />
 -							<Stat size="sm" label="Cache write" value={formatCompact(overall.totalCacheWriteTokens)} />
 -							<Stat size="sm" label="Output" value={formatCompact(overall.totalOutputTokens)} />
-+							<Stat size="sm" label={t("Uncached input", "未缓存输入")} value={formatCompact(overall.totalInputTokens)} />
-+							<Stat size="sm" label={t("Cache read", "缓存读取")} value={formatCompact(overall.totalCacheReadTokens)} />
-+							<Stat size="sm" label={t("Cache write", "缓存写入")} value={formatCompact(overall.totalCacheWriteTokens)} />
-+							<Stat size="sm" label={t("Output", "输出")} value={formatCompact(overall.totalOutputTokens)} />
  							<Stat
  								size="sm"
 -								label="Premium requests"
++								label={t("Uncached input", "未缓存输入")}
++								value={formatCompact(overall.totalInputTokens)}
++							/>
++							<Stat
++								size="sm"
++								label={t("Cache read", "缓存读取")}
++								value={formatCompact(overall.totalCacheReadTokens)}
++							/>
++							<Stat
++								size="sm"
++								label={t("Cache write", "缓存写入")}
++								value={formatCompact(overall.totalCacheWriteTokens)}
++							/>
++							<Stat size="sm" label={t("Output", "输出")} value={formatCompact(overall.totalOutputTokens)} />
++							<Stat
++								size="sm"
 +								label={t("Premium requests", "高级请求")}
  								value={formatInteger(Math.round(overall.totalPremiumRequests * 100) / 100)}
  							/>
 -							<Stat size="sm" label="Tokens/s" value={formatTokensPerSecond(overall.avgTokensPerSecond)} />
 -							<Stat size="sm" label="Avg latency" value={formatDurationMs(overall.avgDuration)} />
 -							<Stat size="sm" label="Avg TTFT" value={formatDurationMs(overall.avgTtft)} />
-+							<Stat size="sm" label={t("Tokens/s", "Token/s")} value={formatTokensPerSecond(overall.avgTokensPerSecond)} />
-+							<Stat size="sm" label={t("Avg latency", "平均延迟")} value={formatDurationMs(overall.avgDuration)} />
-+							<Stat size="sm" label={t("Avg TTFT", "平均首 Token 延迟")} value={formatDurationMs(overall.avgTtft)} />
++							<Stat
++								size="sm"
++								label={t("Tokens/s", "Token/s")}
++								value={formatTokensPerSecond(overall.avgTokensPerSecond)}
++							/>
++							<Stat
++								size="sm"
++								label={t("Avg latency", "平均延迟")}
++								value={formatDurationMs(overall.avgDuration)}
++							/>
++							<Stat
++								size="sm"
++								label={t("Avg TTFT", "平均首 Token 延迟")}
++								value={formatDurationMs(overall.avgTtft)}
++							/>
  						</StatGrid>
  					</div>
  				)}
-@@ -161,8 +200,14 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+@@ -161,8 +221,14 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
  			<div className="grid grid-main-side">
  				<Card
  					index={1}
@@ -2674,7 +2719,7 @@ index bb0ee960c4..a9b0fe3733 100644
  					actions={<Segmented size="sm" options={ACTIVITY_OPTIONS} value={metric} onChange={setMetric} />}
  					stale={overview.stale}
  				>
-@@ -179,7 +224,12 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+@@ -179,7 +245,12 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
  					</QueryView>
  				</Card>
  
@@ -2688,7 +2733,7 @@ index bb0ee960c4..a9b0fe3733 100644
  					<QueryView query={overview} skeleton={<ChartSkeleton height={260} />}>
  						{({ overall, byAgentType }) => {
  							const mix = {
-@@ -194,25 +244,25 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+@@ -194,25 +265,25 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
  								<div className="stack" style={{ gap: 18 }}>
  									<div className="stack" style={{ gap: 10 }}>
  										<ShareBar
@@ -2725,21 +2770,18 @@ index bb0ee960c4..a9b0fe3733 100644
  										</div>
  										<ShareBar
  											segments={agents.segments.map(s => ({
-@@ -227,7 +277,12 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+@@ -227,7 +298,9 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
  												<span className="row">
  													<span className="swatch" style={{ background: AGENT_COLOR[s.agentType] }} />
  													{AGENT_LABEL[s.agentType]}
 -													<span className="dim num">{formatInteger(s.requests)} req</span>
 +													<span className="dim num">
-+														{t(
-+															`${formatInteger(s.requests)} req`,
-+															`${formatInteger(s.requests)} 次请求`,
-+														)}
++														{t(`${formatInteger(s.requests)} req`, `${formatInteger(s.requests)} 次请求`)}
 +													</span>
  												</span>
  												<span className="row">
  													<span className="dim num">{formatCompact(s.tokens)}</span>
-@@ -249,13 +304,13 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+@@ -249,13 +322,13 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
  				index={3}
  				title={
  					<>
@@ -2756,7 +2798,7 @@ index bb0ee960c4..a9b0fe3733 100644
  					</a>
  				}
  				flush
-@@ -279,37 +334,41 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+@@ -279,37 +352,41 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
  const REQUEST_COLUMNS = [
  	{
  		key: "model",
@@ -2806,7 +2848,7 @@ index bb0ee960c4..a9b0fe3733 100644
  	},
  ];
 diff --git a/packages/stats/src/client/routes/ProjectsRoute.tsx b/packages/stats/src/client/routes/ProjectsRoute.tsx
-index 4ada27b3a9..a6b79a0532 100644
+index 4ada27b3a9..18641505e8 100644
 --- a/packages/stats/src/client/routes/ProjectsRoute.tsx
 +++ b/packages/stats/src/client/routes/ProjectsRoute.tsx
 @@ -14,6 +14,7 @@ import {
@@ -2830,7 +2872,7 @@ index 4ada27b3a9..a6b79a0532 100644
  		/>
  	);
  	// Meter scales follow the whole range so a bar's length does not change while filtering.
-@@ -76,38 +81,56 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
+@@ -76,38 +81,68 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
  
  	return (
  		<div className="page">
@@ -2854,7 +2896,10 @@ index 4ada27b3a9..a6b79a0532 100644
 -								hint={view.temporaryCount > 0 ? `${formatInteger(view.temporaryCount)} temporary` : undefined}
 +								hint={
 +									view.temporaryCount > 0
-+										? t(`${formatInteger(view.temporaryCount)} temporary`, `临时 ${formatInteger(view.temporaryCount)} 个`)
++										? t(
++												`${formatInteger(view.temporaryCount)} temporary`,
++												`临时 ${formatInteger(view.temporaryCount)} 个`,
++											)
 +										: undefined
 +								}
  							/>
@@ -2863,18 +2908,27 @@ index 4ada27b3a9..a6b79a0532 100644
 +								label={t("Requests", "请求")}
  								value={formatInteger(view.totalRequests)}
 -								hint={`${formatInteger(view.failedRequests)} failed`}
-+								hint={t(`${formatInteger(view.failedRequests)} failed`, `失败 ${formatInteger(view.failedRequests)} 次`)}
++								hint={t(
++									`${formatInteger(view.failedRequests)} failed`,
++									`失败 ${formatInteger(view.failedRequests)} 次`,
++								)}
  							/>
  							<Stat
 -								label="API-equivalent cost"
 -								title="What this usage would cost at public API rates"
 +								label={t("API-equivalent cost", "API 等价成本")}
-+								title={t("What this usage would cost at public API rates", "按公开 API 价格计算这部分用量的花费")}
++								title={t(
++									"What this usage would cost at public API rates",
++									"按公开 API 价格计算这部分用量的花费",
++								)}
  								value={formatEstimatedCost(view.totalCost, view.unpricedRequests)}
  								hint={
 -									view.unpricedRequests > 0 ? `${formatInteger(view.unpricedRequests)} unpriced` : undefined
 +									view.unpricedRequests > 0
-+										? t(`${formatInteger(view.unpricedRequests)} unpriced`, `未定价 ${formatInteger(view.unpricedRequests)} 个`)
++										? t(
++												`${formatInteger(view.unpricedRequests)} unpriced`,
++												`未定价 ${formatInteger(view.unpricedRequests)} 个`,
++											)
 +										: undefined
  								}
  							/>
@@ -2899,7 +2953,7 @@ index 4ada27b3a9..a6b79a0532 100644
  								value={formatPercent(view.cacheRate)}
  							/>
  						</StatGrid>
-@@ -116,7 +139,12 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
+@@ -116,7 +151,12 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
  			</QueryView>
  
  			<div className="grid grid-2">
@@ -2913,7 +2967,7 @@ index 4ada27b3a9..a6b79a0532 100644
  					<QueryView
  						query={folders}
  						skeleton={<ChartSkeleton height={236} />}
-@@ -137,7 +165,12 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
+@@ -137,7 +177,12 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
  						)}
  					</QueryView>
  				</Card>
@@ -2927,7 +2981,7 @@ index 4ada27b3a9..a6b79a0532 100644
  					<QueryView
  						query={folders}
  						skeleton={<ChartSkeleton height={236} />}
-@@ -161,27 +194,35 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
+@@ -161,27 +206,41 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
  
  			<Card
  				index={3}
@@ -2949,7 +3003,13 @@ index 4ada27b3a9..a6b79a0532 100644
  					<>
  						{view.temporaryCount > 0 && (
 -							<label className="check" title="Session folders under /tmp or /var/folders">
-+							<label className="check" title={t("Session folders under /tmp or /var/folders", "位于 /tmp 或 /var/folders 下的会话文件夹")}>
++							<label
++								className="check"
++								title={t(
++									"Session folders under /tmp or /var/folders",
++									"位于 /tmp 或 /var/folders 下的会话文件夹",
++								)}
++							>
  								<input
  									type="checkbox"
  									checked={hideTemporary}
@@ -2969,7 +3029,7 @@ index 4ada27b3a9..a6b79a0532 100644
  					</>
  				}
  				flush
-@@ -198,12 +239,16 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
+@@ -198,12 +257,16 @@ export function ProjectsRoute({ active, range }: ProjectsRouteProps) {
  							dense
  							empty={
  								<EmptyState
@@ -2989,7 +3049,7 @@ index 4ada27b3a9..a6b79a0532 100644
  												: undefined
  									}
  								/>
-@@ -220,34 +265,34 @@ function folderColumns(maxRequests: number, maxCost: number): Column<FolderRowVi
+@@ -220,34 +283,41 @@ function folderColumns(maxRequests: number, maxCost: number): Column<FolderRowVi
  	return [
  		{
  			key: "folder",
@@ -3013,7 +3073,12 @@ index 4ada27b3a9..a6b79a0532 100644
  			sort: row => row.totalRequests,
  			render: row => (
 -				<span title={`${formatPercent(row.requestShare)} of all requests`}>
-+				<span title={t(`${formatPercent(row.requestShare)} of all requests`, `占全部请求的 ${formatPercent(row.requestShare)}`)}>
++				<span
++					title={t(
++						`${formatPercent(row.requestShare)} of all requests`,
++						`占全部请求的 ${formatPercent(row.requestShare)}`,
++					)}
++				>
  					<MeterCell value={row.totalRequests} max={maxRequests} display={formatInteger(row.totalRequests)} />
  				</span>
  			),
@@ -3028,25 +3093,24 @@ index 4ada27b3a9..a6b79a0532 100644
  			sort: row => row.totalCost,
  			render: row => (
 -				<span title={`${formatPercent(row.costShare)} of all cost`}>
-+				<span title={t(`${formatPercent(row.costShare)} of all cost`, `占全部成本的 ${formatPercent(row.costShare)}`)}>
++				<span
++					title={t(`${formatPercent(row.costShare)} of all cost`, `占全部成本的 ${formatPercent(row.costShare)}`)}
++				>
  					<MeterCell
  						value={row.totalCost}
  						max={maxCost}
-@@ -259,8 +304,11 @@ function folderColumns(maxRequests: number, maxCost: number): Column<FolderRowVi
+@@ -259,8 +329,8 @@ function folderColumns(maxRequests: number, maxCost: number): Column<FolderRowVi
  		},
  		{
  			key: "tokens",
 -			header: "Tokens",
 -			title: "Uncached input + cache reads + cache writes + output",
 +			header: t("Tokens", "Token"),
-+			title: t(
-+				"Uncached input + cache reads + cache writes + output",
-+				"未缓存输入 + 缓存读取 + 缓存写入 + 输出",
-+			),
++			title: t("Uncached input + cache reads + cache writes + output", "未缓存输入 + 缓存读取 + 缓存写入 + 输出"),
  			align: "right",
  			sort: row => row.conversationTokens,
  			render: row => (
-@@ -271,16 +319,19 @@ function folderColumns(maxRequests: number, maxCost: number): Column<FolderRowVi
+@@ -271,16 +341,19 @@ function folderColumns(maxRequests: number, maxCost: number): Column<FolderRowVi
  		},
  		{
  			key: "cacheRate",
@@ -3070,7 +3134,7 @@ index 4ada27b3a9..a6b79a0532 100644
  			align: "right",
  			sort: row => row.cacheSavings,
  			render: row => (
-@@ -291,11 +342,11 @@ function folderColumns(maxRequests: number, maxCost: number): Column<FolderRowVi
+@@ -291,11 +364,13 @@ function folderColumns(maxRequests: number, maxCost: number): Column<FolderRowVi
  		},
  		{
  			key: "errorRate",
@@ -3080,11 +3144,13 @@ index 4ada27b3a9..a6b79a0532 100644
  			sort: row => row.errorRate,
  			render: row => (
 -				<span title={`${formatInteger(row.failedRequests)} failed`}>
-+				<span title={t(`${formatInteger(row.failedRequests)} failed`, `失败 ${formatInteger(row.failedRequests)} 次`)}>
++				<span
++					title={t(`${formatInteger(row.failedRequests)} failed`, `失败 ${formatInteger(row.failedRequests)} 次`)}
++				>
  					<Badge tone={row.failedRequests > 0 ? errorRateTone(row.errorRate) : "neutral"} mono>
  						{formatErrorRate(row.errorRate)}
  					</Badge>
-@@ -304,14 +355,14 @@ function folderColumns(maxRequests: number, maxCost: number): Column<FolderRowVi
+@@ -304,14 +379,14 @@ function folderColumns(maxRequests: number, maxCost: number): Column<FolderRowVi
  		},
  		{
  			key: "duration",
@@ -3102,7 +3168,7 @@ index 4ada27b3a9..a6b79a0532 100644
  			sort: row => row.lastTimestamp,
  			render: row => <span className="dim">{formatRelativeTime(row.lastTimestamp)}</span>,
 diff --git a/packages/stats/src/client/routes/ProvidersRoute.tsx b/packages/stats/src/client/routes/ProvidersRoute.tsx
-index b94515d23c..d28f3cd549 100644
+index b94515d23c..8708d29d73 100644
 --- a/packages/stats/src/client/routes/ProvidersRoute.tsx
 +++ b/packages/stats/src/client/routes/ProvidersRoute.tsx
 @@ -16,6 +16,7 @@ import {
@@ -3167,7 +3233,7 @@ index b94515d23c..d28f3cd549 100644
  			/>
  
  			<QueryView query={stats} skeleton={<ChartSkeleton height={112} />}>
-@@ -155,34 +162,57 @@ export function ProvidersRoute({ active, range }: ProvidersRouteProps) {
+@@ -155,34 +162,54 @@ export function ProvidersRoute({ active, range }: ProvidersRouteProps) {
  					<div data-stale={stats.stale}>
  						<StatGrid min={190}>
  							<Stat
@@ -3190,10 +3256,7 @@ index b94515d23c..d28f3cd549 100644
 -								hint={`${formatInteger(t.failed)} failed`}
 +								label={t("Requests", "请求")}
 +								value={formatInteger(totals.requests)}
-+								hint={t(
-+									`${formatInteger(totals.failed)} failed`,
-+									`${formatInteger(totals.failed)} 次失败`,
-+								)}
++								hint={t(`${formatInteger(totals.failed)} failed`, `${formatInteger(totals.failed)} 次失败`)}
  								spark={view.spark.requests}
  							/>
  							<Stat
@@ -3240,7 +3303,7 @@ index b94515d23c..d28f3cd549 100644
  							/>
  						</StatGrid>
  					</div>
-@@ -191,11 +221,17 @@ export function ProvidersRoute({ active, range }: ProvidersRouteProps) {
+@@ -191,11 +218,17 @@ export function ProvidersRoute({ active, range }: ProvidersRouteProps) {
  
  			<Card
  				index={1}
@@ -3262,7 +3325,7 @@ index b94515d23c..d28f3cd549 100644
  				}
  				flush
  				stale={stats.stale}
-@@ -208,11 +244,17 @@ export function ProvidersRoute({ active, range }: ProvidersRouteProps) {
+@@ -208,11 +241,17 @@ export function ProvidersRoute({ active, range }: ProvidersRouteProps) {
  			<div className="grid grid-main-side">
  				<Card
  					index={2}
@@ -3284,7 +3347,7 @@ index b94515d23c..d28f3cd549 100644
  					}
  					actions={<Segmented size="sm" options={BURN_OPTIONS} value={metric} onChange={setMetric} />}
  					stale={stats.stale}
-@@ -228,7 +270,7 @@ export function ProvidersRoute({ active, range }: ProvidersRouteProps) {
+@@ -228,7 +267,7 @@ export function ProvidersRoute({ active, range }: ProvidersRouteProps) {
  									height={260}
  									format={burnFormat}
  									formatTooltip={metric === "cost" ? v => formatCost(v) : formatInteger}
@@ -3293,7 +3356,7 @@ index b94515d23c..d28f3cd549 100644
  								/>
  								<Legend
  									items={burnSeries.map(s => ({
-@@ -252,8 +294,11 @@ export function ProvidersRoute({ active, range }: ProvidersRouteProps) {
+@@ -252,8 +291,11 @@ export function ProvidersRoute({ active, range }: ProvidersRouteProps) {
  
  			<Card
  				index={4}
@@ -3307,7 +3370,7 @@ index b94515d23c..d28f3cd549 100644
  				flush
  				stale={windows.stale}
  			>
-@@ -312,7 +357,7 @@ function ProviderTotalsTable({
+@@ -312,7 +354,7 @@ function ProviderTotalsTable({
  		return [
  			{
  				key: "provider",
@@ -3316,7 +3379,7 @@ index b94515d23c..d28f3cd549 100644
  				sort: p => p.provider,
  				render: p => (
  					<span className="row" style={{ gap: 8 }}>
-@@ -323,7 +368,7 @@ function ProviderTotalsTable({
+@@ -323,7 +365,7 @@ function ProviderTotalsTable({
  			},
  			{
  				key: "requests",
@@ -3325,7 +3388,7 @@ index b94515d23c..d28f3cd549 100644
  				align: "right",
  				sort: p => p.totalRequests,
  				render: p => (
-@@ -332,7 +377,7 @@ function ProviderTotalsTable({
+@@ -332,7 +374,7 @@ function ProviderTotalsTable({
  			},
  			{
  				key: "errors",
@@ -3334,7 +3397,7 @@ index b94515d23c..d28f3cd549 100644
  				align: "right",
  				sort: p => (p.totalRequests > 0 ? p.failedRequests / p.totalRequests : 0),
  				render: p => {
-@@ -349,16 +394,19 @@ function ProviderTotalsTable({
+@@ -349,16 +391,16 @@ function ProviderTotalsTable({
  			},
  			{
  				key: "models",
@@ -3351,14 +3414,11 @@ index b94515d23c..d28f3cd549 100644
 -				header: "Tokens",
 -				title: "Uncached input + cache reads + cache writes + output",
 +				header: t("Tokens", "Token"),
-+				title: t(
-+					"Uncached input + cache reads + cache writes + output",
-+					"未缓存输入 + 缓存读取 + 缓存写入 + 输出",
-+				),
++				title: t("Uncached input + cache reads + cache writes + output", "未缓存输入 + 缓存读取 + 缓存写入 + 输出"),
  				align: "right",
  				sort: p => p.totalTokens,
  				render: p => (
-@@ -372,8 +420,8 @@ function ProviderTotalsTable({
+@@ -372,8 +414,8 @@ function ProviderTotalsTable({
  			},
  			{
  				key: "share",
@@ -3369,7 +3429,7 @@ index b94515d23c..d28f3cd549 100644
  				align: "right",
  				sort: p => p.totalTokens,
  				render: p => (
-@@ -382,14 +430,21 @@ function ProviderTotalsTable({
+@@ -382,14 +424,21 @@ function ProviderTotalsTable({
  			},
  			{
  				key: "cost",
@@ -3394,7 +3454,7 @@ index b94515d23c..d28f3cd549 100644
  					>
  						{formatEstimatedCost(p.totalCost, p.unpricedRequests)}
  					</span>
-@@ -397,16 +452,16 @@ function ProviderTotalsTable({
+@@ -397,16 +446,16 @@ function ProviderTotalsTable({
  			},
  			{
  				key: "tps",
@@ -3415,7 +3475,7 @@ index b94515d23c..d28f3cd549 100644
  				align: "right",
  				sort: p => p.totalPremiumRequests,
  				render: p => (
-@@ -428,7 +483,7 @@ function ProviderTotalsTable({
+@@ -428,7 +477,7 @@ function ProviderTotalsTable({
  			selectedKey={open}
  			onRowClick={p => setOpen(prev => (prev === p.provider ? null : p.provider))}
  			expanded={p => (p.provider === open ? <TokenMix provider={p} /> : null)}
@@ -3424,7 +3484,7 @@ index b94515d23c..d28f3cd549 100644
  		/>
  	);
  }
-@@ -490,13 +545,13 @@ function PeakHoursCard({
+@@ -490,13 +539,13 @@ function PeakHoursCard({
  		const series: ChartSeries[] = [
  			{
  				key: "tokens",
@@ -3440,7 +3500,7 @@ index b94515d23c..d28f3cd549 100644
  				color: "var(--chart-secondary)",
  				values: tokens.map((v, hour) => (hasData && hour === peak ? v : null)),
  			},
-@@ -509,20 +564,23 @@ function PeakHoursCard({
+@@ -509,20 +558,23 @@ function PeakHoursCard({
  	return (
  		<Card
  			index={3}
@@ -3469,7 +3529,7 @@ index b94515d23c..d28f3cd549 100644
  					{providers.map(p => (
  						<option key={p.provider} value={p.provider}>
  							{p.provider}
-@@ -540,15 +598,15 @@ function PeakHoursCard({
+@@ -540,15 +592,15 @@ function PeakHoursCard({
  				height={260}
  				showTotal={false}
  				formatTooltip={formatInteger}
@@ -3488,16 +3548,21 @@ index b94515d23c..d28f3cd549 100644
  							<span className="chart-tooltip-value">{formatInteger(hours.requests[hour])}</span>
  						</div>
  					</>
-@@ -580,7 +638,7 @@ function WindowInsightsTable({
+@@ -580,7 +632,12 @@ function WindowInsightsTable({
  			limit={12}
  			selectedKey={selected ? `${selected.provider}::${selected.windowKey}` : null}
  			onRowClick={i => onSelect({ provider: i.provider, windowKey: i.windowKey })}
 -			empty={<EmptyState title="No usage snapshots in this range" hint={SNAPSHOT_HINT} />}
-+			empty={<EmptyState title={t("No usage snapshots in this range", "此时间范围内没有用量快照")} hint={SNAPSHOT_HINT} />}
++			empty={
++				<EmptyState
++					title={t("No usage snapshots in this range", "此时间范围内没有用量快照")}
++					hint={SNAPSHOT_HINT}
++				/>
++			}
  		/>
  	);
  }
-@@ -588,53 +646,71 @@ function WindowInsightsTable({
+@@ -588,53 +645,65 @@ function WindowInsightsTable({
  const INSIGHT_COLUMNS: Column<ProviderWindowInsight>[] = [
  	{
  		key: "window",
@@ -3511,10 +3576,7 @@ index b94515d23c..d28f3cd549 100644
 -		header: "Accounts",
 -		title: "Accounts with at least one snapshot for this window in range",
 +		header: t("Accounts", "账户"),
-+		title: t(
-+			"Accounts with at least one snapshot for this window in range",
-+			"该窗口在范围内至少有一条快照的账户数",
-+		),
++		title: t("Accounts with at least one snapshot for this window in range", "该窗口在范围内至少有一条快照的账户数"),
  		align: "right",
  		sort: i => i.accounts,
  		render: i => <span className="num">{formatInteger(i.accounts)}</span>,
@@ -3560,10 +3622,7 @@ index b94515d23c..d28f3cd549 100644
 -				<span className="dim" title="Too little of the window was consumed to extrapolate">
 +				<span
 +					className="dim"
-+					title={t(
-+						"Too little of the window was consumed to extrapolate",
-+						"窗口消耗过少，无法外推",
-+					)}
++					title={t("Too little of the window was consumed to extrapolate", "窗口消耗过少，无法外推")}
 +				>
  					–
  				</span>
@@ -3581,7 +3640,7 @@ index b94515d23c..d28f3cd549 100644
  		align: "right",
  		sort: i => i.peakConcurrentFraction,
  		render: i => {
-@@ -651,14 +727,20 @@ const INSIGHT_COLUMNS: Column<ProviderWindowInsight>[] = [
+@@ -651,14 +720,20 @@ const INSIGHT_COLUMNS: Column<ProviderWindowInsight>[] = [
  	},
  	{
  		key: "ideal",
@@ -3605,7 +3664,7 @@ index b94515d23c..d28f3cd549 100644
  				</Badge>
  			) : (
  				<span className="num">{formatInteger(i.idealAccounts)}</span>
-@@ -666,14 +748,17 @@ const INSIGHT_COLUMNS: Column<ProviderWindowInsight>[] = [
+@@ -666,14 +741,14 @@ const INSIGHT_COLUMNS: Column<ProviderWindowInsight>[] = [
  	},
  	{
  		key: "exhausted",
@@ -3619,14 +3678,11 @@ index b94515d23c..d28f3cd549 100644
  			i.exhaustedEvents > 0 ? (
  				<Badge tone="warn" mono>
 -					{formatInteger(i.exhaustedEvents)} exhausted
-+					{t(
-+						`${formatInteger(i.exhaustedEvents)} exhausted`,
-+						`${formatInteger(i.exhaustedEvents)} 次耗尽`,
-+					)}
++					{t(`${formatInteger(i.exhaustedEvents)} exhausted`, `${formatInteger(i.exhaustedEvents)} 次耗尽`)}
  				</Badge>
  			) : (
  				<span className="num dim">0</span>
-@@ -802,11 +887,14 @@ function WindowUtilizationCard({
+@@ -802,11 +877,14 @@ function WindowUtilizationCard({
  	return (
  		<Card
  			index={5}
@@ -3644,7 +3700,7 @@ index b94515d23c..d28f3cd549 100644
  			}
  			actions={
  				selected && (
-@@ -819,7 +907,7 @@ function WindowUtilizationCard({
+@@ -819,7 +897,7 @@ function WindowUtilizationCard({
  								const first = insights?.find(i => i.provider === next);
  								if (first) onSelect({ provider: next, windowKey: first.windowKey });
  							}}
@@ -3653,7 +3709,7 @@ index b94515d23c..d28f3cd549 100644
  						>
  							{providers.map(p => (
  								<option key={p} value={p}>
-@@ -831,7 +919,7 @@ function WindowUtilizationCard({
+@@ -831,7 +909,7 @@ function WindowUtilizationCard({
  							className="input providers-select"
  							value={selected.windowKey}
  							onChange={e => onSelect({ provider: selected.provider, windowKey: e.target.value })}
@@ -3662,16 +3718,19 @@ index b94515d23c..d28f3cd549 100644
  						>
  							{windows.map(w => (
  								<option key={w.key} value={w.key}>
-@@ -847,7 +935,7 @@ function WindowUtilizationCard({
+@@ -847,7 +925,10 @@ function WindowUtilizationCard({
  			{insights === null ? (
  				<ChartSkeleton height={260} />
  			) : selected === null ? (
 -				<EmptyState title="No usage snapshots in this range" hint={SNAPSHOT_HINT} />
-+				<EmptyState title={t("No usage snapshots in this range", "此时间范围内没有用量快照")} hint={SNAPSHOT_HINT} />
++				<EmptyState
++					title={t("No usage snapshots in this range", "此时间范围内没有用量快照")}
++					hint={SNAPSHOT_HINT}
++				/>
  			) : (
  				<QueryView query={accounts} skeleton={<ChartSkeleton height={260} />}>
  					{() =>
-@@ -874,12 +962,14 @@ function WindowUtilizationCard({
+@@ -874,12 +955,12 @@ function WindowUtilizationCard({
  										format={v => formatPercent(v, 0)}
  										formatTooltip={v => formatPercent(v, 1)}
  										references={[{ value: 1, label: "100%" }]}
@@ -3682,13 +3741,11 @@ index b94515d23c..d28f3cd549 100644
  											return exhausted.length > 0 ? (
  												<div className="chart-tooltip-row">
 -													<span className="chart-tooltip-label tone-bad">Exhausted</span>
-+													<span className="chart-tooltip-label tone-bad">
-+														{t("Exhausted", "已耗尽")}
-+													</span>
++													<span className="chart-tooltip-label tone-bad">{t("Exhausted", "已耗尽")}</span>
  													<span className="chart-tooltip-value">{exhausted.join(", ")}</span>
  												</div>
  											) : null;
-@@ -980,16 +1070,16 @@ function buildUtilization(accounts: UsageWindowSeries[], names: ReadonlyMap<stri
+@@ -980,16 +1061,16 @@ function buildUtilization(accounts: UsageWindowSeries[], names: ReadonlyMap<stri
  }
  
  function statusBadge(latest: AccountRow["latest"]): ReactNode {
@@ -3710,7 +3767,7 @@ index b94515d23c..d28f3cd549 100644
  		sort: r => r.name,
  		render: r => (
  			<span className="row" style={{ gap: 8 }}>
-@@ -1002,13 +1092,13 @@ const ACCOUNT_COLUMNS: Column<AccountRow>[] = [
+@@ -1002,13 +1083,13 @@ const ACCOUNT_COLUMNS: Column<AccountRow>[] = [
  	},
  	{
  		key: "window",
@@ -3726,7 +3783,7 @@ index b94515d23c..d28f3cd549 100644
  		align: "right",
  		sort: r => r.latest?.fraction ?? -1,
  		render: r =>
-@@ -1025,27 +1115,27 @@ const ACCOUNT_COLUMNS: Column<AccountRow>[] = [
+@@ -1025,27 +1106,27 @@ const ACCOUNT_COLUMNS: Column<AccountRow>[] = [
  	},
  	{
  		key: "status",
@@ -3759,7 +3816,7 @@ index b94515d23c..d28f3cd549 100644
  		sort: r => r.latest?.timestamp ?? 0,
  		render: r => <span className="muted">{r.latest ? formatRelativeTime(r.latest.timestamp) : "–"}</span>,
 diff --git a/packages/stats/src/client/routes/RequestsRoute.tsx b/packages/stats/src/client/routes/RequestsRoute.tsx
-index d746711425..e621728225 100644
+index d746711425..37a7f6ae17 100644
 --- a/packages/stats/src/client/routes/RequestsRoute.tsx
 +++ b/packages/stats/src/client/routes/RequestsRoute.tsx
 @@ -13,7 +13,8 @@ import {
@@ -3806,7 +3863,7 @@ index d746711425..e621728225 100644
  			/>
  
  			<QueryView query={log} skeleton={<Skeleton height={96} style={{ borderRadius: 12 }} />}>
-@@ -114,38 +120,51 @@ export function RequestsRoute({ active, range, onRequestClick }: RequestsRoutePr
+@@ -114,38 +120,54 @@ export function RequestsRoute({ active, range, onRequestClick }: RequestsRoutePr
  					<div data-stale={log.stale}>
  						<StatGrid min={160}>
  							<Stat
@@ -3853,7 +3910,10 @@ index d746711425..e621728225 100644
 -								hint={summary.unpriced > 0 ? `${formatInteger(summary.unpriced)} unpriced` : undefined}
 +								hint={
 +									summary.unpriced > 0
-+										? t(`${formatInteger(summary.unpriced)} unpriced`, `${formatInteger(summary.unpriced)} 次未定价`)
++										? t(
++												`${formatInteger(summary.unpriced)} unpriced`,
++												`${formatInteger(summary.unpriced)} 次未定价`,
++											)
 +										: undefined
 +								}
  							/>
@@ -3871,7 +3931,7 @@ index d746711425..e621728225 100644
  								value={formatDurationMs(summary.medianTtft)}
  							/>
  						</StatGrid>
-@@ -155,20 +174,30 @@ export function RequestsRoute({ active, range, onRequestClick }: RequestsRoutePr
+@@ -155,20 +177,30 @@ export function RequestsRoute({ active, range, onRequestClick }: RequestsRoutePr
  
  			<Card
  				index={1}
@@ -3908,7 +3968,7 @@ index d746711425..e621728225 100644
  							options={statusOptions}
  							value={status}
  							onChange={setStatus}
-@@ -181,9 +210,14 @@ export function RequestsRoute({ active, range, onRequestClick }: RequestsRoutePr
+@@ -181,9 +213,14 @@ export function RequestsRoute({ active, range, onRequestClick }: RequestsRoutePr
  					log.data !== null && !complete ? (
  						<>
  							<span>
@@ -3926,7 +3986,7 @@ index d746711425..e621728225 100644
  							</span>
  							{loadMore}
  						</>
-@@ -202,8 +236,16 @@ export function RequestsRoute({ active, range, onRequestClick }: RequestsRoutePr
+@@ -202,8 +239,16 @@ export function RequestsRoute({ active, range, onRequestClick }: RequestsRoutePr
  							dense
  							empty={
  								<EmptyState
@@ -3945,7 +4005,7 @@ index d746711425..e621728225 100644
  								/>
  							}
  						/>
-@@ -217,13 +259,13 @@ export function RequestsRoute({ active, range, onRequestClick }: RequestsRoutePr
+@@ -217,13 +262,13 @@ export function RequestsRoute({ active, range, onRequestClick }: RequestsRoutePr
  const REQUEST_COLUMNS: readonly Column<MessageStats>[] = [
  	{
  		key: "model",
@@ -3961,7 +4021,7 @@ index d746711425..e621728225 100644
  		sort: row => row.timestamp,
  		render: row => (
  			<span className="muted" title={formatTimestamp(row.timestamp)}>
-@@ -233,7 +275,7 @@ const REQUEST_COLUMNS: readonly Column<MessageStats>[] = [
+@@ -233,7 +278,7 @@ const REQUEST_COLUMNS: readonly Column<MessageStats>[] = [
  	},
  	{
  		key: "project",
@@ -3970,7 +4030,7 @@ index d746711425..e621728225 100644
  		sort: row => row.folder,
  		render: row => (
  			<span className="mono muted truncate" title={row.folder} style={{ display: "block", maxWidth: 180 }}>
-@@ -243,57 +285,60 @@ const REQUEST_COLUMNS: readonly Column<MessageStats>[] = [
+@@ -243,57 +288,63 @@ const REQUEST_COLUMNS: readonly Column<MessageStats>[] = [
  	},
  	{
  		key: "input",
@@ -3994,7 +4054,10 @@ index d746711425..e621728225 100644
 -			<span className="num" title={`Cache write: ${formatInteger(row.usage.cacheWrite)}`}>
 +			<span
 +				className="num"
-+				title={t(`Cache write: ${formatInteger(row.usage.cacheWrite)}`, `缓存写入：${formatInteger(row.usage.cacheWrite)}`)}
++				title={t(
++					`Cache write: ${formatInteger(row.usage.cacheWrite)}`,
++					`缓存写入：${formatInteger(row.usage.cacheWrite)}`,
++				)}
 +			>
  				{formatCompact(row.usage.cacheRead)}
  			</span>
@@ -4043,7 +4106,7 @@ index d746711425..e621728225 100644
  		sort: row => requestStatus(row),
  		render: row => {
  			const status = REQUEST_STATUS[requestStatus(row)];
-@@ -302,7 +347,7 @@ const REQUEST_COLUMNS: readonly Column<MessageStats>[] = [
+@@ -302,7 +353,7 @@ const REQUEST_COLUMNS: readonly Column<MessageStats>[] = [
  					<LabelCell
  						lead={<Dot tone={status.tone} />}
  						primary={status.label}
@@ -4053,7 +4116,7 @@ index d746711425..e621728225 100644
  				</span>
  			);
 diff --git a/packages/stats/src/client/routes/SpotlightRoute.tsx b/packages/stats/src/client/routes/SpotlightRoute.tsx
-index 42477c5930..4e5fe8d3f6 100644
+index 42477c5930..a3e6314d1e 100644
 --- a/packages/stats/src/client/routes/SpotlightRoute.tsx
 +++ b/packages/stats/src/client/routes/SpotlightRoute.tsx
 @@ -16,6 +16,7 @@ import { ShareTrend } from "../spotlight/ShareTrend";
@@ -4064,7 +4127,7 @@ index 42477c5930..4e5fe8d3f6 100644
  import { Card, ChartSkeleton, PageHeader, QueryView, Segmented } from "../ui";
  import "../spotlight/spotlight.css";
  
-@@ -25,13 +26,25 @@ export interface SpotlightRouteProps {
+@@ -25,13 +26,29 @@ export interface SpotlightRouteProps {
  }
  
  const AGENT_OPTIONS = [
@@ -4076,7 +4139,11 @@ index 42477c5930..4e5fe8d3f6 100644
 +		label: t("All", "全部"),
 +		title: t("Every experiment session, subagents and advisors included", "所有实验会话，包含子代理与顾问"),
 +	},
-+	{ value: "main", label: t("Main", "主代理"), title: t("Sessions you drove: the main agent only", "你亲自驱动的会话：仅主代理") },
++	{
++		value: "main",
++		label: t("Main", "主代理"),
++		title: t("Sessions you drove: the main agent only", "你亲自驱动的会话：仅主代理"),
++	},
 +	{
 +		value: "subagent",
 +		label: t("Subagents", "子代理"),
@@ -4094,7 +4161,7 @@ index 42477c5930..4e5fe8d3f6 100644
  
  /** The page reads as four questions, in order; each heading opens the cards that answer one. */
  function SectionHeading({ id, title, children }: { id: string; title: string; children: string }) {
-@@ -57,9 +70,19 @@ export function SpotlightRoute({ active, range }: SpotlightRouteProps) {
+@@ -57,9 +74,19 @@ export function SpotlightRoute({ active, range }: SpotlightRouteProps) {
  	return (
  		<div className="page spot-page">
  			<PageHeader
@@ -4117,7 +4184,7 @@ index 42477c5930..4e5fe8d3f6 100644
  			/>
  
  			<QueryView
-@@ -74,21 +97,31 @@ export function SpotlightRoute({ active, range }: SpotlightRouteProps) {
+@@ -74,21 +101,31 @@ export function SpotlightRoute({ active, range }: SpotlightRouteProps) {
  							</span>
  							<h2 className="spot-empty-title">
  								{experimentStart === null
@@ -4157,7 +4224,7 @@ index 42477c5930..4e5fe8d3f6 100644
  								)}
  							</p>
  						</div>
-@@ -99,8 +132,11 @@ export function SpotlightRoute({ active, range }: SpotlightRouteProps) {
+@@ -99,8 +136,11 @@ export function SpotlightRoute({ active, range }: SpotlightRouteProps) {
  					<>
  						<SpotlightHero stats={data} windowLabel={meta.windowLabel} stale={stats.stale} />
  
@@ -4171,7 +4238,7 @@ index 42477c5930..4e5fe8d3f6 100644
  						</SectionHeading>
  						<div className="grid grid-main-side">
  							<SavingsOverTime stats={data} range={range} stale={stats.stale} />
-@@ -109,22 +145,30 @@ export function SpotlightRoute({ active, range }: SpotlightRouteProps) {
+@@ -109,22 +149,30 @@ export function SpotlightRoute({ active, range }: SpotlightRouteProps) {
  						<Compounding stats={data} active={active} stale={stats.stale} />
  						<ShareTrend stats={data} range={range} stale={stats.stale} />
  
@@ -4210,7 +4277,7 @@ index 42477c5930..4e5fe8d3f6 100644
  						<Steps stats={data} stale={stats.stale} />
  						<Economics stats={data} stale={stats.stale} />
 diff --git a/packages/stats/src/client/routes/ToolsRoute.tsx b/packages/stats/src/client/routes/ToolsRoute.tsx
-index 79ac19ab31..6fc96b74d6 100644
+index 79ac19ab31..80626e6542 100644
 --- a/packages/stats/src/client/routes/ToolsRoute.tsx
 +++ b/packages/stats/src/client/routes/ToolsRoute.tsx
 @@ -15,6 +15,7 @@ import { useQuery } from "../data/query";
@@ -4247,7 +4314,7 @@ index 79ac19ab31..6fc96b74d6 100644
  
  export function ToolsRoute({ active, range }: ToolsRouteProps) {
  	const tools = useQuery(["tools", range], ({ signal }) => getToolDashboardStats(range, signal), { enabled: active });
-@@ -73,74 +78,106 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
+@@ -73,74 +78,108 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
  	return (
  		<div className="page">
  			<PageHeader
@@ -4273,10 +4340,7 @@ index 79ac19ab31..6fc96b74d6 100644
 -									hint={`${formatInteger(t.errors)} failed`}
 +									label={t("Tool calls", "工具调用")}
 +									value={formatInteger(totals.calls)}
-+									hint={t(
-+										`${formatInteger(totals.errors)} failed`,
-+										`失败 ${formatInteger(totals.errors)} 次`,
-+									)}
++									hint={t(`${formatInteger(totals.errors)} failed`, `失败 ${formatInteger(totals.errors)} 次`)}
  									spark={view.totalCalls}
  								/>
  								<Stat
@@ -4286,7 +4350,9 @@ index 79ac19ab31..6fc96b74d6 100644
 +									label={t("Distinct tools", "不同工具")}
 +									value={formatInteger(totals.tools)}
 +									hint={
-+										view.rows[0] ? t(`Most used: ${view.rows[0].tool}`, `最常用：${view.rows[0].tool}`) : undefined
++										view.rows[0]
++											? t(`Most used: ${view.rows[0].tool}`, `最常用：${view.rows[0].tool}`)
++											: undefined
 +									}
  								/>
  								<Stat
@@ -4295,10 +4361,7 @@ index 79ac19ab31..6fc96b74d6 100644
 -									value={formatErrorRate(t.calls > 0 ? t.errors / t.calls : 0)}
 -									hint={`${formatInteger(t.calls - t.errors)} succeeded`}
 +									label={t("Error rate", "错误率")}
-+									title={t(
-+										"Tool results that came back flagged as errors",
-+										"返回时被标记为错误的工具结果",
-+									)}
++									title={t("Tool results that came back flagged as errors", "返回时被标记为错误的工具结果")}
 +									value={formatErrorRate(totals.calls > 0 ? totals.errors / totals.calls : 0)}
 +									hint={t(
 +										`${formatInteger(totals.calls - totals.errors)} succeeded`,
@@ -4353,7 +4416,10 @@ index 79ac19ab31..6fc96b74d6 100644
 +										"Characters of tool-result text fed back into context",
 +										"回填到上下文的工具结果文本字符数",
 +									)}
-+									value={t(`${formatCompact(totals.resultChars)} chars`, `${formatCompact(totals.resultChars)} 字符`)}
++									value={t(
++										`${formatCompact(totals.resultChars)} chars`,
++										`${formatCompact(totals.resultChars)} 字符`,
++									)}
  								/>
  								<Stat
  									size="sm"
@@ -4362,7 +4428,10 @@ index 79ac19ab31..6fc96b74d6 100644
 -									value={`${formatCompact(t.argsChars)} chars`}
 +									label={t("Call arguments", "调用参数")}
 +									title={t("Characters of serialized tool-call arguments", "序列化工具调用参数的字符数")}
-+									value={t(`${formatCompact(totals.argsChars)} chars`, `${formatCompact(totals.argsChars)} 字符`)}
++									value={t(
++										`${formatCompact(totals.argsChars)} chars`,
++										`${formatCompact(totals.argsChars)} 字符`,
++									)}
  								/>
  								<Stat
  									size="sm"
@@ -4386,7 +4455,7 @@ index 79ac19ab31..6fc96b74d6 100644
  								/>
  							</StatGrid>
  						</div>
-@@ -150,8 +187,11 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
+@@ -150,8 +189,11 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
  
  			<Card
  				index={1}
@@ -4400,7 +4469,7 @@ index 79ac19ab31..6fc96b74d6 100644
  				actions={<Segmented size="sm" options={METRIC_OPTIONS} value={metric} onChange={setMetric} />}
  				stale={tools.stale}
  			>
-@@ -165,7 +205,11 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
+@@ -165,7 +207,11 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
  								hidden={hidden}
  								height={260}
  								formatTooltip={formatInteger}
@@ -4413,7 +4482,7 @@ index 79ac19ab31..6fc96b74d6 100644
  							/>
  							<Legend
  								items={chartSeries.map(s => ({
-@@ -184,8 +228,11 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
+@@ -184,8 +230,11 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
  
  			<Card
  				index={2}
@@ -4427,18 +4496,21 @@ index 79ac19ab31..6fc96b74d6 100644
  				flush
  				stale={tools.stale}
  			>
-@@ -207,8 +254,8 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
+@@ -207,8 +256,11 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
  
  			<Card
  				index={3}
 -				title="By tool and model"
 -				description="Which models call which tools, and how often those calls fail"
 +				title={t("By tool and model", "按工具与模型")}
-+				description={t("Which models call which tools, and how often those calls fail", "哪些模型调用了哪些工具，以及这些调用的失败频率")}
++				description={t(
++					"Which models call which tools, and how often those calls fail",
++					"哪些模型调用了哪些工具，以及这些调用的失败频率",
++				)}
  				flush
  				stale={tools.stale}
  				actions={
-@@ -217,9 +264,9 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
+@@ -217,9 +269,9 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
  							className="input tools-filter"
  							value={toolFilter ?? ""}
  							onChange={e => setToolFilter(e.target.value || null)}
@@ -4450,7 +4522,7 @@ index 79ac19ab31..6fc96b74d6 100644
  							{view.toolNames.map(name => (
  								<option key={name} value={name}>
  									{name}
-@@ -233,8 +280,8 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
+@@ -233,8 +285,8 @@ export function ToolsRoute({ active, range }: ToolsRouteProps) {
  								data-size="sm"
  								data-variant="ghost"
  								data-icon="true"
@@ -4461,7 +4533,7 @@ index 79ac19ab31..6fc96b74d6 100644
  								onClick={() => setToolFilter(null)}
  							>
  								<X size={13} />
-@@ -271,7 +318,7 @@ function buildToolsView(data: ToolDashboardStats | null, range: TimeRange) {
+@@ -271,7 +323,7 @@ function buildToolsView(data: ToolDashboardStats | null, range: TimeRange) {
  	const byTool = data?.byTool ?? [];
  	const points = data?.series ?? [];
  	const rows = buildToolRows(byTool).sort((a, b) => b.calls - a.calls);
@@ -4470,7 +4542,7 @@ index 79ac19ab31..6fc96b74d6 100644
  	const buckets = bucketAxis(
  		range,
  		points.map(p => p.timestamp),
-@@ -288,15 +335,15 @@ function buildToolsView(data: ToolDashboardStats | null, range: TimeRange) {
+@@ -288,15 +340,15 @@ function buildToolsView(data: ToolDashboardStats | null, range: TimeRange) {
  		resultChars: 0,
  		argsChars: 0,
  	};
@@ -4495,7 +4567,7 @@ index 79ac19ab31..6fc96b74d6 100644
  	}
  
  	// Every tool keeps its table swatch color in both metrics; zero slots become
-@@ -338,7 +385,7 @@ function buildToolColumns(
+@@ -338,7 +390,7 @@ function buildToolColumns(
  	return [
  		{
  			key: "tool",
@@ -4504,7 +4576,7 @@ index 79ac19ab31..6fc96b74d6 100644
  			sort: row => row.tool,
  			render: row => (
  				<span className="row" style={{ gap: 8 }}>
-@@ -351,8 +398,8 @@ function buildToolColumns(
+@@ -351,8 +403,8 @@ function buildToolColumns(
  		},
  		{
  			key: "trend",
@@ -4515,7 +4587,7 @@ index 79ac19ab31..6fc96b74d6 100644
  			render: row => {
  				const values = trends.get(row.tool);
  				return values && values.length > 1 ? (
-@@ -364,7 +411,7 @@ function buildToolColumns(
+@@ -364,7 +416,7 @@ function buildToolColumns(
  		},
  		{
  			key: "calls",
@@ -4524,7 +4596,7 @@ index 79ac19ab31..6fc96b74d6 100644
  			align: "right",
  			sort: row => row.calls,
  			render: row => (
-@@ -372,7 +419,12 @@ function buildToolColumns(
+@@ -372,7 +424,12 @@ function buildToolColumns(
  					value={row.calls}
  					max={maxCalls}
  					display={
@@ -4538,7 +4610,7 @@ index 79ac19ab31..6fc96b74d6 100644
  							{formatInteger(row.calls)}
  							<span className="dim tools-share">{formatPercent(row.callFraction, 0)}</span>
  						</span>
-@@ -382,8 +434,8 @@ function buildToolColumns(
+@@ -382,8 +439,8 @@ function buildToolColumns(
  		},
  		{
  			key: "errorRate",
@@ -4549,7 +4621,7 @@ index 79ac19ab31..6fc96b74d6 100644
  			align: "right",
  			sort: row => row.errorRate,
  			render: row => (
-@@ -397,36 +449,42 @@ function buildToolColumns(
+@@ -397,36 +454,42 @@ function buildToolColumns(
  		},
  		{
  			key: "args",
@@ -4600,17 +4672,14 @@ index 79ac19ab31..6fc96b74d6 100644
  					{formatCompact(Math.round(row.totalTokensShare))}
  					<span className="dim tools-share">{formatPercent(row.tokenFraction, 0)}</span>
  				</span>
-@@ -434,12 +492,21 @@ function buildToolColumns(
+@@ -434,12 +497,18 @@ function buildToolColumns(
  		},
  		{
  			key: "cost",
 -			header: "Attr. cost",
 -			title: `${ATTRIBUTION_NOTE}; API-equivalent estimate`,
 +			header: t("Attr. cost", "归属成本"),
-+			title: t(
-+				`${ATTRIBUTION_NOTE_EN}; API-equivalent estimate`,
-+				`${ATTRIBUTION_NOTE_ZH}；按 API 等价估算`,
-+			),
++			title: t(`${ATTRIBUTION_NOTE_EN}; API-equivalent estimate`, `${ATTRIBUTION_NOTE_ZH}；按 API 等价估算`),
  			align: "right",
  			sort: row => row.costShare,
  			render: row => (
@@ -4625,7 +4694,7 @@ index 79ac19ab31..6fc96b74d6 100644
  					{formatEstimatedCost(row.costShare, row.unpricedRequestsShare)}
  					<span className="dim tools-share">{formatPercent(row.costFraction, 0)}</span>
  				</span>
-@@ -447,7 +514,7 @@ function buildToolColumns(
+@@ -447,7 +516,7 @@ function buildToolColumns(
  		},
  		{
  			key: "lastUsed",
@@ -4634,7 +4703,7 @@ index 79ac19ab31..6fc96b74d6 100644
  			align: "right",
  			sort: row => row.lastUsed,
  			render: row => <span className="muted">{formatRelativeTime(row.lastUsed)}</span>,
-@@ -485,7 +552,7 @@ function ToolModelTable({
+@@ -485,7 +554,7 @@ function ToolModelTable({
  		return [
  			{
  				key: "tool",
@@ -4643,7 +4712,7 @@ index 79ac19ab31..6fc96b74d6 100644
  				sort: row => row.tool,
  				render: row => (
  					<span className="row" style={{ gap: 8 }}>
-@@ -498,22 +565,25 @@ function ToolModelTable({
+@@ -498,22 +567,25 @@ function ToolModelTable({
  			},
  			{
  				key: "model",
@@ -4673,7 +4742,7 @@ index 79ac19ab31..6fc96b74d6 100644
  				align: "right",
  				sort: row => row.errorRate,
  				render: row => (
-@@ -527,15 +597,15 @@ function ToolModelTable({
+@@ -527,15 +599,15 @@ function ToolModelTable({
  			},
  			{
  				key: "result",
@@ -4692,17 +4761,14 @@ index 79ac19ab31..6fc96b74d6 100644
  				title: ATTRIBUTION_NOTE,
  				align: "right",
  				sort: row => row.totalTokensShare,
-@@ -543,15 +613,18 @@ function ToolModelTable({
+@@ -543,15 +615,15 @@ function ToolModelTable({
  			},
  			{
  				key: "cost",
 -				header: "Attr. cost",
 -				title: `${ATTRIBUTION_NOTE}; API-equivalent estimate`,
 +				header: t("Attr. cost", "归属成本"),
-+				title: t(
-+					`${ATTRIBUTION_NOTE_EN}; API-equivalent estimate`,
-+					`${ATTRIBUTION_NOTE_ZH}；按 API 等价估算`,
-+				),
++				title: t(`${ATTRIBUTION_NOTE_EN}; API-equivalent estimate`, `${ATTRIBUTION_NOTE_ZH}；按 API 等价估算`),
  				align: "right",
  				sort: row => row.costShare,
  				render: row => <span className="num">{formatEstimatedCost(row.costShare, row.unpricedRequestsShare)}</span>,
@@ -4714,7 +4780,7 @@ index 79ac19ab31..6fc96b74d6 100644
  				align: "right",
  				sort: row => row.lastUsed,
  				render: row => <span className="muted">{formatRelativeTime(row.lastUsed)}</span>,
-@@ -567,7 +640,15 @@ function ToolModelTable({
+@@ -567,7 +639,15 @@ function ToolModelTable({
  			initialSort={{ key: "calls", dir: "desc" }}
  			limit={25}
  			dense
@@ -4880,7 +4946,7 @@ index bc126fab3a..71633f318c 100644
  					)}
  				</QueryView>
 diff --git a/packages/stats/src/client/spotlight/Compounding.tsx b/packages/stats/src/client/spotlight/Compounding.tsx
-index 0414225f64..ced3e453e3 100644
+index 0414225f64..c02bf6eaa7 100644
 --- a/packages/stats/src/client/spotlight/Compounding.tsx
 +++ b/packages/stats/src/client/spotlight/Compounding.tsx
 @@ -6,6 +6,7 @@ import { formatCompact, formatFolder, formatInteger } from "../data/formatters";
@@ -5057,7 +5123,7 @@ index 0414225f64..ced3e453e3 100644
  				formatTooltip={formatInteger}
  				showTotal={false}
  				tooltipExtra={i => {
-@@ -197,22 +222,26 @@ function ContextChart({ context, stale }: { context: SpotlightSessionContext; st
+@@ -197,22 +222,28 @@ function ContextChart({ context, stale }: { context: SpotlightSessionContext; st
  					return (
  						<div className="spot-tooltip-extra">
  							<div className="chart-tooltip-row chart-tooltip-total">
@@ -5068,7 +5134,9 @@ index 0414225f64..ced3e453e3 100644
  							{p.saved > 0 && (
  								<div className="chart-tooltip-row">
 -									<span className="chart-tooltip-label">Cut since last request</span>
-+									<span className="chart-tooltip-label">{t("Cut since last request", "距上次请求的裁剪")}</span>
++									<span className="chart-tooltip-label">
++										{t("Cut since last request", "距上次请求的裁剪")}
++									</span>
  									<span className="chart-tooltip-value">{formatInteger(p.saved)}</span>
  								</div>
  							)}
@@ -5274,7 +5342,7 @@ index d0e0bab37d..944b21e87a 100644
  													</div>
  												</dl>
 diff --git a/packages/stats/src/client/spotlight/FetchBack.tsx b/packages/stats/src/client/spotlight/FetchBack.tsx
-index fab8716c43..afe7c9879b 100644
+index fab8716c43..c0ff49f954 100644
 --- a/packages/stats/src/client/spotlight/FetchBack.tsx
 +++ b/packages/stats/src/client/spotlight/FetchBack.tsx
 @@ -8,6 +8,7 @@ import type {
@@ -5310,16 +5378,22 @@ index fab8716c43..afe7c9879b 100644
  		}));
  		rows.push({
  			key: tool,
-@@ -85,7 +91,7 @@ export function FetchBack({ stats, stale }: FetchBackProps) {
+@@ -85,7 +91,13 @@ export function FetchBack({ stats, stale }: FetchBackProps) {
  					{COMPARISONS.map((group, i) => {
  						const cell = byGroup.get(group);
  						return (
 -							<span key={group} title={`${CUT_GROUP[group].label}: ${CUT_GROUP[group].rule}`}>
-+							<span key={group} title={t(`${CUT_GROUP[group].label}: ${CUT_GROUP[group].rule}`, `${CUT_GROUP[group].label}：${CUT_GROUP[group].rule}`)}>
++							<span
++								key={group}
++								title={t(
++									`${CUT_GROUP[group].label}: ${CUT_GROUP[group].rule}`,
++									`${CUT_GROUP[group].label}：${CUT_GROUP[group].rule}`,
++								)}
++							>
  								{i > 0 && " · "}
  								<span className="spot-fb-detail" data-group={group}>
  									{cell === undefined ? "–" : formatShare(cell.rate.value)}
-@@ -101,13 +107,19 @@ export function FetchBack({ stats, stale }: FetchBackProps) {
+@@ -101,13 +113,19 @@ export function FetchBack({ stats, stale }: FetchBackProps) {
  	return (
  		<Card
  			index={3}
@@ -5343,7 +5417,7 @@ index fab8716c43..afe7c9879b 100644
  			) : (
  				<div className="spot-fb">
  					<GroupLegend groups={legend} />
-@@ -139,17 +151,19 @@ function GapPanel({ tool, counts }: { tool: SpotlightTool; counts: readonly Spot
+@@ -139,17 +157,18 @@ function GapPanel({ tool, counts }: { tool: SpotlightTool; counts: readonly Spot
  	}
  
  	return (
@@ -5356,8 +5430,7 @@ index fab8716c43..afe7c9879b 100644
 -					<span className="num">{formatInteger(applied)}</span> shortened ·{" "}
 -					<span className="num">{formatInteger(holdout)}</span> held out
 +					<span className="num">{formatInteger(applied)}</span>
-+					{t(" shortened", " 个已裁剪")} ·{" "}
-+					<span className="num">{formatInteger(holdout)}</span>
++					{t(" shortened", " 个已裁剪")} · <span className="num">{formatInteger(holdout)}</span>
 +					{t(" held out", " 个留出")}
  				</span>
  			</h3>
@@ -5367,7 +5440,7 @@ index fab8716c43..afe7c9879b 100644
  			) : (
  				<div className="spot-gap-bins">
  					{GAP_BINS.map(bin => {
-@@ -168,7 +182,10 @@ function GapPanel({ tool, counts }: { tool: SpotlightTool; counts: readonly Spot
+@@ -168,7 +187,10 @@ function GapPanel({ tool, counts }: { tool: SpotlightTool; counts: readonly Spot
  												className="spot-gap-bar"
  												data-group={group}
  												data-empty={total === 0}
@@ -5379,14 +5452,17 @@ index fab8716c43..afe7c9879b 100644
  											>
  												{total > 0 && <span className="spot-gap-value num">{formatShare(share)}</span>}
  												<span
-@@ -197,13 +214,16 @@ export function FetchBackGaps({ stats, stale }: FetchBackProps) {
+@@ -197,13 +219,19 @@ export function FetchBackGaps({ stats, stale }: FetchBackProps) {
  	return (
  		<Card
  			index={3}
 -			title="How soon it comes back"
 -			description="Calls between a result and the first fetch-back after it"
 +			title={t("How soon it comes back", "多久会回来")}
-+			description={t("Calls between a result and the first fetch-back after it", "结果与其后第一次重新获取之间隔了多少次调用")}
++			description={t(
++				"Calls between a result and the first fetch-back after it",
++				"结果与其后第一次重新获取之间隔了多少次调用",
++			)}
  			stale={stale}
 -			footer="Bars are each group's share of its own fetch-backs, so shortened and held-out results compare despite their different counts (next to each tool). Same rule as above; nothing after 12 calls counts."
 +			footer={t(
@@ -5401,7 +5477,7 @@ index fab8716c43..afe7c9879b 100644
  				<>
  					<GroupLegend groups={GAP_GROUPS} />
 diff --git a/packages/stats/src/client/spotlight/Hero.tsx b/packages/stats/src/client/spotlight/Hero.tsx
-index 081ba53580..ad4eda5e0f 100644
+index 081ba53580..b0a743d6e9 100644
 --- a/packages/stats/src/client/spotlight/Hero.tsx
 +++ b/packages/stats/src/client/spotlight/Hero.tsx
 @@ -1,6 +1,7 @@
@@ -5412,17 +5488,14 @@ index 081ba53580..ad4eda5e0f 100644
  import { Stat } from "../ui";
  import { foldTools, formatInterval, formatShare, formatSignedCompact, formatSignedCost, OTHER_TOOLS } from "./meta";
  
-@@ -25,9 +26,19 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
+@@ -25,9 +26,16 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
  	const thin = adjusted.byTool.filter(row => row.cuts > 0 && row.holdouts < adjusted.minHoldouts).map(row => row.tool);
  	// Prose list: `read`, `read and bash`, `read, bash and eval`, `read, bash, … and 4 more tools`.
  	const thinFold = foldTools(thin);
 -	const thinNames = thinFold.rest.length > 0 ? [...thinFold.listed, `${thinFold.rest.length} more tools`] : thin;
 +	const thinNames =
 +		thinFold.rest.length > 0
-+			? [
-+					...thinFold.listed,
-+					t(`${thinFold.rest.length} more tools`, `另有 ${thinFold.rest.length} 个工具`),
-+				]
++			? [...thinFold.listed, t(`${thinFold.rest.length} more tools`, `另有 ${thinFold.rest.length} 个工具`)]
 +			: thin;
  	const thinProse =
 -		thinNames.length < 2 ? (thinNames[0] ?? "") : `${thinNames.slice(0, -1).join(", ")} and ${thinNames.at(-1)}`;
@@ -5434,7 +5507,7 @@ index 081ba53580..ad4eda5e0f 100644
  	const heldFold = foldTools(adjusted.byTool);
  	const heldRows = heldFold.listed.map(row => ({
  		tool: row.tool,
-@@ -44,23 +55,39 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
+@@ -44,23 +52,39 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
  	const overstated = gross.fullSavedTokens > 0 ? 1 - gross.savedTokens / gross.fullSavedTokens : null;
  
  	return (
@@ -5479,7 +5552,7 @@ index 081ba53580..ad4eda5e0f 100644
  							>
  								{formatSignedCost(netUsd.value)}
  							</span>
-@@ -68,34 +95,50 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
+@@ -68,34 +92,50 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
  					</div>
  					{(tokenInterval !== "" || usdInterval !== "") && (
  						<div className="spot-hero-interval">
@@ -5541,7 +5614,7 @@ index 081ba53580..ad4eda5e0f 100644
  							</span>
  						</p>
  					)}
-@@ -105,19 +148,28 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
+@@ -105,19 +145,31 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
  			<div className="spot-hero-stats">
  				<Stat
  					size="sm"
@@ -5572,7 +5645,10 @@ index 081ba53580..ad4eda5e0f 100644
  					hint={
  						<>
 -							of {formatCompact(clawback.tokens)} fetched back
-+							{t(`of ${formatCompact(clawback.tokens)} fetched back`, `占重新获取的 ${formatCompact(clawback.tokens)}`)}
++							{t(
++								`of ${formatCompact(clawback.tokens)} fetched back`,
++								`占重新获取的 ${formatCompact(clawback.tokens)}`,
++							)}
  							{adjusted.excessTokens.lo !== null && adjusted.excessTokens.hi !== null && (
  								<>
  									{" "}
@@ -5590,7 +5666,7 @@ index 081ba53580..ad4eda5e0f 100644
  					value={formatInteger(stats.holdouts)}
  					hint={
  						<span className="spot-hero-tools">
-@@ -147,12 +202,17 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
+@@ -147,12 +202,15 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
  										row.tool === OTHER_TOOLS
  											? heldFold.rest.map(rest => `${rest.tool} ${formatInteger(rest.holdouts)}`).join(", ")
  											: row.thin
@@ -5604,13 +5680,11 @@ index 081ba53580..ad4eda5e0f 100644
  								>
  									{row.tool} <span className="num">{formatInteger(row.holdouts)}</span>
 -									{row.thin && <TriangleAlert size={11} aria-label="thin baseline" />}
-+									{row.thin && (
-+										<TriangleAlert size={11} aria-label={t("thin baseline", "基线偏薄")} />
-+									)}
++									{row.thin && <TriangleAlert size={11} aria-label={t("thin baseline", "基线偏薄")} />}
  								</span>
  							))}
  						</span>
-@@ -160,16 +220,19 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
+@@ -160,16 +218,19 @@ export function SpotlightHero({ stats, windowLabel, stale }: SpotlightHeroProps)
  				/>
  				<Stat
  					size="sm"
@@ -5636,7 +5710,7 @@ index 081ba53580..ad4eda5e0f 100644
  			</div>
  		</section>
 diff --git a/packages/stats/src/client/spotlight/Overhead.tsx b/packages/stats/src/client/spotlight/Overhead.tsx
-index 3f2c2ceb7b..d47245244a 100644
+index 3f2c2ceb7b..c147341056 100644
 --- a/packages/stats/src/client/spotlight/Overhead.tsx
 +++ b/packages/stats/src/client/spotlight/Overhead.tsx
 @@ -2,6 +2,7 @@ import { TriangleAlert } from "lucide-react";
@@ -5717,7 +5791,7 @@ index 3f2c2ceb7b..d47245244a 100644
  		render: row =>
  			row.failedWaitMs > 0 ? (
  				<span className="num">{formatDurationMs(row.failedWaitMs)}</span>
-@@ -83,31 +99,37 @@ const COLUMNS: Column<SpotlightOverhead>[] = [
+@@ -83,31 +99,34 @@ const COLUMNS: Column<SpotlightOverhead>[] = [
  	},
  	{
  		key: "results",
@@ -5726,10 +5800,7 @@ index 3f2c2ceb7b..d47245244a 100644
  		align: "right",
  		sort: row => row.results,
 -		title: "Results Spotlight evaluated, held-out ones included",
-+		title: t(
-+			"Results Spotlight evaluated, held-out ones included",
-+			"聚光灯评估过的结果数，含留出未裁剪的结果",
-+		),
++		title: t("Results Spotlight evaluated, held-out ones included", "聚光灯评估过的结果数，含留出未裁剪的结果"),
  		render: row => <span className="num">{formatInteger(row.results)}</span>,
  	},
  	{
@@ -5762,7 +5833,7 @@ index 3f2c2ceb7b..d47245244a 100644
  		align: "right",
  		sort: row => row.spotlightUsd,
  		render: row => <span className="num">{formatCost(row.spotlightUsd)}</span>,
-@@ -130,22 +152,30 @@ function FailureCallout({ overhead }: { overhead: SpotlightOverhead }) {
+@@ -130,22 +149,30 @@ function FailureCallout({ overhead }: { overhead: SpotlightOverhead }) {
  			<TriangleAlert size={16} aria-hidden="true" />
  			<div>
  				<div className="spot-callout-head">
@@ -5800,7 +5871,7 @@ index 3f2c2ceb7b..d47245244a 100644
  						</>
  					)}
  				</p>
-@@ -161,11 +191,17 @@ export function Overhead({ stats, stale }: { stats: SpotlightDashboardStats; sta
+@@ -161,11 +188,17 @@ export function Overhead({ stats, stale }: { stats: SpotlightDashboardStats; sta
  	return (
  		<Card
  			index={3}
@@ -5821,7 +5892,7 @@ index 3f2c2ceb7b..d47245244a 100644
  		>
  			{overhead.results > 0 && <FailureCallout overhead={overhead} />}
  			<Table
-@@ -173,7 +209,9 @@ export function Overhead({ stats, stale }: { stats: SpotlightDashboardStats; sta
+@@ -173,7 +206,9 @@ export function Overhead({ stats, stale }: { stats: SpotlightDashboardStats; sta
  				rowKey={() => "overhead"}
  				columns={COLUMNS}
  				dense
@@ -5833,7 +5904,7 @@ index 3f2c2ceb7b..d47245244a 100644
  		</Card>
  	);
 diff --git a/packages/stats/src/client/spotlight/Ranking.tsx b/packages/stats/src/client/spotlight/Ranking.tsx
-index 51ad47a289..f51df5e599 100644
+index 51ad47a289..cce94af7ea 100644
 --- a/packages/stats/src/client/spotlight/Ranking.tsx
 +++ b/packages/stats/src/client/spotlight/Ranking.tsx
 @@ -1,6 +1,7 @@
@@ -5906,7 +5977,7 @@ index 51ad47a289..f51df5e599 100644
  ] as const;
  
  /** Per-line ranking quality: Spotlight's heat and the cut against the lines the agent needed later. */
-@@ -65,14 +83,20 @@ export function Ranking({ stats, stale }: { stats: SpotlightDashboardStats; stal
+@@ -65,14 +83,22 @@ export function Ranking({ stats, stale }: { stats: SpotlightDashboardStats; stal
  	return (
  		<Card
  			index={4}
@@ -5927,11 +5998,13 @@ index 51ad47a289..f51df5e599 100644
  		>
  			{!measured ? (
 -				<div className="empty">No shaped read was needed again in this range.</div>
-+				<div className="empty">{t("No shaped read was needed again in this range.", "此范围内没有被再次需要的裁剪读取。")}</div>
++				<div className="empty">
++					{t("No shaped read was needed again in this range.", "此范围内没有被再次需要的裁剪读取。")}
++				</div>
  			) : (
  				<div className="spot-rank">
  					<div className="spot-rank-panels">
-@@ -83,15 +107,15 @@ export function Ranking({ stats, stale }: { stats: SpotlightDashboardStats; stal
+@@ -83,15 +109,15 @@ export function Ranking({ stats, stale }: { stats: SpotlightDashboardStats; stal
  					<div className="spot-rank-foot">
  						<SampleTable cells={cells} />
  						<PositionHeat positions={ranking.position} />
@@ -5950,7 +6023,7 @@ index 51ad47a289..f51df5e599 100644
  										</dd>
  									</div>
  								))}
-@@ -117,7 +141,10 @@ function RankPanel({ measure, cells }: { measure: Measure; cells: ReadonlyMap<Ra
+@@ -117,7 +143,10 @@ function RankPanel({ measure, cells }: { measure: Measure; cells: ReadonlyMap<Ra
  				color: CUT_GROUP[group].color,
  				shape: CUT_GROUP[group].shape,
  				offset: MARK_OFFSET[group],
@@ -5962,7 +6035,7 @@ index 51ad47a289..f51df5e599 100644
  			},
  		];
  	});
-@@ -125,7 +152,7 @@ function RankPanel({ measure, cells }: { measure: Measure; cells: ReadonlyMap<Ra
+@@ -125,7 +154,7 @@ function RankPanel({ measure, cells }: { measure: Measure; cells: ReadonlyMap<Ra
  	const rows: DotWhiskerRow[] = [
  		{
  			key: "reads",
@@ -5971,7 +6044,7 @@ index 51ad47a289..f51df5e599 100644
  			marks,
  			figure: (
  				<span style={{ color: CUT_GROUP.applied.color }}>{applied === null ? "–" : measure.format(applied)}</span>
-@@ -166,10 +193,10 @@ function RankPanel({ measure, cells }: { measure: Measure; cells: ReadonlyMap<Ra
+@@ -166,10 +195,10 @@ function RankPanel({ measure, cells }: { measure: Measure; cells: ReadonlyMap<Ra
  /** Results and needed lines behind every cell of the panels. */
  function SampleTable({ cells }: { cells: ReadonlyMap<RankingGroup, SpotlightRankingCell> }) {
  	return (
@@ -5985,7 +6058,7 @@ index 51ad47a289..f51df5e599 100644
  			</h3>
  			<table className="spot-rank-n">
  				<thead>
-@@ -190,7 +217,12 @@ function SampleTable({ cells }: { cells: ReadonlyMap<RankingGroup, SpotlightRank
+@@ -190,7 +219,12 @@ function SampleTable({ cells }: { cells: ReadonlyMap<RankingGroup, SpotlightRank
  									{cell === undefined || cell.results === 0 ? (
  										<span className="dim">–</span>
  									) : (
@@ -5999,7 +6072,7 @@ index 51ad47a289..f51df5e599 100644
  											{formatInteger(cell.results)}
  											<span className="dim"> · {formatCompact(cell.neededLines)}</span>
  										</span>
-@@ -209,13 +241,13 @@ function SampleTable({ cells }: { cells: ReadonlyMap<RankingGroup, SpotlightRank
+@@ -209,13 +243,13 @@ function SampleTable({ cells }: { cells: ReadonlyMap<RankingGroup, SpotlightRank
  function PositionHeat({ positions }: { positions: readonly SpotlightHeatPosition[] }) {
  	const top = Math.max(0, ...positions.map(p => p.meanHeat));
  	return (
@@ -6017,7 +6090,7 @@ index 51ad47a289..f51df5e599 100644
  			) : (
  				<>
  					<div className="spot-rank-bars">
-@@ -223,7 +255,10 @@ function PositionHeat({ positions }: { positions: readonly SpotlightHeatPosition
+@@ -223,7 +257,10 @@ function PositionHeat({ positions }: { positions: readonly SpotlightHeatPosition
  							<div
  								key={p.label}
  								className="spot-rank-bar"
@@ -6029,7 +6102,7 @@ index 51ad47a289..f51df5e599 100644
  							>
  								<span className="spot-rank-bar-track">
  									<span className="spot-rank-bar-value num">{p.meanHeat.toFixed(1)}</span>
-@@ -240,7 +275,12 @@ function PositionHeat({ positions }: { positions: readonly SpotlightHeatPosition
+@@ -240,7 +277,12 @@ function PositionHeat({ positions }: { positions: readonly SpotlightHeatPosition
  							</div>
  						))}
  					</div>
@@ -6044,7 +6117,7 @@ index 51ad47a289..f51df5e599 100644
  			)}
  		</section>
 diff --git a/packages/stats/src/client/spotlight/ResultsFeed.tsx b/packages/stats/src/client/spotlight/ResultsFeed.tsx
-index b463795bd3..e4d33e3c51 100644
+index b463795bd3..01fc76d679 100644
 --- a/packages/stats/src/client/spotlight/ResultsFeed.tsx
 +++ b/packages/stats/src/client/spotlight/ResultsFeed.tsx
 @@ -10,6 +10,7 @@ import {
@@ -6224,14 +6297,12 @@ index b463795bd3..e4d33e3c51 100644
  				/>
  			</Card>
  			<RecoveryDrawer row={current} onClose={close} />
-@@ -231,19 +270,24 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
+@@ -231,19 +270,22 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
  		>
  			<div className="spot-drawer-summary">
  				<div>
 -					<div className="spot-eyebrow">{row.holdout ? "Would save" : "Saved"}</div>
-+					<div className="spot-eyebrow">
-+						{row.holdout ? t("Would save", "本可节省") : t("Saved", "节省")}
-+					</div>
++					<div className="spot-eyebrow">{row.holdout ? t("Would save", "本可节省") : t("Saved", "节省")}</div>
  					<div className="spot-drawer-figure num">{formatSignedCompact(row.savedTokens)}</div>
  				</div>
  				<div>
@@ -6253,7 +6324,7 @@ index b463795bd3..e4d33e3c51 100644
  							–
  						</div>
  					) : (
-@@ -260,27 +304,31 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
+@@ -260,27 +302,31 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
  
  			<KeyValues
  				items={[
@@ -6294,7 +6365,7 @@ index b463795bd3..e4d33e3c51 100644
  				<ol className="spot-timeline">
  					<li className="spot-timeline-item" data-kind={row.holdout ? "holdout" : "cut"}>
  						<span className="spot-timeline-node" aria-hidden="true">
-@@ -289,12 +337,19 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
+@@ -289,12 +335,19 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
  						<div className="spot-timeline-body">
  							<div className="row spot-timeline-head">
  								<span className="cell-primary">
@@ -6318,7 +6389,7 @@ index b463795bd3..e4d33e3c51 100644
  								</span>
  							</div>
  						</div>
-@@ -312,7 +367,7 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
+@@ -312,7 +365,7 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
  							<div className="spot-timeline-body">
  								<div className="row spot-timeline-head">
  									<KindBadge kind={r.kind} />
@@ -6327,7 +6398,7 @@ index b463795bd3..e4d33e3c51 100644
  									<span className="spot-timeline-spacer" />
  									<span className="num tone-warn">+{formatCompact(r.tokens)}</span>
  								</div>
-@@ -322,9 +377,15 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
+@@ -322,9 +375,15 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
  								</code>
  								<div className="micro">
  									{r.after === 0
@@ -6346,7 +6417,7 @@ index b463795bd3..e4d33e3c51 100644
  								</div>
  							</div>
  						</li>
-@@ -336,14 +397,18 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
+@@ -336,14 +395,18 @@ function RecoveryDrawer({ row, onClose }: { row: SpotlightResultRow | null; onCl
  								<span className="cell-primary">
  									{row.holdout
  										? row.recoveries.length === 0
@@ -6371,7 +6442,7 @@ index b463795bd3..e4d33e3c51 100644
  						</div>
  					</li>
 diff --git a/packages/stats/src/client/spotlight/Savings.tsx b/packages/stats/src/client/spotlight/Savings.tsx
-index d003c6426c..a8f71ec870 100644
+index d003c6426c..90a7615c9c 100644
 --- a/packages/stats/src/client/spotlight/Savings.tsx
 +++ b/packages/stats/src/client/spotlight/Savings.tsx
 @@ -4,6 +4,7 @@ import { formatCompact, formatCost, formatInteger } from "../data/formatters";
@@ -6382,7 +6453,7 @@ index d003c6426c..a8f71ec870 100644
  import { Card, Segmented } from "../ui";
  import {
  	bucketNoun,
-@@ -21,12 +22,20 @@ import {
+@@ -21,12 +22,14 @@ import {
  type Unit = "tokens" | "usd";
  
  const UNIT_OPTIONS = [
@@ -6394,18 +6465,12 @@ index d003c6426c..a8f71ec870 100644
  function UnitToggle({ value, onChange }: { value: Unit; onChange: (unit: Unit) => void }) {
 -	return <Segmented size="sm" aria-label="Unit" options={UNIT_OPTIONS} value={value} onChange={onChange} />;
 +	return (
-+		<Segmented
-+			size="sm"
-+			aria-label={t("Unit", "单位")}
-+			options={UNIT_OPTIONS}
-+			value={value}
-+			onChange={onChange}
-+		/>
++		<Segmented size="sm" aria-label={t("Unit", "单位")} options={UNIT_OPTIONS} value={value} onChange={onChange} />
 +	);
  }
  
  export interface SavingsProps {
-@@ -54,21 +63,23 @@ export function SavingsOverTime({ stats, range, stale }: SavingsProps) {
+@@ -54,21 +57,21 @@ export function SavingsOverTime({ stats, range, stale }: SavingsProps) {
  		const series: ChartSeries[] = [
  			{
  				key: "gross",
@@ -6418,9 +6483,7 @@ index d003c6426c..a8f71ec870 100644
  			{
  				key: "clawback",
 -				label: usd ? "Recoveries + Spotlight cost" : "Fetched back",
-+				label: usd
-+					? t("Recoveries + Spotlight cost", "取回 + 聚光灯开销")
-+					: t("Fetched back", "重新获取"),
++				label: usd ? t("Recoveries + Spotlight cost", "取回 + 聚光灯开销") : t("Fetched back", "重新获取"),
  				color: "var(--spot-clawback)",
  				kind: "bars",
  				values: saved.map((v, i) => net[i] - v),
@@ -6432,7 +6495,7 @@ index d003c6426c..a8f71ec870 100644
  				color: "var(--spot-net)",
  				kind: "line",
  				values: net.map(v => (netRun += v)),
-@@ -81,14 +92,23 @@ export function SavingsOverTime({ stats, range, stale }: SavingsProps) {
+@@ -81,14 +84,23 @@ export function SavingsOverTime({ stats, range, stale }: SavingsProps) {
  	return (
  		<Card
  			index={1}
@@ -6460,7 +6523,7 @@ index d003c6426c..a8f71ec870 100644
  			}
  		>
  			<div className="spot-chart-legend">
-@@ -106,7 +126,7 @@ export function SavingsOverTime({ stats, range, stale }: SavingsProps) {
+@@ -106,7 +118,7 @@ export function SavingsOverTime({ stats, range, stale }: SavingsProps) {
  					unit === "usd" ? formatSignedCost : v => (v < 0 ? `−${formatInteger(-v)}` : formatInteger(v))
  				}
  				showTotal={false}
@@ -6469,7 +6532,7 @@ index d003c6426c..a8f71ec870 100644
  			/>
  		</Card>
  	);
-@@ -143,13 +163,19 @@ export function WhereSavingsWent({ stats, stale }: Omit<SavingsProps, "range">)
+@@ -143,13 +155,19 @@ export function WhereSavingsWent({ stats, stale }: Omit<SavingsProps, "range">)
  		const steps: WaterfallStep[] = [
  			{
  				key: "gross",
@@ -6492,7 +6555,7 @@ index d003c6426c..a8f71ec870 100644
  			},
  			...kindSteps,
  		];
-@@ -160,7 +186,7 @@ export function WhereSavingsWent({ stats, stale }: Omit<SavingsProps, "range">)
+@@ -160,7 +178,7 @@ export function WhereSavingsWent({ stats, stale }: Omit<SavingsProps, "range">)
  					label: (
  						<>
  							<span className="spot-step-swatch" style={{ background: "var(--spot-turns)" }} />
@@ -6501,7 +6564,7 @@ index d003c6426c..a8f71ec870 100644
  							<span className="dim num">{formatInteger(clawback.turns)}</span>
  						</>
  					),
-@@ -168,21 +194,24 @@ export function WhereSavingsWent({ stats, stale }: Omit<SavingsProps, "range">)
+@@ -168,21 +186,24 @@ export function WhereSavingsWent({ stats, stale }: Omit<SavingsProps, "range">)
  					value: -clawback.turnsUsd,
  					color: "var(--spot-turns)",
  					note: share(clawback.turnsUsd),
@@ -6529,7 +6592,7 @@ index d003c6426c..a8f71ec870 100644
  				},
  			);
  		}
-@@ -196,20 +225,26 @@ export function WhereSavingsWent({ stats, stale }: Omit<SavingsProps, "range">)
+@@ -196,20 +217,23 @@ export function WhereSavingsWent({ stats, stale }: Omit<SavingsProps, "range">)
  				label: (
  					<>
  						<span className="spot-step-swatch" style={{ background: "var(--spot-anyway)" }} />
@@ -6552,14 +6615,11 @@ index d003c6426c..a8f71ec870 100644
  		steps.push({
  			key: "net",
 -			label: adjustedNet === null ? "Net (no holdout baseline yet)" : "Net",
-+			label:
-+				adjustedNet === null
-+					? t("Net (no holdout baseline yet)", "净额（尚无留出基线）")
-+					: t("Net", "净额"),
++			label: adjustedNet === null ? t("Net (no holdout baseline yet)", "净额（尚无留出基线）") : t("Net", "净额"),
  			kind: "total",
  			value: net,
  			color: "var(--spot-net-fill)",
-@@ -221,19 +256,25 @@ export function WhereSavingsWent({ stats, stale }: Omit<SavingsProps, "range">)
+@@ -221,19 +245,25 @@ export function WhereSavingsWent({ stats, stale }: Omit<SavingsProps, "range">)
  	return (
  		<Card
  			index={2}
@@ -6590,7 +6650,7 @@ index d003c6426c..a8f71ec870 100644
  				<ToolNetList byTool={gross.byTool} adjusted={adjusted.byTool} />
  			</div>
  		</Card>
-@@ -277,11 +318,22 @@ function ToolNetList({
+@@ -277,11 +307,19 @@ function ToolNetList({
  				row === undefined
  					? undefined
  					: [
@@ -6610,14 +6670,11 @@ index d003c6426c..a8f71ec870 100644
 +									),
 +							excessInterval === ""
 +								? ""
-+								: t(
-+										`Beyond the baseline: ${excessInterval} (90%)`,
-+										`超出基线的部分：${excessInterval}（90%）`,
-+									),
++								: t(`Beyond the baseline: ${excessInterval} (90%)`, `超出基线的部分：${excessInterval}（90%）`),
  						]
  							.filter(Boolean)
  							.join("\n"),
-@@ -310,7 +362,10 @@ function ToolNetList({
+@@ -310,7 +348,10 @@ function ToolNetList({
  			tool: OTHER_TOOLS,
  			totals,
  			excess,
@@ -6629,7 +6686,7 @@ index d003c6426c..a8f71ec870 100644
  		});
  	}
  	const top = Math.max(0, ...rows.map(row => row.totals.savedTokens));
-@@ -329,11 +384,14 @@ function ToolNetList({
+@@ -329,11 +370,14 @@ function ToolNetList({
  							<Icon size={13} aria-hidden="true" />
  							<span className="cell-primary">{tool}</span>
  							<span className="dim num">
@@ -6646,7 +6703,7 @@ index d003c6426c..a8f71ec870 100644
  							>
  								{formatSignedCompact(net ?? totals.savedTokens)}
  							</span>
-@@ -344,8 +402,15 @@ function ToolNetList({
+@@ -344,8 +388,15 @@ function ToolNetList({
  							</span>
  						</div>
  						<div className="micro spot-tool-net-detail">
@@ -7150,7 +7207,7 @@ index d0d33fd4f5..45156b5111 100644
  
  .topbar-slash {
 diff --git a/packages/stats/src/client/traces/AggregatesPanel.tsx b/packages/stats/src/client/traces/AggregatesPanel.tsx
-index 0d2f242946..6033e51dae 100644
+index 0d2f242946..6f6be3e2d7 100644
 --- a/packages/stats/src/client/traces/AggregatesPanel.tsx
 +++ b/packages/stats/src/client/traces/AggregatesPanel.tsx
 @@ -4,6 +4,7 @@
@@ -7161,12 +7218,17 @@ index 0d2f242946..6033e51dae 100644
  import type { TraceToolStat } from "../types";
  import { Badge, Card, type Column, MeterCell, Table } from "../ui";
  
-@@ -16,21 +17,21 @@ export function AggregatesPanel({ toolStats, index }: AggregatesPanelProps) {
+@@ -16,21 +17,28 @@ export function AggregatesPanel({ toolStats, index }: AggregatesPanelProps) {
  	if (toolStats.length === 0) return null;
  	const maxTotal = Math.max(...toolStats.map(stat => stat.totalMs));
  	const columns: Column<TraceToolStat>[] = [
 -		{ key: "tool", header: "Tool", render: row => <span className="mono">{row.tool}</span>, sort: row => row.tool },
-+		{ key: "tool", header: t("Tool", "工具"), render: row => <span className="mono">{row.tool}</span>, sort: row => row.tool },
++		{
++			key: "tool",
++			header: t("Tool", "工具"),
++			render: row => <span className="mono">{row.tool}</span>,
++			sort: row => row.tool,
++		},
  		{
  			key: "calls",
 -			header: "Calls",
@@ -7183,11 +7245,13 @@ index 0d2f242946..6033e51dae 100644
  			render: row =>
  				row.errors > 0 ? (
 -					<Badge tone="bad">{formatInteger(row.errors)} failed</Badge>
-+					<Badge tone="bad">{t(`${formatInteger(row.errors)} failed`, `${formatInteger(row.errors)} 次失败`)}</Badge>
++					<Badge tone="bad">
++						{t(`${formatInteger(row.errors)} failed`, `${formatInteger(row.errors)} 次失败`)}
++					</Badge>
  				) : (
  					<span className="num dim">0</span>
  				),
-@@ -38,7 +39,7 @@ export function AggregatesPanel({ toolStats, index }: AggregatesPanelProps) {
+@@ -38,7 +46,7 @@ export function AggregatesPanel({ toolStats, index }: AggregatesPanelProps) {
  		},
  		{
  			key: "total",
@@ -7196,7 +7260,7 @@ index 0d2f242946..6033e51dae 100644
  			align: "right",
  			width: 200,
  			render: row => (
-@@ -48,21 +49,26 @@ export function AggregatesPanel({ toolStats, index }: AggregatesPanelProps) {
+@@ -48,21 +56,26 @@ export function AggregatesPanel({ toolStats, index }: AggregatesPanelProps) {
  		},
  		{
  			key: "avg",
@@ -7248,7 +7312,7 @@ index 8044a9deda..813885ca47 100644
  			aria-valuemax={100}
  			aria-valuenow={Math.round(((viewport.u0 - d0) / dSpan) * 100)}
 diff --git a/packages/stats/src/client/traces/SpanDrawer.tsx b/packages/stats/src/client/traces/SpanDrawer.tsx
-index a1da305581..f9e41cd3d1 100644
+index a1da305581..5cdfa49174 100644
 --- a/packages/stats/src/client/traces/SpanDrawer.tsx
 +++ b/packages/stats/src/client/traces/SpanDrawer.tsx
 @@ -9,6 +9,7 @@ import { Check, Copy, X } from "lucide-react";
@@ -7420,15 +7484,13 @@ index a1da305581..f9e41cd3d1 100644
  						<pre className="code-block traces-pre">{span.detail}</pre>
  					</div>
  				)}
-@@ -271,20 +298,28 @@ export function SpanDrawer({
+@@ -271,20 +298,26 @@ export function SpanDrawer({
  						<Skeleton height={160} />
  					</div>
  				)}
 -				{error && <ErrorState error={`Failed to load entry: ${error.message}`} />}
 +				{error && (
-+					<ErrorState
-+						error={t(`Failed to load entry: ${error.message}`, `加载条目失败：${error.message}`)}
-+					/>
++					<ErrorState error={t(`Failed to load entry: ${error.message}`, `加载条目失败：${error.message}`)} />
 +				)}
  
  				{!loading &&
@@ -7453,7 +7515,7 @@ index a1da305581..f9e41cd3d1 100644
  		</DetailShell>
  	);
 diff --git a/packages/stats/src/client/traces/SummaryStrip.tsx b/packages/stats/src/client/traces/SummaryStrip.tsx
-index 456e6e657e..0b9317380c 100644
+index 456e6e657e..ddc97890c0 100644
 --- a/packages/stats/src/client/traces/SummaryStrip.tsx
 +++ b/packages/stats/src/client/traces/SummaryStrip.tsx
 @@ -4,6 +4,7 @@
@@ -7464,7 +7526,7 @@ index 456e6e657e..0b9317380c 100644
  import type { TraceSummary } from "../types";
  import { Stat, StatGrid } from "../ui";
  
-@@ -12,23 +13,39 @@ export interface SummaryStripProps {
+@@ -12,23 +13,40 @@ export interface SummaryStripProps {
  }
  
  export function SummaryStrip({ summary }: SummaryStripProps) {
@@ -7501,17 +7563,18 @@ index 456e6e657e..0b9317380c 100644
 +				label={t("Requests", "请求")}
  				value={formatInteger(summary.requests)}
 -				hint={`${formatInteger(summary.toolCalls)} tool calls`}
-+				hint={t(
-+					`${formatInteger(summary.toolCalls)} tool calls`,
-+					`${formatInteger(summary.toolCalls)} 次工具调用`,
-+				)}
++				hint={t(`${formatInteger(summary.toolCalls)} tool calls`, `${formatInteger(summary.toolCalls)} 次工具调用`)}
++			/>
++			<Stat size="sm" label={t("Agents", "代理")} value={formatInteger(summary.subagents)} />
++			<Stat size="sm" label={t("Tokens", "Token")} value={formatCompact(summary.totalTokens)} />
++			<Stat
++				size="sm"
++				label={t("Cost", "成本")}
++				value={formatEstimatedCost(summary.costTotal, summary.unpricedRequests)}
  			/>
 -			<Stat size="sm" label="Agents" value={formatInteger(summary.subagents)} />
 -			<Stat size="sm" label="Tokens" value={formatCompact(summary.totalTokens)} />
 -			<Stat size="sm" label="Cost" value={formatEstimatedCost(summary.costTotal, summary.unpricedRequests)} />
-+			<Stat size="sm" label={t("Agents", "代理")} value={formatInteger(summary.subagents)} />
-+			<Stat size="sm" label={t("Tokens", "Token")} value={formatCompact(summary.totalTokens)} />
-+			<Stat size="sm" label={t("Cost", "成本")} value={formatEstimatedCost(summary.costTotal, summary.unpricedRequests)} />
  		</StatGrid>
  	);
  }
@@ -7835,7 +7898,7 @@ index e333bf7853..6dad2ed007 100644
  			</div>
  			{!collapsed && (
 diff --git a/packages/stats/src/client/ui/Modal.tsx b/packages/stats/src/client/ui/Modal.tsx
-index 5ed6f765f7..be069dce5e 100644
+index 5ed6f765f7..e0920eab85 100644
 --- a/packages/stats/src/client/ui/Modal.tsx
 +++ b/packages/stats/src/client/ui/Modal.tsx
 @@ -2,6 +2,7 @@ import { X } from "lucide-react";
@@ -7846,16 +7909,23 @@ index 5ed6f765f7..be069dce5e 100644
  import "./modal.css";
  
  export interface ModalAction {
-@@ -26,7 +27,7 @@ export interface ModalProps {
+@@ -26,7 +27,14 @@ export interface ModalProps {
   * containers cannot clip it. Focus lands on the primary action (or the cancel
   * button when there is none) and returns to the opener on close.
   */
 -export function Modal({ open, title, onClose, primaryAction, cancelLabel = "Cancel", children }: ModalProps) {
-+export function Modal({ open, title, onClose, primaryAction, cancelLabel = t("Cancel", "取消"), children }: ModalProps) {
++export function Modal({
++	open,
++	title,
++	onClose,
++	primaryAction,
++	cancelLabel = t("Cancel", "取消"),
++	children,
++}: ModalProps) {
  	const primaryRef = useRef<HTMLButtonElement>(null);
  	const cancelRef = useRef<HTMLButtonElement>(null);
  	const onCloseRef = useRef(onClose);
-@@ -76,7 +77,7 @@ export function Modal({ open, title, onClose, primaryAction, cancelLabel = "Canc
+@@ -76,7 +84,7 @@ export function Modal({ open, title, onClose, primaryAction, cancelLabel = "Canc
  						data-icon="true"
  						data-size="sm"
  						onClick={onClose}
@@ -7865,7 +7935,7 @@ index 5ed6f765f7..be069dce5e 100644
  						<X size={15} />
  					</button>
 diff --git a/packages/stats/src/client/ui/RequestDrawer.tsx b/packages/stats/src/client/ui/RequestDrawer.tsx
-index c6351ec435..0cf015ac67 100644
+index c6351ec435..d0a1b5a9d8 100644
 --- a/packages/stats/src/client/ui/RequestDrawer.tsx
 +++ b/packages/stats/src/client/ui/RequestDrawer.tsx
 @@ -12,7 +12,8 @@ import {
@@ -7900,29 +7970,24 @@ index c6351ec435..0cf015ac67 100644
  			subtitle={
  				details ? (
  					<>
-@@ -70,9 +71,12 @@ export function RequestDrawer({ id, onClose }: RequestDrawerProps) {
+@@ -70,9 +71,9 @@ export function RequestDrawer({ id, onClose }: RequestDrawerProps) {
  								session: details.sessionFile,
  							})}
  							onClick={onClose}
 -							title="Open this request's session in the trace view"
-+							title={t(
-+								"Open this request's session in the trace view",
-+								"在追踪视图中打开此请求的会话",
-+							)}
++							title={t("Open this request's session in the trace view", "在追踪视图中打开此请求的会话")}
  						>
 -							<GitBranch size={13} /> Trace
 +							<GitBranch size={13} /> {t("Trace", "追踪")}
  						</a>
  						<Badge tone={status.tone}>{status.label}</Badge>
  					</div>
-@@ -108,35 +112,45 @@ function RequestDetailsBody({ details, aborted }: { details: RequestDetails; abo
+@@ -108,35 +109,43 @@ function RequestDetailsBody({ details, aborted }: { details: RequestDetails; abo
  		<>
  			{details.errorMessage && (
  				<section className="request-drawer-error" data-tone={aborted ? "warn" : "bad"} role="note">
 -					<div className="request-drawer-error-label">{aborted ? "Aborted" : "Error"}</div>
-+					<div className="request-drawer-error-label">
-+						{aborted ? t("Aborted", "已中止") : t("Error", "错误")}
-+					</div>
++					<div className="request-drawer-error-label">{aborted ? t("Aborted", "已中止") : t("Error", "错误")}</div>
  					<pre className="request-drawer-error-text">{details.errorMessage}</pre>
  				</section>
  			)}
@@ -7974,7 +8039,7 @@ index c6351ec435..0cf015ac67 100644
  							value: formatInteger(Math.round((usage.premiumRequests ?? 0) * 100) / 100),
  						},
  					]}
-@@ -144,42 +158,46 @@ function RequestDetailsBody({ details, aborted }: { details: RequestDetails; abo
+@@ -144,42 +153,46 @@ function RequestDetailsBody({ details, aborted }: { details: RequestDetails; abo
  			</section>
  
  			<section>
@@ -8082,20 +8147,26 @@ index 99d7140d3e..3133623fb9 100644
  	const tone = rounded === 0 ? undefined : rounded > 0 === (good === "up") ? "good" : "bad";
  	const sign = rounded > 0 ? "+" : rounded < 0 ? "−" : "±";
 diff --git a/packages/stats/src/client/ui/States.tsx b/packages/stats/src/client/ui/States.tsx
-index bcc350901b..5235d26b82 100644
+index bcc350901b..642cf9d4ae 100644
 --- a/packages/stats/src/client/ui/States.tsx
 +++ b/packages/stats/src/client/ui/States.tsx
-@@ -1,7 +1,8 @@
+@@ -1,7 +1,14 @@
  import { Inbox, RotateCw, TriangleAlert } from "lucide-react";
  import type { CSSProperties, ReactNode } from "react";
 +import { t } from "../i18n";
  
 -export function EmptyState({ title = "Nothing here yet", hint }: { title?: ReactNode; hint?: ReactNode }) {
-+export function EmptyState({ title = t("Nothing here yet", "暂无数据"), hint }: { title?: ReactNode; hint?: ReactNode }) {
++export function EmptyState({
++	title = t("Nothing here yet", "暂无数据"),
++	hint,
++}: {
++	title?: ReactNode;
++	hint?: ReactNode;
++}) {
  	return (
  		<div className="empty">
  			<Inbox size={20} />
-@@ -18,7 +19,7 @@ export function ErrorState({ error, onRetry }: { error: Error | string; onRetry?
+@@ -18,7 +25,7 @@ export function ErrorState({ error, onRetry }: { error: Error | string; onRetry?
  			<span className="error-state-message">{typeof error === "string" ? error : error.message}</span>
  			{onRetry && (
  				<button type="button" className="btn" data-size="sm" data-variant="ghost" onClick={onRetry}>

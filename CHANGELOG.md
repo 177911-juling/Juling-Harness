@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 缩短工作区内切换会话时的等待，保留各会话的草稿、滚动位置和已展开内容。重新打开近期会话时优先复用已加载首屏。
 - 减少对话流式输出期间的重复渲染、重排和语法高亮工作，归档读取复用索引，关闭会话时回收相关终端资源。
 - 开发环境的生产预览会复用输入未变且文件完整的构建产物，启动时继续验证 Runtime 签名和身份。
-- 内置 Runtime 更新为 `18.20.2-harness.14`。
+- 内置 Runtime 更新为 `18.20.2-harness.18`。
 
 ### Fixed
 
@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Linux x64 桌面客户端（`AppImage` 与 `deb`）接入应用内差分更新：支持在「设置 → 更新与维护」自动检查、验签、后台差分下载与重启更新；`deb` 经系统 polkit 授权后由 `apt` 安装，不受外部包升级干扰，新版启动失败时自动尝试回滚至上一版本。0.2.2 及之前的 Linux 安装需先手动安装一次本版安装包以启用后续应用内更新。详见 [Linux 客户端说明](docs/linux.md#更新与卸载)。
 - Agent Hub 的「代理」页新增「指挥台」名册视图，排在「平铺 / 按父代理」之前，每次进入 Agent Hub 都先打开指挥台。左侧是指挥台的编队、时间线、星图和通讯，读取与工作台指挥台同一段运行记录；右侧仍是 Hub 详情，两边共用选中项，停止、恢复、发消息和 BTW 沿用 Hub 现有的确认与权限。详见[停靠说明](docs/workbench-docking.md#agents-与子-agent-对话)。
-- Agent 之间的消息接入了真实数据（内置 Runtime 升至 `18.20.2-harness.8`）。Agent Hub 详情的「消息」标签按时间列出所选 Agent 发出和收到的消息，包括 `@` 的对象、回复的原文和进度标记；点对方的名字会切到那个 Agent。指挥台的「通讯」视图和星图连线也改用同一份真实记录，一次广播合并为一条。消息从各 Agent 会话里已经送达的记录读出，因此停驻、结束的 Agent 和重启后的历史也能看到；旧 Runtime 会显示「读不到 Agent 间通讯」。
+- Agent 之间的消息接入了真实数据（内置 Runtime 升至 `18.20.2-harness.18`）。Agent Hub 详情的「消息」标签按时间列出所选 Agent 发出和收到的消息，包括 `@` 的对象、回复的原文和进度标记；点对方的名字会切到那个 Agent。指挥台的「通讯」视图和星图连线也改用同一份真实记录，一次广播合并为一条。消息从各 Agent 会话里已经送达的记录读出，因此停驻、结束的 Agent 和重启后的历史也能看到；旧 Runtime 会显示「读不到 Agent 间通讯」。
 - 模型配置从供应商接口拉取可用模型后，支持按名称或 ID 搜索、按「全部 / 新增 / 待匹配 / 已选」筛选与批量勾选；命中多个内置目录项的模型可直接切换目录匹配以自动补全推荐参数。
 
 ### Changed
@@ -68,17 +68,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **合入 OMP Studio 0.2.2 工作台能力**：在保留 Juling 品牌、Quiet Precision 主题和既有 Runtime 适配的前提下，接收上游 0.2.2 的 78 个提交 —— 文件浏览器（本机 / SSH 项目外文件）、SSH tmux 附加、Agent 指挥台（编队 / 时间线 / 星图）、选择性提交、输入历史、原生表单题组、浏览器原生页面与 Console/Network、GitHub Actions 展开、四档光效以及补全的英文界面。Runtime pin 同步升级到 **OMP 18.20.2**，Harness patchset 为 `18.20.2-harness.13`。
+- **合入 OMP Studio 0.2.2 工作台能力**：在保留 Juling 品牌、Quiet Precision 主题和既有 Runtime 适配的前提下，接收上游 0.2.2 的 78 个提交 —— 文件浏览器（本机 / SSH 项目外文件）、SSH tmux 附加、Agent 指挥台（编队 / 时间线 / 星图）、选择性提交、输入历史、原生表单题组、浏览器原生页面与 Console/Network、GitHub Actions 展开、四档光效以及补全的英文界面。Runtime pin 同步升级到 **OMP 18.20.2**，Harness patchset 为 `18.20.2-harness.18`。
 - **界面重设计「静默精确 / Quiet Precision」**：整套视觉系统从「蓝图 HUD」切换为单一表面系统 —— 浅色瓷白 / 深色石墨双主题，靛蓝作为唯一交互主色、青绿只表达数据，语义色只表达状态；圆角阶梯 6 / 8 / 10 / 14px，控件统一为 26 / 32 / 38px 三档，正文基准字号提升到 13px，层级改由字重、留白与细线承担；保留极轻投影给菜单、弹窗、卡片与 Composer，不再用网格、四角刻度、双线框或深色舱壁制造技术感。标题栏、原生窗口按钮、导航 rail、侧栏、顶栏、二级页头、状态条使用同一主题表面；工作台对话（消息、工具卡、Plan 入口、队列、空态）、首页 / 历史 / 能力中心 / Agent Hub / 模型配置 / 设置 / 诊断 / 媒体 / 评估 / 统计 / 教程全部跟版；`linework.css` 及其装饰语法退役，动效数值与既有门禁不变。
 - **Runtime 身份统一为 Juling**：`omp.exe` / `omp` 更名为 `juling.exe` / `juling`，Runtime 的 `APP_NAME`、用户代理、帮助与登录提示、进程标题都改为 `juling`；`omp --mode harness-host` 变为 `juling --mode harness-host`。用户配置目录从 `~/.omp` 迁移到 `~/.juling`（首次启动整目录改名，失败则改为复制并继续使用旧目录），项目级 `.juling/` 与 `~/.juling/` 取代 `.omp`；旧的 `~/.omp`、项目 `.omp/`、`OMP_*` / `PI_*` 环境变量与已安装的 `omp.exe`（`runtime-manifest.json.entrypoint` 为准）继续可读，不再写入。上述旧名兼容由 vendor 接缝补丁 `0005-juling-identity.patch` 与 Host 侧发现/迁移逻辑共同保证。安装包新增随包分发的 `third-party-notices.txt`（MIT 全文与版权声明），满足随 Runtime 二进制分发的许可要求。
 - **产品展示品牌统一为 Juling**：对话作者、顶栏状态、工作台文档面板（Juling Logs）、统计面板、审批卡片、各页说明、安装向导、更新发布标题与诊断报告中的产品名由 OMP 改为 Juling / Juling Runtime；上游项目名（oh-my-pi）、`omp` CLI、`~/.omp` 路径、`OMP_*` 环境变量与线协议标识保持不变（CLI、路径与环境变量已由上方 Runtime 身份统一改名取代）。同时补齐 Agent Hub 恢复命令、预览演示项目名与安装完成页中的旧品牌展示。
-- Runtime 升级至 **OMP 18.20.2**，上游固定为 `7c49c11aa5bbaf3f418406583096168ad5b8c6dc`，Harness patchset 为 `18.20.2-harness.13`；完整接收 18.19.0–18.20.2 修复链，详见 [18.20.2 迁移报告](docs/migrations/omp-18.20.2.md)。Skillshare 已验证来源展示统一为 `Reported Juling`。
+- Runtime 升级至 **OMP 18.20.2**，上游固定为 `7c49c11aa5bbaf3f418406583096168ad5b8c6dc`，Harness patchset 为 `18.20.2-harness.18`；完整接收 18.19.0–18.20.2 修复链，详见 [18.20.2 迁移报告](docs/migrations/omp-18.20.2.md)。Skillshare 已验证来源展示统一为 `Reported Juling`。
 - Agent Hub 跟随上游移除 `taskFile`，任务内容统一通过 inline `assignment` 提交；不再保留私有文件任务校验、审批或恢复 shim。
 - Browser 接入 18.19 的 `insecure`、`app` 字符串、`argv` 与顶层 `target` 参数；托管浏览器保留会话绑定、人工控制和下载生命周期，普通 relay 仍拒绝不安全连接。
 - Ask/Tree 重答改用原生 HTML form；Context 查看器新增 `instruction-files` 分类；Codex 与 Claude 重置券设置按 5h、weekly 及 Fable 窗口拆分，不再提供已删除的总开关。
 - **左侧导航补齐目的地**：rail 按「工作台、首页、会话历史、能力中心、模型配置、评测、媒体、设置、诊断中心」排列，末尾新增「主题」明暗切换；评测与诊断中心改用不同图标（量杯 / 波形）。rail 外框改为浮动胶囊：2px 内描边（`--rail-border`，深色为 24% 白，保证暗色下仍看得见）、两端为扁椭圆（横向半径取半宽 30px、纵向 16px），顶底是宽而平的弧而不是正半圆；画布、侧栏、标题栏与 rail 共用同一壳面（浅色 `#e2e6ec` / 深色 `#05060a`），左右背景不再分成两种灰，内容卡片仍保持白色；收起时宽度与四周留白一起收到 0，内容回补整条 rail 的占位。
 - **六语界面选择**：左侧 rail 新增「多语言」入口（地球图标菜单），可在简体中文 / English / Русский / 日本語 / 한국어 / हिन्दी 之间切换，设置页的「界面语言」同步提供六项；`AppLanguage`/`Locale` 扩展为六语，`html lang`、窗口标题、系统语言检测、语言包回退链（缺失键 → 英文）一并跟上。组件里约 2,800 处内联 `zh ? … : …` 文案在四种新语言下暂回退英文，待后续迁入词库。
-- **统计面板中文化与换标**：统计页内嵌的原生 `omp stats` 面板随界面语言切换（Harness iframe 追加 `?lang=zh`）：导航、指标、表格、图表图例、空态与 tooltip 全部中英双语，英文原句仍内置为回退；顶栏品牌改为 Juling Harness + 新图标（favicon 同步），正文中的 omp 产品名改为 Juling，stop reason 等枚举显示中文标签。Runtime patchset 增至 `18.20.2-harness.13`；面板需随下一次 Runtime 构建生效。
+- **统计面板中文化与换标**：统计页内嵌的原生 `omp stats` 面板随界面语言切换（Harness iframe 追加 `?lang=zh`）：导航、指标、表格、图表图例、空态与 tooltip 全部中英双语，英文原句仍内置为回退；顶栏品牌改为 Juling Harness + 新图标（favicon 同步），正文中的 omp 产品名改为 Juling，stop reason 等枚举显示中文标签。Runtime patchset 增至 `18.20.2-harness.18`；面板需随下一次 Runtime 构建生效。
 - **二级页顶部导航删除**：首页 / 历史 / 能力中心等页面不再有页头那一行（返回、标题、标签行、主题按钮），导航只在左侧 rail；正文直接铺到标题栏下，顶部多出 48px。返回 / 前进仍用窗口标题栏按钮，主题用 rail 末项或命令面板。
 - **产品图标换新**：桌面窗口 / 任务栏、侧栏与关于页、浏览器 favicon、安装向导和官网统一换用新的 Harness 徽标；桌面端 ICO 由 1024 px 源图生成 16–256 px 七档，macOS 菜单栏继续使用单色 template 图标。
 
