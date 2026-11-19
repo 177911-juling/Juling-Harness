@@ -1,12 +1,13 @@
 {
   "upstreamCommit": "7c49c11aa5bbaf3f418406583096168ad5b8c6dc",
-  "patchsetVersion": "harness.11",
-  "patchsetDigest": "sha256:07eb5c3b61df8249da825a811c3d38623a80e43eae3383c063a2e1e3b59faa19",
+  "patchsetVersion": "harness.16",
+  "patchsetDigest": "sha256:fe03b0740eb9dbd802f0d44a7399843cabf3f5a770404700781dd726ff405dd3",
   "patches": [
     "0001-harness-cli-entry.patch",
     "0002-harness-session-runtime.patch",
     "0003-harness-modes-and-pause.patch",
     "0004-harness-extensibility.patch",
-    "0005-juling-identity.patch"
+    "0005-juling-identity.patch",
+    "0006-stats-dashboard.patch"
   ]
 }

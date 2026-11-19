@@ -262,6 +262,7 @@ it("cancelling cache work stops unscheduled pairs while keeping the completed na
 		await service.execute({ kind: "benchmarks.cancel", sessionId: "s", id: run.id });
 		const result = await finished(service, run.id);
 		expect(result.run.state).toBe("cancelled");
+		expect(result.models[0]?.state).toBe("cancelled");
 		expect(requests).toBe(3);
 		expect(result.models[0]?.completed).toBe(2);
 		expect(result.models[0]?.measurements.slice(0, 2).map(row => row.ok)).toEqual([true, true]);

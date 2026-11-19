@@ -1,6 +1,6 @@
 # OMP 统计：真实能力、Harness 现状与适配清单
 
-> **状态（已落地）**：旧的「6 个标签页全是同一张表」统计页及其读模型已整体删除（`StatisticsPage` 旧实现、`FrustrationPane`、`stats.read` / `stats.frustration`、Desktop `stats-worker.ts`、`harness-protocol` 的 `contracts/stats.ts`）。现在的统计页 = 二级页头以下整块内嵌原生 `omp stats` 仪表盘，入口在首页 Token 用量卡。本文第 3 节描述的断点因此不再有代码路径；保留它是因为第 2 节的上游能力盘点与第 4 节的适配清单仍然有效。
+> **状态（已落地）**：旧的「6 个标签页全是同一张表」统计页及其读模型已整体删除（`StatisticsPage` 旧实现、`FrustrationPane`、`stats.read` / `stats.frustration`、Desktop `stats-worker.ts`、`harness-protocol` 的 `contracts/stats.ts`）。现在的统计页 = 整页正文内嵌原生 `omp stats` 仪表盘，入口在首页 Token 用量卡。本文第 3 节描述的断点因此不再有代码路径；保留它是因为第 2 节的上游能力盘点与第 4 节的适配清单仍然有效。
 >
 > **仍留在 Runtime overlay 里的死代码**：`omp-patch/overlay/packages/coding-agent/src/harness/stats-worker.ts`、`stats-protocol.ts` 以及接缝补丁 `0001-harness-cli-entry.patch` 里的 `__omp_worker_harness_stats` 分支。它们现在没有任何调用方；删除需要跑 `npm run omp:patches:regen` 并重出 Runtime 版本，所以单独作为一次任务处理。
 

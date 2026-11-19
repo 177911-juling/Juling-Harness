@@ -175,6 +175,19 @@ index 987d50d8dc..8d6dee86ed 100644
  	provider: string,
  	identity: OAuthAccountIdentity,
  	limits: UsageLimit[] | undefined,
+diff --git a/packages/coding-agent/src/export/html/viewer.generated.json b/packages/coding-agent/src/export/html/viewer.generated.json
+index 04a1c4a429..890071d5de 100644
+--- a/packages/coding-agent/src/export/html/viewer.generated.json
++++ b/packages/coding-agent/src/export/html/viewer.generated.json
+@@ -1,5 +1,5 @@
+ {
+-	"file": "export-viewer-a453a3a5e3536ca377898ca37e9f1569acd5841d7a9fdfbe04a1e705bbdc4bbe.js",
+-	"integrity": "sha256-pFOjpeNTbKN3iYyjfp8VaazVhB16n9++BKHnBbvcS74=",
+-	"size": 793212
++	"file": "export-viewer-d8f37495676ec448acf0f056195d9c223fa907da9e994e4bc6efbe3fe33ad22b.js",
++	"integrity": "sha256-2PN0lWduxEis8PBWGV2cIj+pB9qemU5Lxu++P+M60is=",
++	"size": 796026
+ }
 diff --git a/packages/coding-agent/src/if-bench/runner.ts b/packages/coding-agent/src/if-bench/runner.ts
 index 6125f06216..20286af1da 100644
 --- a/packages/coding-agent/src/if-bench/runner.ts

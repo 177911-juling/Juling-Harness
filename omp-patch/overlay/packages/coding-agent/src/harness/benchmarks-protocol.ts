@@ -73,7 +73,7 @@ export interface BenchmarkModelResult {
 	>;
 	selector: string;
 	model: string;
-	state: "queued" | "running" | "done";
+	state: "queued" | "running" | "done" | "cancelled";
 	total: number;
 	completed: number;
 	failed: number;

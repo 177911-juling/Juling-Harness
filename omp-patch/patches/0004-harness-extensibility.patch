@@ -860,7 +860,7 @@ index dc72884a80..16710a124b 100644
  		expect(branchPrompt.request.prompt).toEqual([{ type: "text", text: "what was the first number?" }]);
  		const fork = new Database(conversationStorePath(state.dir, forkId), { readonly: true });
 diff --git a/packages/coding-agent/src/cli/bench-cli.ts b/packages/coding-agent/src/cli/bench-cli.ts
-index ea5793d85a..a13ae7817b 100644
+index ea5793d85a..6082d3823c 100644
 --- a/packages/coding-agent/src/cli/bench-cli.ts
 +++ b/packages/coding-agent/src/cli/bench-cli.ts
 @@ -86,7 +86,7 @@ export type BenchProfile = "mix" | BenchChallengeKind;
@@ -991,7 +991,7 @@ index ea5793d85a..a13ae7817b 100644
  	total: number;
  	completed: number;
  	failed: number;
-@@ -867,7 +903,7 @@ interface BenchProgress {
+@@ -867,10 +903,10 @@ interface BenchProgress {
  }
  
  /** One model's comparison-table row; the live footer repaints it as runs finish. */
@@ -999,8 +999,21 @@ index ea5793d85a..a13ae7817b 100644
 +export interface BenchTableRow {
  	/** Aggregates over the runs finished so far. */
  	report: BenchModelReport;
- 	state: "queued" | "running" | "done";
-@@ -1039,7 +1075,8 @@ function assertCacheModeSupported(targets: BenchTarget[]): void {
+-	state: "queued" | "running" | "done";
++	state: "queued" | "running" | "done" | "cancelled";
+ 	progress: BenchProgress;
+ }
+ 
+@@ -891,6 +927,8 @@ function formatRowStatus(row: BenchTableRow, spinner: string): string {
+ 			const failed = row.report.results.filter(result => !result.ok).length;
+ 			return failed > 0 ? chalk.red(`(${failed} failed)`) : "";
+ 		}
++		case "cancelled":
++			return chalk.dim("cancelled");
+ 	}
+ }
+ 
+@@ -1039,7 +1077,8 @@ function assertCacheModeSupported(targets: BenchTarget[]): void {
  	}
  }
  
@@ -1010,7 +1023,7 @@ index ea5793d85a..a13ae7817b 100644
  	const cacheMode = command.flags.cache === true;
  	const cacheFlagsUsed =
  		command.flags.cachePrefixFile !== undefined ||
-@@ -1111,6 +1148,41 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1111,6 +1150,41 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  		? detailedSteps(runsPerStep, par)
  		: [{ kinds, runs: runsPerStep, concurrency: par }];
  	const runs = cacheMode ? cachePairs! * 2 : steps.reduce((sum, step) => sum + step.runs, 0);
@@ -1052,7 +1065,7 @@ index ea5793d85a..a13ae7817b 100644
  	const tableSpec = detailed ? detailedTableSpec(par) : profileTableSpec(kinds);
  	// Detailed phases each run a single kind under a phase header; only a mixed profile needs per-run kind tags.
  	const tagKind = kinds.length > 1;
-@@ -1159,6 +1231,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1159,6 +1233,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  					return true;
  				},
  			} satisfies LiveBoardOutput);
@@ -1063,7 +1076,7 @@ index ea5793d85a..a13ae7817b 100644
  	const print = (text: string): void => {
  		if (board) board.log(text);
  		else writeStdout(`${text}\n`);
-@@ -1174,6 +1250,15 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1174,6 +1252,15 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  		});
  	try {
  		const targets = await resolveBenchTargets(command.models, runtime.modelRegistry, runtime.settings, writeStderr);
@@ -1079,7 +1092,7 @@ index ea5793d85a..a13ae7817b 100644
  		if (cacheMode) assertCacheModeSupported(targets);
  		// Explicit `--service-tier` (a single value broadcast across families) wins;
  		// otherwise fall back to the configured per-family `tier.*` settings. Each
-@@ -1193,7 +1278,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1193,7 +1280,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  			state: "queued",
  			progress: { total, completed: 0, failed: 0, inFlight: 0 },
  		}));
@@ -1089,7 +1102,7 @@ index ea5793d85a..a13ae7817b 100644
  			const row = rows[targetIndex]!;
  			const { progress } = row;
  			if (!json) {
-@@ -1201,7 +1288,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1201,7 +1290,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				print(`${chalk.bold(label)}${selector === label ? "" : chalk.dim(` (${selector})`)}`);
  			}
  			row.state = "running";
@@ -1098,7 +1111,7 @@ index ea5793d85a..a13ae7817b 100644
  			const results: BenchRunResult[] = [];
  
  			// Preflight check: let's verify credentials before starting any runs.
-@@ -1212,17 +1299,13 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1212,17 +1301,13 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  			if (command.flags.account !== undefined) {
  				const oauth = runtime.oauth;
  				if (!oauth) throw new Error("OAuth account selection is unavailable");
@@ -1120,7 +1133,7 @@ index ea5793d85a..a13ae7817b 100644
  					});
  					if (!result?.ok)
  						throw new Error(
-@@ -1244,6 +1327,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1244,6 +1329,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				row.report = buildModelReport(selector, model, thinking, results);
  				if (cacheMode) row.report.cachePairs = [];
  				row.state = "done";
@@ -1128,7 +1141,7 @@ index ea5793d85a..a13ae7817b 100644
  				continue;
  			}
  
-@@ -1255,7 +1339,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1255,7 +1341,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  					async (pairIndex): Promise<BenchCachePairReport> => {
  						const cacheNamespace = randomSessionId();
  						progress.inFlight++;
@@ -1137,7 +1150,7 @@ index ea5793d85a..a13ae7817b 100644
  						const promptCacheKey = `bench-cache:${cacheNamespace}`;
  						const stablePrefix = renderCacheBenchmarkPrefix(cachePrefix!, cacheNamespace);
  						const coldSuffix = prompt.render(cacheSuffixTemplate, { variant: "A" }).trim();
-@@ -1273,6 +1357,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1273,6 +1359,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						const coldResult = await runBenchRequest(
  							model,
  							{
@@ -1145,7 +1158,7 @@ index ea5793d85a..a13ae7817b 100644
  								apiKey: credentialResolver,
  								sessionId: credentialAffinitySessionId,
  								messages: cacheBenchmarkMessages(stablePrefix, coldSuffix),
-@@ -1294,6 +1379,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1294,6 +1381,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						const warmResult = await runBenchRequest(
  							model,
  							{
@@ -1153,7 +1166,7 @@ index ea5793d85a..a13ae7817b 100644
  								apiKey: credentialResolver,
  								sessionId: credentialAffinitySessionId,
  								messages: cacheBenchmarkMessages(stablePrefix, warmSuffix),
-@@ -1312,7 +1398,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1312,7 +1400,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						progress.completed++;
  						if (!coldResult.ok) progress.failed++;
  						if (!warmResult.ok) progress.failed++;
@@ -1162,7 +1175,7 @@ index ea5793d85a..a13ae7817b 100644
  						return {
  							cold: cacheRunReport("cold", coldResult, coldCapture),
  							warm: cacheRunReport("warm", warmResult, warmCapture),
-@@ -1328,11 +1414,13 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1328,11 +1416,13 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  									: coldCapture.payloadStructure === warmCapture.payloadStructure,
  						};
  					},
@@ -1171,12 +1184,13 @@ index ea5793d85a..a13ae7817b 100644
  				for (const pair of pairs) results.push(pair.cold.result, pair.warm.result);
  				row.report = buildModelReport(selector, model, thinking, results);
  				row.report.cachePairs = pairs;
- 				row.state = "done";
+-				row.state = "done";
++				row.state = deps.signal?.aborted ? "cancelled" : "done";
 +				updateProgress();
  				if (!json) {
  					for (const [index, pair] of pairs.entries()) {
  						print(formatCachePairLine(pair, index, pairs.length));
-@@ -1346,6 +1434,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1346,6 +1436,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  			let offset = 0;
  			// Steps run back to back so one phase's load never skews the next.
  			for (const step of steps) {
@@ -1184,7 +1198,7 @@ index ea5793d85a..a13ae7817b 100644
  				const { phase } = step;
  				if (!json && phase) {
  					print(
-@@ -1356,51 +1445,57 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1356,51 +1447,57 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				const startedAt = now();
  				// Runs finish out of order under concurrency; lines print in index order.
  				let nextToPrint = 0;
@@ -1286,10 +1300,18 @@ index ea5793d85a..a13ae7817b 100644
  				// Chat phases close with the combined output rate across every in-flight request.
  				const phaseReport = phase && phase !== "prefill" ? phases[phase] : undefined;
  				if (!json && phaseReport) {
-@@ -1411,6 +1506,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1410,7 +1507,14 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 				}
  				offset += step.runs;
  			}
- 			row.state = "done";
+-			row.state = "done";
++			row.state = deps.signal?.aborted ? "cancelled" : "done";
++			updateProgress();
++		}
++		if (deps.signal?.aborted) {
++			for (const row of rows) {
++				if (row.state === "queued") row.state = "cancelled";
++			}
 +			updateProgress();
  		}
  		const reports = rows.map(row => row.report);
