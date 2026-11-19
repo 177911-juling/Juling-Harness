@@ -101,7 +101,6 @@ it("keeps full shell chrome without preview-switch, switches routes without echo
   await waitFor(() => expect(document.querySelector('#pageBody[data-route="home"]')).not.toBeNull());
   expect(document.querySelector(".app-titlebar")).not.toBeNull();
   expect(document.querySelector(".app-rail")).not.toBeNull();
-  expect(document.querySelector("#pageHead")).not.toBeNull();
   expect(document.querySelector(".preview-switch")).toBeNull();
   expect(screen.queryByRole("dialog")).toBeNull();
 
@@ -112,9 +111,9 @@ it("keeps full shell chrome without preview-switch, switches routes without echo
   expect(confirm).not.toHaveBeenCalled();
   expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "route-changed" }), expect.anything());
 
-  // Clicking a `#pageHead` `.page-nav` tab switches routes without confirm and emits `route-changed`.
+  // Clicking the rail destination switches routes without confirm and emits `route-changed`.
   setModelConfigDirty(true);
-  const capTab = document.querySelector('#pageHead nav.page-nav a[data-nav="capabilities"]')!;
+  const capTab = document.querySelector('.app-rail button[aria-label="Capabilities"]')!;
   fireEvent.click(capTab);
   await waitFor(() => expect(document.querySelector('#pageBody[data-route="capabilities"]')).not.toBeNull());
   expect(confirm).not.toHaveBeenCalled();
@@ -126,9 +125,9 @@ it("keeps full shell chrome without preview-switch, switches routes without echo
   await waitFor(() => expect(document.querySelector('#pageBody[data-route="home"]')).not.toBeNull());
   expect(postMessage).toHaveBeenCalledWith({ source: WEBSITE_EMBED_SOURCE, type: "route-changed", route: "home" }, expect.any(String));
 
-  // Clicking `#pageHead` theme toggle updates theme synchronously and emits `theme-changed`.
+  // Clicking the rail theme toggle updates theme synchronously and emits `theme-changed`.
   postMessage.mockClear();
-  fireEvent.click(document.querySelector('#pageHead button[data-tip*="theme" i]')!);
+  fireEvent.click(document.querySelector('.app-rail .app-rail-theme')!);
   await waitFor(() => expect(document.documentElement.getAttribute("data-theme")).toBe("dark"));
   expect(postMessage).toHaveBeenCalledWith({ source: WEBSITE_EMBED_SOURCE, type: "theme-changed", theme: "dark" }, expect.any(String));
 

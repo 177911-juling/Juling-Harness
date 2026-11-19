@@ -1,3 +1,4 @@
+import "./locale-en.js";
 /**
  * Desktop Host composition contract tests (FRONTEND_INTEGRATION.md §9.2).
  *
@@ -857,7 +858,7 @@ test("managedInstall without trusted keys fails closed instead of reporting inst
     }
     const receipt = events.find((event) => event.kind === "command.receipt");
     assert.equal(receipt?.receipt?.status, "failed");
-    assert.match(receipt?.receipt?.error?.message ?? "", /JULING_RUNTIME_TRUSTED_PUBLIC_KEY/u);
+    assert.match(receipt?.receipt?.error?.message ?? "", /JULING_RUNTIME_SIGNING_KEY_ID/u);
     await composition.shutdown();
   });
 });

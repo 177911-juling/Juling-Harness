@@ -1,3 +1,4 @@
+import "./locale-en.js";
 /**
  * Desktop-chrome terminal IPC tests.
  *

@@ -777,6 +777,7 @@ export function DiagnosticsPage({
 
   return (
     <div className="page-wide diag-page">
+      <h1 className="sr-only">{t("diagnostics.title")}</h1>
 <WorkspaceTabs<"runtime"|"maintenance"> id="diagnostics-workspace" label="Diagnostics" value={workspaceTab} onChange={setWorkspaceTab} items={[{id:"runtime",icon:"pulse",label:resolvedLanguage==="zh"?"运行环境":"Runtime"},{id:"maintenance",icon:"settings",label:resolvedLanguage==="zh"?"会话与维护":"Sessions and maintenance"}]}/>
 <WorkspacePanel id="diagnostics-workspace" name="runtime" active={workspaceTab==="runtime"}>
       <div className="diag-head">

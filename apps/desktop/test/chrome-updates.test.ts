@@ -1,3 +1,4 @@
+import "./locale-en.js";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
@@ -1066,7 +1067,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
 
     const failEvent = progress.find((p) => p.phase === "failed");
     assert.ok(failEvent !== undefined, "Should fail on manifest mismatch");
-    assert.ok(failEvent.message?.includes("不一致"), failEvent.message);
+    assert.ok(/不一致|does not match|mismatch/i.test(failEvent.message ?? ""), failEvent.message);
     assert.ok(!fetchedUrls.some((u) => u.endsWith("juling.exe")), "juling.exe must not be fetched");
 
     handle.dispose();

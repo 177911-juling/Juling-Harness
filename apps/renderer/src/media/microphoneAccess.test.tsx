@@ -31,10 +31,10 @@ describe("microphone consent", () => {
 });
 
 describe("file manager copy", () => {
-  it("names Finder on macOS and keeps File Explorer everywhere else", () => {
+  it("names Finder on macOS, File Manager on Linux and File Explorer elsewhere", () => {
     const t = (key: string) => key;
     expect(fileManagerName(t, "darwin")).toBe("shell.fileManagerMac");
     expect(fileManagerName(t, "win32")).toBe("shell.fileManagerWindows");
-    expect(fileManagerName(t, "linux")).toBe("shell.fileManagerWindows");
+    expect(fileManagerName(t, "linux")).toBe("shell.fileManagerLinux");
   });
 });

@@ -1,3 +1,4 @@
+import "./locale-en.js";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
@@ -689,7 +690,7 @@ test("index rejects filesystem escape versions and file names before staging wri
     assert.throws(() => parseUpdateIndex(index));
   }
   const duplicate = createSampleIndex();
-  (duplicate.runtime.files[1] as { name: string }).name = "OMP.EXE";
+  (duplicate.runtime.files[1] as { name: string }).name = (duplicate.runtime.files[0] as { name: string }).name.toUpperCase();
   assert.throws(() => parseUpdateIndex(duplicate), /Duplicate/);
 });
 

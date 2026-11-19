@@ -273,7 +273,7 @@ it("reuses a single workspace shell across main-view conversations while keeping
     write: vi.fn().mockResolvedValue(undefined), resize: vi.fn().mockResolvedValue(undefined), dispose: vi.fn().mockResolvedValue(undefined),
     onData: vi.fn(() => () => {}), onExit: vi.fn(() => () => {}),
   };
-  vi.stubGlobal("ompHarnessTerminal", api);
+  vi.stubGlobal("julingHarnessTerminal", api);
   const view = render(<TerminalSessionsProvider>
     <section aria-label="Main view"><TerminalPane workspaceId="work" visible /></section>
   </TerminalSessionsProvider>);

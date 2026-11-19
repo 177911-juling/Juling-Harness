@@ -257,9 +257,12 @@ it("files a failed send under its original owner instead of the newly selected d
   const choose = async (name: string) => {
     await waitFor(() => expect(document.querySelector(".execution-picker > button")).not.toBeNull());
     fireEvent.click(document.querySelector<HTMLButtonElement>(".execution-picker > button")!);
-    const item = Array.from(document.querySelectorAll<HTMLButtonElement>(".execution-menu-row")).find(button => button.textContent?.startsWith(name));
-    expect(item).toBeTruthy();
-    fireEvent.click(item!);
+    const item = await waitFor(() => {
+      const found = Array.from(document.querySelectorAll<HTMLButtonElement>(".execution-menu-row")).find(button => button.textContent?.startsWith(name));
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    fireEvent.click(item);
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)); });
     return document.querySelector<HTMLElement>("#composerInput")!;
   };
@@ -271,7 +274,7 @@ it("files a failed send under its original owner instead of the newly selected d
   await act(async () => { prompt.reject(new Error("send failed")); await prompt.promise.catch(() => {}); });
   expect(remoteEditor.textContent).toBe("draft for B");
 
-  const restoredLocal = await choose("此计算机");
+  const restoredLocal = await choose("This computer");
   await selectFixture();
   await waitFor(() => expect(restoredLocal.textContent).toBe("payload for A"));
   expect(restoredLocal.textContent).toBe("payload for A");

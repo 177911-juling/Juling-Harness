@@ -58,7 +58,7 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
       void globalThis.julingHarnessChrome.files.open({ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, path: descriptor.path, ...(descriptor.source ? { source: descriptor.source } : {}) }).then(result => { lease = result.id; if (alive) setResource(result); else void globalThis.julingHarnessChrome?.files?.release(result.id); }).catch(error => { if (alive) setError(error instanceof Error ? error.message : String(error)); });
     } else setError(pickLocale("此连接没有桌面文件资源通道", "Desktop file resource channel unavailable on this connection"));
     return () => { alive = false; if (lease) void globalThis.julingHarnessChrome?.files?.release(lease); if (blob) URL.revokeObjectURL(blob); };
-  }, [descriptor.path, descriptor.source, descriptor.targetId, descriptor.workspaceId, state.file.version, preview, reload, active, visible, needsResource]);
+  }, [descriptor.path, descriptor.source, descriptor.targetId, descriptor.workspaceId, state.file.version, preview, reload, visible, needsResource]);
   // Working-tree patch for the gutter and Diff view; a non-repository or failed query simply shows nothing.
   useEffect(() => {
     if (!active) return;

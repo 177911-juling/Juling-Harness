@@ -245,7 +245,7 @@ it("replaces an expired channel and recovers after the replacement closes", asyn
     : { ok: true });
   const predictionInput = vi.fn(({ channelId, input }: { channelId: string; input: PredictionInput }) =>
     channelId === "channel-2" && input.kind === "next" ? staleInput.promise : Promise.resolve({ ok: true }));
-  vi.stubGlobal("ompHarnessChrome", {
+  vi.stubGlobal("julingHarnessChrome", {
     attachPrediction,
     predictionInput,
     detachPrediction: vi.fn(async () => ({ ok: true })),
@@ -287,7 +287,7 @@ it("keeps a missing prediction receipt from showing a composer error", async () 
       subscribe: () => () => {},
     } as unknown as HarnessClient;
     const attachPrediction = vi.fn();
-    vi.stubGlobal("ompHarnessChrome", {
+    vi.stubGlobal("julingHarnessChrome", {
       attachPrediction,
       predictionInput: vi.fn(),
       onPrediction: () => () => {},

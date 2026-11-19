@@ -98,7 +98,9 @@ test("a macOS desktop update commits only once the new version confirms it is he
   await v2.initialize();
   assert.equal(v2.state.app.phase, "verifying");
   assert.equal((await journal()).pending.app.manifest.app.version, "2.0.0", "still revocable by the swap helper");
-  assert.deepEqual(await v2.apply(), { ok: false, message: "No pending update to apply" }, "the running version is never installed again");
+  const applyAgain = await v2.apply();
+  assert.equal(applyAgain.ok, false, "the running version is never installed again");
+  assert.match(applyAgain.message ?? "", /No pending update to apply|没有待应用的更新/);
   assert.equal(h.installs.length, 1);
 
   await v2.confirmDesktopStartup();

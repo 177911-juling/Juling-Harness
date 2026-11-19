@@ -1,3 +1,4 @@
+import "./locale-en.js";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
