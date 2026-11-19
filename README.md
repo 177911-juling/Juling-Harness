@@ -11,7 +11,7 @@
 
 | Version | Bundled runtime | Platforms | License |
 |:--:|:--:|:--:|:--:|
-| **1.0.0** | OMP **18.20.2** · `harness.18` | Windows · macOS · Linux | MIT |
+| **1.0.1** | OMP **18.20.2** · `harness.18` | Windows · macOS · Linux | MIT |
 
 <p align="center">
   <img src="docs/readme/app-workbench.png" width="100%" alt="Juling Harness workbench with a conversation, tool cards, subagents and context panels" />

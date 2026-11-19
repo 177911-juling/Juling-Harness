@@ -11,7 +11,7 @@
 
 | 版本 | 内置运行时 | 平台 | 许可 |
 |:--:|:--:|:--:|:--:|
-| **1.0.0** | OMP **18.20.2** · `harness.18` | Windows · macOS · Linux | MIT |
+| **1.0.1** | OMP **18.20.2** · `harness.18` | Windows · macOS · Linux | MIT |
 
 <p align="center">
   <img src="docs/readme/app-workbench.png" width="100%" alt="Juling Harness 工作台：对话、工具卡、子 Agent 与上下文面板" />
