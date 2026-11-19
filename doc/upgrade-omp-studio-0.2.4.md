@@ -507,3 +507,15 @@ website/shared/media/icon-512.webp
 
 > 附录基于 `git diff 90249ea HEAD` 与 `git status` 的路径交集；实际合并时以 git 报出的冲突为准，
 > 未报冲突但双方都改的文件（如 `frame-codec.ts` 的 encode/decode 不同区域）需要 `git diff` 复核。
+
+## 执行记录（2026-11-19）
+
+- 已按确认执行：Linux 应用内更新接入（`UPDATE_PLATFORMS` 加回 `linux-x64`）、版本统一 `0.2.4`、
+  官网保留本地站点（未引入上游 `website/src` 与发布叙事文档）、只吸收手册类 docs。
+- 合并提交：`77410a6`；并在其上完成补丁再生（`harness.18`）、六语补全（六份字典各 3276 键）、
+  模型目录按 `7c49c11` 重新生成、平台表与更新测试对齐。
+- 未提交的 vendor 工作区是 overlay + 接缝补丁的预期形态，`.gitmodules` 已标记 `ignore = dirty`。
+- 验证：`npm run check -- --fast`、`--only renderer|desktop|harness-host|runtime-installer`、
+  `npm run build`、`npm run test:tooling` 均通过；`npm run omp:verify:patches` 从干净 vendor 全链通过。
+- 仍需人工 GUI 验收：Agent Hub 指挥台 / 消息、模型拉取筛选、工作区恢复、六语切换、统计面板、
+  Windows/macOS/Linux 更新流程（见 §5 Phase 6 清单）。
