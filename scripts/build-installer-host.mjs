@@ -17,8 +17,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { unzipSync } from "fflate";
 
 import { repositoryRoot, run } from "./omp-tooling.mjs";
 import { resolveTargetArch, installerHostArch, assertPeArchitecture } from "./windows-architecture.mjs";
@@ -76,9 +77,11 @@ export async function downloadWebView2Sdk(version = WEBVIEW2_VERSION) {
 function extractNupkg(nupkg, dest) {
   rmSync(dest, { recursive: true, force: true });
   mkdirSync(dest, { recursive: true });
-  const tar = spawnSync("tar", ["-xf", nupkg, "-C", dest], { encoding: "utf8" });
-  if (tar.status !== 0) {
-    throw new Error(`Failed to extract WebView2 nupkg: ${tar.stderr || tar.stdout}`);
+  for (const [name, data] of Object.entries(unzipSync(readFileSync(nupkg)))) {
+    if (name.endsWith("/")) continue;
+    const output = join(dest, name);
+    mkdirSync(dirname(output), { recursive: true });
+    writeFileSync(output, data);
   }
 }
 

@@ -423,7 +423,7 @@ async function main() {
     env: {
       ...process.env,
       JULING_APP_USER_MODEL_ID: previewAumid,
-      ...(production ? {} : { JULING_RENDERER_DEV_URL: rendererEntryUrl }),
+      ...(production ? {} : { OMP_RENDERER_DEV_URL: rendererEntryUrl }),
     },
   });
 
