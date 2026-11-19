@@ -9,7 +9,7 @@ import { AgentBtwPane } from "./btw/AgentBtwPane";
 import { ServicesPane } from "./services/ServicesPane";
 import { WorkspacePanel, WorkspaceTabs } from "./workspaces/Workspace";
 import { useI18n } from "./i18n";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ClientBootstrap, CommandInput, CommandName, SessionId, HarnessClient } from "@juling-harness/client-contract";
 import type { AgentId, AgentTranscriptMessage, OpaqueCursor, OperatorStateSnapshot, HarnessAgentSnapshot } from "@juling-harness/harness-protocol";
@@ -23,18 +23,26 @@ import { usePreviewMode } from "./preview/PreviewContext";
 import { hostErrorMessage, waitReceipt } from "./hostError";
 import { SubagentConversationPane } from "./conversation/SubagentConversationPane";
 import { tabPaneRole, useOverlappingTabs } from "./pageTransition";
+import { motionReduced } from "./motion";
 import { type HubTab } from "./pageIntents";
 import { clearHubIntent, loadPersisted, persist, readHubIntent } from "./agents/hub/navigation";
 import { type HubAgent, type HubJob, type HubStatus, type HubView, type Modal, type Notice } from "./agents/hub/types";
 import { contractFor, capsFor, missingCap } from "./agents/hub/capabilities";
-import { STATUS_DOT, STATUS_LABEL, TABS, activityPill, fmtAge, fmtClock, fmtCost, fmtDur, fmtNum, fromPreviewAgent, fromPreviewJob, hubChatTarget, hubComposerAgents, hubDurationMs, hubSelectorId, hubWord, linearSeq, sortByCreation, toHubAgent, toHubJob, treeGroups } from "./agents/hub/projection";
+import { STATUS_DOT, STATUS_LABEL, TABS, fmtClock, fmtCost, fmtDur, fmtNum, fromPreviewAgent, fromPreviewJob, hubChatTarget, hubComposerAgents, hubSelectorId, hubWord, linearSeq, sortByCreation, toHubAgent, toHubJob, treeGroups } from "./agents/hub/projection";
 import { hubFaceClass, useHubChatCloseMotion } from "./agents/hub/useHubChatMotion";
 import { AgentCard, EmptyBlock, KbdHint, TreeGroup } from "./agents/hub/AgentCards";
 import { HubAgentOverview } from "./agents/hub/HubAgentOverview";
+import { HubDossierHead, HubSigil, HubStatusPill } from "./agents/hub/HubDossier";
 import { HubJobRow } from "./agents/hub/HubJobRow";
 import { TaskAssignmentEditor, createTaskStep, type TaskAssignmentMode, type TaskStepDraft } from "./agents/TaskAssignmentEditor";
 import { TaskStepsView } from "./agents/TaskStepsView";
 import { previewTaskStepsForAgent } from "./preview/taskStepsPreview";
+import { getPreviewDockAgents } from "./preview/agentDockPreview";
+import { AgentDeck, type DeckEmbedding, type DeckLinks } from "./agents/deck/AgentDeck";
+import { buildDeck, type DeckAgent } from "./agents/deck/deckModel";
+import { CommsView } from "./agents/deck/CommsView";
+import { rosterKeyOf, useSwarmComms } from "./agents/deck/comms";
+import { agentSwarmScope } from "./agents/deck/swarmScope";
 
 export type { HubView } from "./agents/hub/types";
 
@@ -55,6 +63,7 @@ export function AgentHubPage({
   pendingInteraction,
   workspaceId,
   loadMentions,
+  swarmScope,
   onOpenMain,
   onOpenDiagnostics,
 }: {
@@ -75,6 +84,8 @@ export function AgentHubPage({
     trigger: "@" | "/" | "^",
     query: string,
   ) => Promise<readonly MentionCandidate[]>;
+  /** The workbench deck's recorder scope, so the Hub's deck replays the same history. */
+  swarmScope?: string;
   onOpenMain: () => void;
   onOpenDiagnostics?: () => void;
 }) {
@@ -85,7 +96,8 @@ export function AgentHubPage({
   >(initial.selectedBySession);
   const selected = selectedBySession[sessionKey] ?? null;
   const [tab, setTab] = useState<HubTab>(initial.tab);
-  const [view, setView] = useState<HubView>(initial.view);
+  // The Hub always opens on the command deck; the card views are a click away.
+  const [view, setView] = useState<HubView>("deck");
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -96,8 +108,11 @@ export function AgentHubPage({
   const [narrow, setNarrow] = useState(
     () => typeof window !== "undefined" && window.innerWidth <= 900,
   );
-  const [commandBusy, setCommandBusy] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [busyCount, setBusyCount] = useState(0);
+  const busyCountRef = useRef(0);
+  const commandBusy = busyCount > 0;
+  const [draftsByAgent, setDraftsByAgent] = useState<Record<string, string>>({});
+  const [transcriptRefresh, setTranscriptRefresh] = useState(0);
   const [spawnTask, setSpawnTask] = useState("");
   const [spawnEffort, setSpawnEffort] = useState("");
   const [spawnModel, setSpawnModel] = useState("");
@@ -125,12 +140,41 @@ export function AgentHubPage({
   const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const colsRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // The sticky dossier sits under the sticky workspace tab bar and fits what is
+  // left of the page's scroll area; both heights depend on the window chrome.
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const scroller = root?.closest<HTMLElement>(".page-body");
+    if (!root || !scroller) return;
+    const measure = () => {
+      const bar = root.querySelector<HTMLElement>(":scope > .workspace-tabbar");
+      root.style.setProperty("--hub-scroll-h", `${scroller.clientHeight}px`);
+      root.style.setProperty("--hub-bar-h", `${bar?.offsetHeight ?? 0}px`);
+      // Content under the columns ends the sticky range early; leave room for it
+      // so the dossier is never pushed under the tab bar at the end of the page.
+      const cols = colsRef.current;
+      if (cols) {
+        const bottom = cols.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top + scroller.scrollTop;
+        root.style.setProperty("--hub-tail-h", `${Math.max(0, Math.round(scroller.scrollHeight - bottom))}px`);
+      }
+    };
+    measure();
+    const Observer = root.ownerDocument.defaultView?.ResizeObserver;
+    if (!Observer) return;
+    const observer = new Observer(measure);
+    observer.observe(scroller);
+    observer.observe(root);
+    const bar = root.querySelector<HTMLElement>(":scope > .workspace-tabbar");
+    if (bar) observer.observe(bar);
+    return () => observer.disconnect();
+  }, []);
   const searchRef = useRef<HTMLInputElement>(null);
   const transcriptReq = useRef(0);
 
   useEffect(() => {
-    persist({ selectedBySession, tab, view });
-  }, [selectedBySession, tab, view]);
+    persist({ selectedBySession, tab });
+  }, [selectedBySession, tab]);
 
   useEffect(() => {
     if (parentSessionId === undefined) return;
@@ -152,19 +196,15 @@ export function AgentHubPage({
   }, [sessionKey]);
 
   useEffect(() => {
-    const tick = window.setInterval(() => setNow(Date.now()), 5000);
-    return () => window.clearInterval(tick);
-  }, []);
-
-  useEffect(() => {
     const onResize = () => setNarrow(window.innerWidth <= 900);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
   const { preview, marks } = usePreviewMode();
-  const { resolvedLanguage } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const deckWords = useCallback((key: string, params?: Record<string, string | number>) => t(`agentDeck.${key}`, params), [t]);
   const zhRef = useRef(zh);
   zhRef.current = zh;
   const contract = contractFor(zh);
@@ -175,6 +215,38 @@ export function AgentHubPage({
   const connOnline = runtimeStatus === "connected" && !resyncRequired;
   const viewingLive =
     parentSessionId === undefined || snapshot?.sessionId === parentSessionId;
+  const liveClock = preview || (connOnline && viewingLive);
+  useEffect(() => {
+    if (!liveClock) return;
+    let timer: number | undefined;
+    const isVisible = () => !document.hidden && document.visibilityState !== "hidden";
+    const start = () => {
+      if (timer !== undefined || !isVisible()) return;
+      timer = window.setInterval(() => {
+        if (isVisible()) setNow(Date.now());
+      }, 5000);
+    };
+    const stop = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const onVisibility = () => {
+      if (!isVisible()) {
+        stop();
+      } else {
+        setNow(Date.now());
+        start();
+      }
+    };
+    start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [liveClock]);
   const spawnAvailable =
     preview ||
     (viewingLive &&
@@ -187,14 +259,27 @@ export function AgentHubPage({
   useEffect(() => {
     spawnEpoch.current++;
     spawnLock.current = false;
-    const previewDefs = getPreviewAgentDefinitions(zh);
-    setSpawnDefinitions(preview ? previewDefs : null);
-    setSpawnDefinition(preview ? previewDefs[0]!.name : "");
+    if (preview) {
+      const previewDefs = getPreviewAgentDefinitions(zhRef.current);
+      setSpawnDefinitions(previewDefs);
+      setSpawnDefinition(previewDefs[0]?.name ?? "");
+    } else {
+      setSpawnDefinitions(null);
+      setSpawnDefinition("");
+    }
     setSpawnEffort("");
     return () => {
       spawnEpoch.current++;
     };
-  }, [client, preview, parentSessionId, snapshot?.sessionId, zh]);
+  }, [client, preview, parentSessionId, snapshot?.sessionId]);
+  useEffect(() => {
+    if (!preview) return;
+    const previewDefs = getPreviewAgentDefinitions(zh);
+    setSpawnDefinitions(previewDefs);
+    setSpawnDefinition((current) =>
+      previewDefs.some((item) => item.name === current) ? current : (previewDefs[0]?.name ?? ""),
+    );
+  }, [preview, zh]);
   useEffect(() => {
     let alive = true;
     setSpawnOptions(undefined); setSpawnOptionsError(""); setSpawnModel(""); setSpawnEffort("");
@@ -337,6 +422,7 @@ export function AgentHubPage({
     preview,
     viewingLive,
     zh,
+    marks,
   );
   const killTarget =
     modal?.kind === "kill"
@@ -350,6 +436,7 @@ export function AgentHubPage({
     preview,
     viewingLive,
     zh,
+    marks,
   );
 
   const runCommand = useCallback(
@@ -360,7 +447,7 @@ export function AgentHubPage({
     ): Promise<boolean> => {
       const c = contractFor(zhRef.current);
       if (preview) {
-        setNotice({ kind: "warn", text: c.previewWrite });
+        if (marks) setNotice({ kind: "warn", text: c.previewWrite });
         return false;
       }
       if (!viewingLive) {
@@ -371,7 +458,8 @@ export function AgentHubPage({
         setNotice({ kind: "warn", text: zhRef.current ? "无 Harness client（桌面桥未注入）" : "No Harness client (desktop bridge not injected)" });
         return false;
       }
-      setCommandBusy(true);
+      busyCountRef.current += 1;
+      setBusyCount(busyCountRef.current);
       try {
         const handle = await client.command(name, input);
         await waitReceipt(client, handle.requestId);
@@ -381,10 +469,11 @@ export function AgentHubPage({
         setNotice({ kind: "err", text: hostErrorMessage(error, zhRef.current ? "操作失败" : "Action failed") });
         return false;
       } finally {
-        setCommandBusy(false);
+        busyCountRef.current = Math.max(0, busyCountRef.current - 1);
+        setBusyCount(busyCountRef.current);
       }
     },
-    [client, preview, viewingLive],
+    [client, marks, preview, viewingLive],
   );
 
   const cancelJob = useCallback(
@@ -431,9 +520,15 @@ export function AgentHubPage({
     [runCommand],
   );
 
+  const draftSlot = useCallback(
+    (id: string) => `${sessionKey}:${id}`,
+    [sessionKey],
+  );
+
   const sendDraft = useCallback(
     (agent: HubAgent) => {
-      const text = draft.trim();
+      const slot = draftSlot(agent.id);
+      const text = (draftsByAgent[slot] ?? "").trim();
       if (!text) return;
       void runCommand(
         "agent.send",
@@ -445,10 +540,18 @@ export function AgentHubPage({
         },
         zhRef.current ? `消息已发送给 ${agent.name}` : `Message sent to ${agent.name}`,
       ).then((ok) => {
-        if (ok) setDraft("");
+        if (ok) {
+          setDraftsByAgent((prev) => {
+            if (!(slot in prev)) return prev;
+            const next = { ...prev };
+            delete next[slot];
+            return next;
+          });
+          setTranscriptRefresh((n) => n + 1);
+        }
       });
     },
-    [draft, runCommand],
+    [draftSlot, draftsByAgent, runCommand],
   );
 
   const select = useCallback(
@@ -465,7 +568,10 @@ export function AgentHubPage({
             `[data-hub-id="${hubSelectorId(id)}"]`,
           );
           if (row && typeof row.scrollIntoView === "function") {
-            row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            row.scrollIntoView({
+              block: "nearest",
+              behavior: motionReduced() ? "instant" : "smooth",
+            });
           }
         });
       }
@@ -515,7 +621,110 @@ export function AgentHubPage({
       ? [outgoing, incoming]
       : [incoming];
 
+  // Detail tabs cross like sibling panes: the later tab arrives from the right.
+  const {
+    incoming: paneIncoming,
+    outgoing: paneOutgoing,
+    dir: paneDir,
+    live: paneLive,
+    stageRef: paneStageRef,
+  } = useOverlappingTabs(tab, Math.max(0, TABS.findIndex(([id]) => id === tab)));
+  const detailPanes: ReadonlyArray<HubTab> =
+    paneOutgoing != null && paneOutgoing !== paneIncoming
+      ? [paneOutgoing, paneIncoming]
+      : [paneIncoming];
+  // The dossier head draws its divider once the body under it has scrolled.
+  const [bodyScrolled, setBodyScrolled] = useState(false);
+  useLayoutEffect(() => {
+    const pane = paneStageRef.current?.querySelector<HTMLElement>(`[data-pane="${paneIncoming}"]`);
+    setBodyScrolled((pane?.scrollTop ?? 0) > 0);
+  }, [paneIncoming, paneStageRef]);
+  // Another agent's dossier starts at its top.
+  useLayoutEffect(() => {
+    for (const pane of paneStageRef.current?.querySelectorAll<HTMLElement>("[data-pane]") ?? []) pane.scrollTop = 0;
+    setBodyScrolled(false);
+  }, [paneStageRef, selected]);
+  const selectedParentName = selectedAgent?.parentId
+    ? (mapped.roster.find((agent) => agent.id === selectedAgent.parentId)?.name ??
+      (selectedAgent.parentId === "main" ? null : selectedAgent.parentId))
+    : null;
+
   const warn = (text: string) => setNotice({ kind: "warn", text });
+
+  // ---- Command deck: a third roster view. It shows the swarm and picks members;
+  // the detail column beside it stays the one place to inspect and act.
+  const deckView = view === "deck";
+  const deckShown = deckView && workspaceTab === "agents";
+  const deckAgents = useMemo(
+    () => (preview ? getPreviewDockAgents(zh) : (agents ?? snapshot?.agents ?? [])),
+    [preview, preview ? zh : false, agents, snapshot?.agents],
+  );
+  const deckScope = swarmScope ?? agentSwarmScope(null, workspaceId, parentSessionId, preview);
+  const deckSource = connKind === "offline" ? "offline" : !viewingLive ? "history" : "live";
+  // One read of the agents' messages serves the deck and the Messages tab beside it.
+  const commsRosterKey = useMemo(() => rosterKeyOf(deckAgents), [deckAgents]);
+  const commsShown = workspaceTab === "agents" && (deckShown || tab === "messages");
+  const comms = useSwarmComms({ preview, zh, live: commsShown && (preview || deckSource === "live"), client,
+    sessionId: viewingLive ? snapshot?.sessionId : undefined, rosterKey: commsRosterKey });
+  const commsRows = useMemo(() => buildDeck(deckAgents, preview, zh), [deckAgents, preview, zh]);
+  const [commsNow, setCommsNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!commsShown || tab !== "messages") return;
+    setCommsNow(Date.now());
+    const timer = window.setInterval(() => setCommsNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, [commsShown, tab]);
+  const deckRef = useRef<HTMLDivElement>(null);
+  const [deckSize, setDeckSize] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    const node = deckRef.current;
+    if (!deckView || !node) return;
+    const measure = () => {
+      const rect = node.getBoundingClientRect();
+      const width = Math.round(rect.width), height = Math.round(rect.height);
+      setDeckSize((current) => current.width === width && current.height === height ? current : { width, height });
+    };
+    measure();
+    const Observer = node.ownerDocument.defaultView?.ResizeObserver;
+    if (!Observer) return;
+    const observer = new Observer(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [deckView]);
+  const inRoster = (id: string) => mapped.roster.some((agent) => agent.id === id);
+  const deckEmbedding: DeckEmbedding = {
+    selectedId: selected,
+    // The lead is the main conversation, not a Hub member: its row has nothing to show here.
+    onSelect: (id) => { if (inRoster(id)) select(id); },
+  };
+  const deckLinks: DeckLinks = {
+    onOpen: (row: DeckAgent) => {
+      const agent = mapped.roster.find((item) => item.id === row.id);
+      if (!agent) return;
+      const rowCaps = capsFor(agent, connOnline, capabilities, client !== undefined, preview, viewingLive, zhRef.current, marks);
+      if (rowCaps.open) openChat(agent.id);
+      else { select(agent.id); warn(rowCaps.openWhy ?? (zhRef.current ? "已结束" : "Ended")); }
+    },
+    onMain: onOpenMain,
+    onBtw: (row: DeckAgent) => {
+      if (!inRoster(row.id)) return;
+      setChatOpen(false);
+      select(row.id);
+      setTab("btw");
+    },
+    // Already in the Hub, and the deck shows no inspector of its own here.
+    onHub: () => undefined,
+    canLocate: () => false,
+    onLocate: async () => false,
+  };
+  // Swapping between the cards and the deck crosses like sibling tabs: the deck sits to the left.
+  const lastView = useRef(view);
+  const deckSwap = useRef<"" | "fwd" | "back">("");
+  if (lastView.current !== view) {
+    if ((lastView.current === "deck") !== deckView) deckSwap.current = deckView ? "back" : "fwd";
+    lastView.current = view;
+  }
+  const swapClass = deckSwap.current ? ` tab-pane-enter-${deckSwap.current}` : "";
 
   const agentId = selectedAgent?.id;
   const agentGeneration = selectedAgent?.generation;
@@ -563,7 +772,7 @@ export function AgentHubPage({
     return () => {
       cancelled = true;
     };
-  }, [preview, viewingLive, tab, agentId, agentGeneration, client]);
+  }, [preview, viewingLive, tab, agentId, agentGeneration, client, transcriptRefresh]);
 
   const loadMoreTranscript = useCallback(() => {
     if (
@@ -643,7 +852,25 @@ export function AgentHubPage({
     };
   }, [modal, preview, viewingLive, client, spawnDefinitions]);
   useEffect(() => {
+    if (workspaceTab !== "agents" && !modal) return;
     const onKey = (event: KeyboardEvent) => {
+      const root = rootRef.current;
+      if (!root || !root.isConnected || root.closest("[hidden], [inert], [aria-hidden='true']")) return;
+      if (document.hidden || document.visibilityState === "hidden") return;
+      if (modal) {
+        if (
+          event.key === "Escape" &&
+          !event.defaultPrevented &&
+          !commandBusy &&
+          busyCountRef.current === 0 &&
+          !spawnLock.current
+        ) {
+          event.preventDefault();
+          setModal(null);
+        }
+        return;
+      }
+      if (workspaceTab !== "agents") return;
       const target = event.target as HTMLElement | null;
       const inField = Boolean(
         target?.closest(
@@ -659,11 +886,16 @@ export function AgentHubPage({
         }
         return;
       }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      // The deck moves through its own crew, views and cards; the Hub keeps the shortcuts that act on the pick.
+      const deck = view === "deck";
+      if (deck && event.key === "Enter" && target?.closest(".ad")) return;
       const seq = linearSeq(filtered, view);
       const index = seq.findIndex((agent) => agent.id === selected);
       switch (event.key) {
         case "j":
         case "ArrowDown":
+          if (deck) break;
           event.preventDefault();
           if (seq.length)
             select(
@@ -678,6 +910,7 @@ export function AgentHubPage({
           break;
         case "k":
         case "ArrowUp":
+          if (deck) break;
           event.preventDefault();
           if (seq.length)
             select(seq[Math.max(0, index < 0 ? 0 : index - 1)]!.id, {
@@ -692,12 +925,15 @@ export function AgentHubPage({
           }
           break;
         case "t":
+          // Flips the card list between flat and by-parent; it never swaps the deck in or out.
+          if (deck) break;
           event.preventDefault();
           setView((current) => (current === "flat" ? "tree" : "flat"));
           break;
         case "r":
           if (selectedAgent) {
             event.preventDefault();
+            if (commandBusy || busyCountRef.current > 0) break;
             if (caps.revive) reviveAgent(selectedAgent);
             else warn(caps.reviveWhy ?? contractFor(zhRef.current).revive);
           }
@@ -705,6 +941,7 @@ export function AgentHubPage({
         case "x":
           if (selectedAgent) {
             event.preventDefault();
+            if (commandBusy || busyCountRef.current > 0) break;
             if (caps.kill)
               setModal({ kind: "kill", agentId: selectedAgent.id });
             else warn(caps.killWhy ?? contractFor(zhRef.current).kill);
@@ -728,14 +965,17 @@ export function AgentHubPage({
     caps.revive,
     caps.reviveWhy,
     chatOpen,
+    commandBusy,
     drawerOpen,
     filtered,
+    modal,
     openChat,
     reviveAgent,
     select,
     selected,
     selectedAgent,
     view,
+    workspaceTab,
   ]);
 
   const counts = useMemo(() => {
@@ -753,11 +993,13 @@ export function AgentHubPage({
   const mainTask = mapped.mainTask;
   const mainStatus = hubWord(mapped.mainStatus, zh);
   const mainMeta = mapped.mainMeta;
+  // The deck has its own search, so its usage line covers the whole roster.
+  const usageRows = deckView ? mapped.roster : filtered;
   const usage = useMemo(() => {
-    const metrics = filtered
+    const metrics = usageRows
       .map((agent) => agent.metrics)
       .filter((item): item is PreviewMetrics => Boolean(item));
-    if (!metrics.length) return `Usage — · 0/${filtered.length} measured`;
+    if (!metrics.length) return `Usage — · 0/${usageRows.length} measured`;
     const seed = {
       cost: 0,
       durationMs: 0,
@@ -779,8 +1021,8 @@ export function AgentHubPage({
       }),
       seed,
     );
-    return `${fmtCost(total.cost)} · ${fmtDur(total.durationMs)} active agent time · ${total.requests} req · ${total.tools} tools · ${fmtNum(total.tokens)} tok · ${total.timed}/${metrics.length} timed · ${metrics.length}/${filtered.length} measured`;
-  }, [filtered]);
+    return `${fmtCost(total.cost)} · ${fmtDur(total.durationMs)} active agent time · ${total.requests} req · ${total.tools} tools · ${fmtNum(total.tokens)} tok · ${total.timed}/${metrics.length} timed · ${metrics.length}/${usageRows.length} measured`;
+  }, [usageRows]);
 
   const renderList = () => {
     if (!filtered.length) {
@@ -833,6 +1075,7 @@ export function AgentHubPage({
               key={group.head.id}
               head={group.head}
               kids={group.kids}
+              nodes={group.nodes}
               selected={selected}
               now={now}
               onSelect={select}
@@ -870,7 +1113,30 @@ export function AgentHubPage({
   };
   const renderOverview = (agent: HubAgent) => {
     const taskSteps = preview ? previewTaskStepsForAgent(agent.id, zh) : (agents ?? snapshot?.agents ?? []).find(row => row.agentId === agent.id)?.taskSteps;
-    return <>{taskSteps ? <TaskStepsView key={agent.id} state={taskSteps} zh={zh} /> : null}<HubAgentOverview zh={zh} select={select} agent={agent} /></>;
+    return (
+      <HubAgentOverview
+        zh={zh}
+        agent={agent}
+        roster={mapped.roster}
+        now={now}
+        select={select}
+        onOpenMain={onOpenMain}
+        onJobs={() => setTab("jobs")}
+        steps={taskSteps ? <TaskStepsView key={agent.id} state={taskSteps} zh={zh} /> : null}
+        models={
+          <AgentModelDetails
+            client={client}
+            sessionId={snapshot?.sessionId}
+            agentId={agent.id}
+            available={viewingLive && connOnline}
+            capabilities={capabilities}
+            running={agent.status === "running"}
+            previewModel={agent.resolvedModel}
+            previewSaved={!agent.hasLiveSession}
+          />
+        }
+      />
+    );
   };
   const renderJobRow = (row: JobTreeRow<HubJob>, agent?: HubAgent) => <HubJobRow key={row.job.id} selectedJobId={selectedJobId} setSelectedJobId={setSelectedJobId} zh={zh} preview={preview} viewingLive={viewingLive} commandBusy={commandBusy} connOnline={connOnline} client={client} capabilities={capabilities} cancelJob={cancelJob} parentSessionId={parentSessionId} snapshot={snapshot} resyncRequired={resyncRequired} row={row} agent={agent} />;
 
@@ -904,9 +1170,9 @@ export function AgentHubPage({
     );
   };
 
-  const renderDetailBody = (agent: HubAgent) => {
-    if(tab === "btw")return <AgentBtwPane key={`${parentSessionId ?? snapshot?.sessionId}:${agent.id}`} client={client} sessionId={parentSessionId ?? snapshot?.sessionId} agentId={agent.id} available={connOnline && viewingLive && !resyncRequired && agent.kind!=="main" && agent.hasLiveSession && !missingCap(capabilities,"agent.btw.read")}/>;
-    if (tab === "transcript") {
+  const renderDetailBody = (agent: HubAgent, pane: HubTab) => {
+    if (pane === "btw") return <AgentBtwPane key={`${parentSessionId ?? snapshot?.sessionId}:${agent.id}`} showTarget={false} client={client} sessionId={parentSessionId ?? snapshot?.sessionId} agentId={agent.id} available={connOnline && viewingLive && !resyncRequired && agent.kind !== "main" && agent.hasLiveSession && !missingCap(capabilities, "agent.btw.read")} />;
+    if (pane === "transcript") {
       if (preview) {
         return (
           <>
@@ -915,15 +1181,19 @@ export function AgentHubPage({
                 icon="message"
                 detail={
                   agent.hasTranscript
-                    ? (zh ? "预览模式不读取真实 transcript" : "Preview mode does not read real transcripts")
-                    : "No messages yet."
+                    ? marks
+                      ? (zh ? "预览模式不读取真实 transcript" : "Preview mode does not read real transcripts")
+                      : (zh ? "点击「打开对话」查看完整对话记录。" : "Click Open conversation to view the full transcript.")
+                    : (zh ? "暂无消息。" : "No messages yet.")
                 }
               />
             </div>
-            <div className="hub-ro-banner">
-              <Icon name="lock" extra="sm" />
-              <span>{zh ? "预览模式不调用 Host 写操作" : "Preview mode does not invoke Host write operations"}</span>
-            </div>
+            {marks ? (
+              <div className="hub-ro-banner">
+                <Icon name="lock" extra="sm" />
+                <span>{zh ? "预览模式不调用 Host 写操作" : "Preview mode does not invoke Host write operations"}</span>
+              </div>
+            ) : null}
           </>
         );
       }
@@ -944,6 +1214,7 @@ export function AgentHubPage({
         );
       }
       const page = transcriptPage?.agentId === agent.id ? transcriptPage : null;
+      const currentDraft = draftsByAgent[draftSlot(agent.id)] ?? "";
       return (
         <>
           <div className="hub-transcript" id="hubTranscript">
@@ -957,7 +1228,7 @@ export function AgentHubPage({
               <EmptyBlock
                 icon="message"
                 detail={
-                  agent.hasTranscript ? contract.transcript : "No messages yet."
+                  agent.hasTranscript ? contract.transcript : (zh ? "暂无消息。" : "No messages yet.")
                 }
               />
             ) : null}
@@ -999,15 +1270,19 @@ export function AgentHubPage({
                   : (caps.chatWhy ?? contract.chat)
               }
               aria-label={zh ? "发送消息" : "Send message"}
-              value={draft}
+              value={currentDraft}
               disabled={!caps.chat || commandBusy}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value;
+                const slot = draftSlot(agent.id);
+                setDraftsByAgent((prev) => ({ ...prev, [slot]: value }));
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Escape") event.currentTarget.blur();
                 if (
                   event.key === "Enter" &&
                   !event.nativeEvent.isComposing &&
-                  draft.trim()
+                  currentDraft.trim()
                 ) {
                   event.preventDefault();
                   sendDraft(agent);
@@ -1017,7 +1292,7 @@ export function AgentHubPage({
             <button
               className="btn small primary"
               type="button"
-              disabled={!caps.chat || commandBusy || !draft.trim()}
+              disabled={!caps.chat || commandBusy || !currentDraft.trim()}
               data-tip={caps.chatWhy ?? undefined}
               onClick={() => sendDraft(agent)}
             >
@@ -1036,25 +1311,13 @@ export function AgentHubPage({
         </>
       );
     }
-    if (tab === "jobs") return renderJobs(agent);
-    if (tab === "messages") {
+    if (pane === "jobs") return renderJobs(agent);
+    if (pane === "messages") {
       return (
-        <>
-          <div className="hub-ro-banner" style={{ margin: "0 0 var(--sp-12)" }}>
-            <Icon name="lock" extra="sm" />
-            <span>{contract.irc}</span>
-          </div>
-          <div className="hub-irc-list">
-            <EmptyBlock
-              icon="message"
-              detail={
-                agent.unread > 0
-                  ? (zh ? `${agent.unread} 条未读（内容读取本轮未接入）` : `${agent.unread} unread (content reading not yet wired)`)
-                  : (zh ? "没有与该 Agent 的 IRC 往来" : "No IRC messages with this agent")
-              }
-            />
-          </div>
-        </>
+        <div className="hub-comms">
+          <CommsView comms={comms} rows={commsRows} now={commsNow} replay={null} query="" selectedId={null} only={agent.id}
+            onSelect={(id) => { if (id !== agent.id && mapped.roster.some((row) => row.id === id)) select(id, { scroll: true }); }} d={deckWords} />
+        </div>
       );
     }
     return renderOverview(agent);
@@ -1072,8 +1335,9 @@ export function AgentHubPage({
 
   return (
     <div
-      className={`hub-page${chatOpen && workspaceTab === "agents" ? " is-chat-preview" : ""}${chatClosing && workspaceTab === "agents" ? " is-chat-closing" : ""}`}
+      className={`hub-page${deckShown ? " is-deck" : ""}${chatOpen && workspaceTab === "agents" ? " is-chat-preview" : ""}${chatClosing && workspaceTab === "agents" ? " is-chat-closing" : ""}`}
       id="hubRoot"
+      ref={rootRef}
     >
       <WorkspaceTabs<"agents" | "jobs" | "services">
         id="hub-workspace"
@@ -1208,10 +1472,21 @@ export function AgentHubPage({
         </div>
 
         <div className="hub-roster-head">
-          <div className="seg" role="group" aria-label={zh ? "Roster 视图" : "Roster view"}>
+          <div className="seg hub-view-seg" role="group" aria-label={zh ? "Roster 视图" : "Roster view"}>
+            <button
+              type="button"
+              className={view === "deck" ? "active" : undefined}
+              aria-pressed={view === "deck"}
+              data-tip={zh ? "编队、时间线、星图与通讯；详情仍在右侧" : "Crew, timeline, orbit and comms; details stay on the right"}
+              onClick={() => setView("deck")}
+            >
+              <Icon name="formation" extra="sm" />
+              {zh ? "指挥台" : "Deck"}
+            </button>
             <button
               type="button"
               className={view === "flat" ? "active" : undefined}
+              aria-pressed={view === "flat"}
               onClick={() => setView("flat")}
             >
               {zh ? "平铺" : "Flat"}
@@ -1219,13 +1494,15 @@ export function AgentHubPage({
             <button
               type="button"
               className={view === "tree" ? "active" : undefined}
+              aria-pressed={view === "tree"}
               onClick={() => setView("tree")}
             >
               {zh ? "按父代理" : "By parent"}
             </button>
           </div>
+          {deckView ? null : <>
           <div className="hub-status-counts">
-            {(["running", "idle", "parked", "aborted"] as const)
+            {(["running", "idle", "parked", "aborted", "released"] as const)
               .filter((key) => counts[key])
               .map((key) => (
                 <span className="sc-item" key={key}>
@@ -1247,9 +1524,10 @@ export function AgentHubPage({
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onSearchKeyDown}
           />
+          </>}
         </div>
 
-        {filtered.length ? (
+        {usageRows.length ? (
           <div className="hub-usage">
             <span>{usage}</span>
             <span className="spacer" />
@@ -1270,18 +1548,40 @@ export function AgentHubPage({
         ) : null}
 
         <div
-          className={`hub-cols${chatOpen ? " is-chat-preview" : ""}`}
+          className={`hub-cols${deckView ? " is-deck" : ""}${chatOpen ? " is-chat-preview" : ""}`}
           ref={colsRef}
         >
-          <div
-            className={`hub-list${view === "tree" ? " tree" : ""}`}
-            id="hubList"
-            ref={listRef}
-            role="listbox"
-            aria-label={zh ? "子 Agent 列表" : "Subagent list"}
-          >
-            {renderList()}
-          </div>
+          {deckView ? (
+            <div className={`hub-deck-col${swapClass}`} key="deck" ref={deckRef}>
+              <AgentDeck
+                instanceKey={`${deckScope}|hub`}
+                scope={deckScope}
+                agents={deckAgents}
+                ready={preview || persistedReady}
+                source={deckSource}
+                visible={deckShown}
+                width={deckSize.width}
+                height={deckSize.height}
+                region="hub"
+                openedIds={[]}
+                links={deckLinks}
+                commandContext={{ client, capabilities, preview, marks, viewingLive, online: connOnline }}
+                comms={comms}
+                embedded={deckEmbedding}
+              />
+            </div>
+          ) : (
+            <div
+              className={`hub-list${view === "tree" ? " tree" : ""}${swapClass}`}
+              key="list"
+              id="hubList"
+              ref={listRef}
+              role="listbox"
+              aria-label={zh ? "子 Agent 列表" : "Subagent list"}
+            >
+              {renderList()}
+            </div>
+          )}
           {selectedAgent ? (
             <div
               className={`hub-detail${drawerOpen || !narrow ? " open" : ""}${chatOpen || chatClosing ? " is-chat" : ""}`}
@@ -1304,13 +1604,18 @@ export function AgentHubPage({
                         <>
                           <div className="hub-chat-bar">
                             <button
-                              className="btn small outline"
+                              className="btn small ghost"
                               type="button"
                               onClick={() => setChatOpen(false)}
                             >
                               <Icon name="arrow-l" extra="sm" />
                               {zh ? "返回" : "Back"}
                             </button>
+                            <span className="hub-chat-who" key={selectedAgent.id}>
+                              <HubSigil agent={selectedAgent} size={22} />
+                              <b title={selectedAgent.name}>{selectedAgent.name}</b>
+                              <HubStatusPill agent={selectedAgent} zh={zh} />
+                            </span>
                           </div>
                           <SubagentConversationPane
                             target={hubChatTarget(selectedAgent)}
@@ -1342,194 +1647,66 @@ export function AgentHubPage({
                         </>
                       ) : (
                         <>
-                          <div className="hub-detail-head">
-                            <div className="hd-title">
-                              <button
-                                className="icon-btn small hub-drawer-back"
-                                type="button"
-                                data-tip={zh ? "返回" : "Back"}
-                                aria-label={zh ? "返回" : "Back"}
-                                onClick={() => setDrawerOpen(false)}
-                              >
-                                <Icon name="arrow-l" extra="sm" />
-                              </button>
-                              <b>{selectedAgent.name}</b>
-
-                              <span
-                                className={`chip ${selectedAgent.kind === "advisor" ? "gray" : "purple"} xs`}
-                              >
-                                {selectedAgent.kind === "advisor"
-                                  ? zh
-                                    ? "顾问"
-                                    : "Advisor"
-                                  : zh
-                                    ? "子代理"
-                                    : "Subagent"}
-                              </span>
-                              {selectedAgent.parentId ? (
-                                <button
-                                  className="hub-child-link tiny"
-                                  type="button"
-                                  onClick={() =>
-                                    !mapped.roster.some(
-                                      (agent) =>
-                                        agent.id === selectedAgent.parentId,
-                                    )
-                                      ? onOpenMain()
-                                      : select(selectedAgent.parentId!, {
-                                          scroll: true,
-                                        })
-                                  }
-                                >
-                                  {zh ? "父代理" : "Parent"}:{" "}
-                                  {mapped.roster.find(
-                                    (agent) =>
-                                      agent.id === selectedAgent.parentId,
-                                  )?.name ??
-                                    (selectedAgent.parentId === "main"
-                                      ? zh
-                                        ? "主对话"
-                                        : "Main"
-                                      : selectedAgent.parentId)}
-                                </button>
-                              ) : null}
-                              <span className="spacer" />
-                              <span
-                                className={`hub-act ${activityPill(selectedAgent, zh).cls}`}
-                              >
-                                {activityPill(selectedAgent, zh).label}
-                              </span>
-                            </div>
-                            <div className="hd-sub">
-                              <span className="hub-status-line">
-                                <span
-                                  className={`dot ${STATUS_DOT[selectedAgent.status]}`}
-                                />
-                                {hubWord(
-                                  STATUS_LABEL[selectedAgent.status],
-                                  zh,
-                                )}{" "}
-                                ·{" "}
-                                {(() => {
-                                  const durationMs = hubDurationMs(
-                                    selectedAgent,
-                                    now,
-                                  );
-                                  return durationMs === undefined
-                                    ? "—"
-                                    : fmtDur(durationMs);
-                                })()}{" "}
-                                · {zh ? "最近活动" : "Last active"}{" "}
-                                {fmtAge(selectedAgent.lastActivity, now, zh)}
-                              </span>
-                              {selectedAgent.modelRole ? (
-                                <span className="hub-role">
-                                  {selectedAgent.modelRole}
-                                </span>
-                              ) : null}
-                              {selectedAgent.fallback ? (
-                                <span className="hub-model hub-fallback">
-                                  {zh ? "回退模型" : "Fallback"} →{" "}
-                                  {selectedAgent.fallback}
-                                </span>
-                              ) : selectedAgent.resolvedModel ? (
-                                <span className="hub-model">
-                                  {selectedAgent.resolvedModel}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                          <details className="small hub-native-details">
-                            <summary>
-                              {zh
-                                ? "身份与原始状态"
-                                : "Identity and native state"}
-                            </summary>
-                            <p className="mono">
-                              {selectedAgent.id} ·{" "}
-                              {selectedAgent.rawStatus ?? selectedAgent.status}{" "}
-                              · {selectedAgent.kind}
-                            </p>
-                          </details>
-                          <AgentModelDetails
-                            client={client}
-                            sessionId={snapshot?.sessionId}
-                            agentId={selectedAgent.id}
-                            available={viewingLive && connOnline}
-                            capabilities={capabilities}
-                            running={selectedAgent.status === "running"}
-                            previewModel={selectedAgent.resolvedModel}
-                            previewSaved={!selectedAgent.hasLiveSession}
+                          <HubDossierHead
+                            agent={selectedAgent}
+                            parentName={selectedParentName}
+                            now={now}
+                            zh={zh}
+                            caps={caps}
+                            busy={commandBusy}
+                            scrolled={bodyScrolled}
+                            onBack={() => setDrawerOpen(false)}
+                            onParent={() =>
+                              selectedAgent.parentId && inRoster(selectedAgent.parentId)
+                                ? select(selectedAgent.parentId, { scroll: true })
+                                : onOpenMain()
+                            }
+                            onOpen={() => openChat(selectedAgent.id)}
+                            onRevive={() => reviveAgent(selectedAgent)}
+                            onKill={() => {
+                              if (!caps.kill) warn(caps.killWhy ?? contract.kill);
+                              else setModal({ kind: "kill", agentId: selectedAgent.id });
+                            }}
+                            onRelease={() => releaseAgent(selectedAgent)}
                           />
-                          <div className="hub-detail-actions">
-                            <button
-                              className="btn small primary"
-                              type="button"
-                              disabled={!caps.open}
-                              data-tip={caps.openWhy ?? undefined}
-                              onClick={() => openChat(selectedAgent.id)}
-                            >
-                              <Icon name="external" extra="sm" />
-                              {zh ? "打开" : "Open"}
-                            </button>
-                            <button
-                              className="btn small outline"
-                              type="button"
-                              disabled={!caps.chat || commandBusy}
-                              data-tip={caps.chatWhy ?? undefined}
-                              onClick={() => openChat(selectedAgent.id)}
-                            >
-                              <Icon name="message" extra="sm" />
-                              {zh ? "发消息" : "Send message"}
-                            </button>
-                            <button
-                              className="btn small outline"
-                              type="button"
-                              disabled={!caps.revive || commandBusy}
-                              data-tip={caps.reviveWhy ?? undefined}
-                              onClick={() => reviveAgent(selectedAgent)}
-                            >
-                              <Icon name="refresh" extra="sm" />
-                              {zh ? "恢复" : "Revive"}
-                            </button>
-                            <button
-                              className="btn small danger"
-                              type="button"
-                              disabled={!caps.kill || commandBusy}
-                              data-tip={caps.killWhy ?? undefined}
-                              onClick={() => {
-                                if (!caps.kill)
-                                  warn(caps.killWhy ?? contract.kill);
-                                else
-                                  setModal({
-                                    kind: "kill",
-                                    agentId: selectedAgent.id,
-                                  });
-                              }}
-                            >
-                              <Icon name="stop" extra="sm" />
-                              {zh ? "停止" : "Stop"}
-                            </button>
-                            {selectedAgent.status === "aborted" ? (
-                              <button
-                                className="btn small outline"
-                                type="button"
-                                disabled={!caps.release || commandBusy}
-                                data-tip={caps.releaseWhy ?? undefined}
-                                onClick={() => releaseAgent(selectedAgent)}
-                              >
-                                <Icon name="x" extra="sm" />
-                                {zh ? "释放" : "Release"}
-                              </button>
-                            ) : null}
-                          </div>
                           <div className="hub-detail-tabs">
                             <SlidingTabs id="hubTabs" ariaLabel={zh ? "Agent 详情" : "Agent details"} value={tab} orientation="horizontal" className="tabs"
-                              items={TABS.map(([id, label]) => ({ id, label: hubWord(label, zh), icon: "bot", buttonId: `hub-tab-${id}`, panelId: "hubDetailBody" }))}
+                              items={TABS.map(([id, label, icon]) => {
+                                const count = id === "jobs" ? selectedAgent.activeJobIds.length : id === "messages" ? selectedAgent.unread : 0;
+                                return {
+                                  id,
+                                  label: hubWord(label, zh),
+                                  icon,
+                                  buttonId: `hub-tab-${id}`,
+                                  panelId: `hub-pane-${id}`,
+                                  ...(count > 0 ? { badge: <span className="hub-tab-badge">{count}</span> } : {}),
+                                };
+                              })}
                               onChange={id => { setTab(id); setNotice(null); }} />
                           </div>
-                          <div className="hub-detail-body" id="hubDetailBody">
-                            {renderDetailBody(selectedAgent)}
+                          <div className="hub-detail-body" ref={paneStageRef}>
+                            {detailPanes.map((pane) => {
+                              const paneRole = tabPaneRole(pane, paneIncoming, paneOutgoing, paneLive);
+                              return (
+                                <div
+                                  key={pane}
+                                  className={`hub-pane${paneRole ? ` tab-pane-${paneRole}-${paneDir}` : ""}`}
+                                  data-tab-pane={pane}
+                                  data-pane={pane}
+                                  id={`hub-pane-${pane}`}
+                                  role="tabpanel"
+                                  aria-labelledby={`hub-tab-${pane}`}
+                                  onScroll={(event) => {
+                                    if (pane === paneIncoming) setBodyScrolled(event.currentTarget.scrollTop > 0);
+                                  }}
+                                  {...(paneRole === "leave" ? { "aria-hidden": true, inert: true } : {})}
+                                >
+                                  <div className="hub-pane-inner" key={selectedAgent.id}>
+                                    {renderDetailBody(selectedAgent, pane)}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </>
                       )}
@@ -1543,7 +1720,9 @@ export function AgentHubPage({
               <div className="hub-empty-list" style={{ border: "none" }}>
                 <Icon name="cursor" />
                 <b>{zh ? "未选择 Agent" : "No agent selected"}</b>
-                <span>{zh ? "从左侧列表选择一个子 Agent 查看详情。" : "Select a subagent from the list to view details."}</span>
+                <span>{deckView
+                  ? (zh ? "在左侧指挥台的编队、时间线或星图中选择一个子 Agent。" : "Pick a subagent in the deck's crew, timeline or orbit.")
+                  : (zh ? "从左侧列表选择一个子 Agent 查看详情。" : "Select a subagent from the list to view details.")}</span>
               </div>
             </div>
           )}
@@ -1559,7 +1738,9 @@ export function AgentHubPage({
         <div
           className="modal-backdrop"
           role="presentation"
-          onMouseDown={() => setModal(null)}
+          onMouseDown={() => {
+            if (!commandBusy && !spawnLock.current) setModal(null);
+          }}
         >
           <div
             className={`modal hub-modal${modal.kind === "spawn" ? " is-spawn" : ""}`}

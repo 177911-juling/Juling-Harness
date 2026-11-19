@@ -33,15 +33,23 @@ export function applyTitleBarOverlay(
   window: { setTitleBarOverlay?(options: { color: string; symbolColor: string; height: number }): void; setBackgroundColor?(color: string): void },
   payload: TitlebarThemePayload,
   platform: NodeJS.Platform = process.platform,
+  options?: { readonly overlay?: boolean },
 ): void {
   const colors = payload.tint ?? TITLEBAR_OVERLAY[payload.theme];
-  if (canRecolorTitleBarOverlay(platform)) window.setTitleBarOverlay?.({ ...colors, height: TITLEBAR_OVERLAY_HEIGHT });
+  if (options?.overlay !== false && canRecolorTitleBarOverlay(platform)) {
+    try {
+      window.setTitleBarOverlay?.({ ...colors, height: TITLEBAR_OVERLAY_HEIGHT });
+    } catch {
+      // Frameless floating windows have no native caption-button overlay.
+    }
+  }
   window.setBackgroundColor?.(WINDOW_BACKGROUND[payload.theme]);
   nativeTheme.themeSource = payload.theme;
 }
 
 export function registerTitleBarOverlayIpc(options: {
   readonly isTrustedSender: (sender: Pick<WebContents, "isDestroyed" | "getURL">) => boolean;
+  readonly hasTitleBarOverlay?: (sender: WebContents) => boolean;
 }): () => void {
   ipcMain.removeHandler(TITLEBAR_OVERLAY_CHANNEL);
   ipcMain.handle(TITLEBAR_OVERLAY_CHANNEL, (event, rawPayload: unknown) => {
@@ -50,7 +58,9 @@ export function registerTitleBarOverlayIpc(options: {
     if (payload === undefined) return;
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window === null) return;
-    applyTitleBarOverlay(window, payload);
+    applyTitleBarOverlay(window, payload, process.platform, {
+      overlay: options.hasTitleBarOverlay ? options.hasTitleBarOverlay(event.sender) : true,
+    });
   });
   return () => {
     ipcMain.removeHandler(TITLEBAR_OVERLAY_CHANNEL);

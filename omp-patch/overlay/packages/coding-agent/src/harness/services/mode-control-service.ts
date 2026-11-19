@@ -438,6 +438,9 @@ export class HarnessModeControlService {
 		if (options?.deferModelRestore !== true) this.#planPreviousModelState = undefined;
 		this.#pendingPlan = undefined;
 		this.#planReviewAbortPending = false;
+		if (this.#review && options?.claimedReviewId === undefined) {
+			this.#finishReview(this.#review, undefined, "local");
+		}
 		this.session.sessionManager.appendModeChange(
 			"none",
 			options?.approvedPlanFilePath ? { approvedPlanFilePath: options.approvedPlanFilePath } : undefined,

@@ -22,6 +22,25 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
   const senders = new Set<Sender>();
   const senderCleanups = new Map<Sender, () => void>();
   const contexts = new Map<string, { id: string; generation: number; owner: Sender; transport: ClientTransport; off: () => void }>();
+  const pruneContexts = (onlyId?: string): void => {
+    for (const [contextId, entry] of contexts) {
+      if (onlyId !== undefined && entry.id !== onlyId) continue;
+      let alive = false;
+      if (typeof manager.get === "function") {
+        try {
+          const remote = manager.get(entry.id);
+          alive = remote.generation === entry.generation;
+        } catch {
+          alive = false;
+        }
+      }
+      if (!alive) {
+        contexts.delete(contextId);
+        entry.off();
+        void entry.transport.close().catch(() => {});
+      }
+    }
+  };
   const target = (sender: Sender, id: string, contextId?: unknown) => {
     const remote = manager.get(id);
     if (contextId === undefined) return remote.transport;
@@ -88,7 +107,11 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
   };
   handle(REMOTE_CHANNELS.list, () => manager.list());
   handle(REMOTE_CHANNELS.save, (_sender, profile) => manager.save(profile as Omit<RemoteConnectionProfile, "id"> & { id?: string }));
-  handle(REMOTE_CHANNELS.remove, (_sender, id) => manager.remove(idOf(id)));
+  handle(REMOTE_CHANNELS.remove, async (_sender, id) => {
+    const target = idOf(id);
+    try { return await manager.remove(target); }
+    finally { pruneContexts(target); }
+  });
   handle(REMOTE_CHANNELS.connect, async (sender, id, input) => {
     const credentials = input as RemoteCredentials | undefined;
     const target = idOf(id);
@@ -116,11 +139,12 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
   handle(REMOTE_CHANNELS.installRuntime, (_sender, id) => options.installRuntime(idOf(id)));
   handle(REMOTE_CHANNELS.approve, (_sender, id) => manager.approveDeployment(idOf(id)));
   handle(REMOTE_CHANNELS.retryNetwork, (_sender, id) => read(id, remote => remote.transport.peer.request("network.reset")));
-  handle(REMOTE_CHANNELS.disconnect, (_sender, id) => {
+  handle(REMOTE_CHANNELS.disconnect, async (_sender, id) => {
     const target = idOf(id);
     const attempt = connecting.get(target);
     if (attempt) { attempt.controller.abort(); attempt.clearCredentials(); }
-    return manager.disconnect(target);
+    try { return await manager.disconnect(target); }
+    finally { pruneContexts(target); }
   });
   handle(REMOTE_CHANNELS.select, (_sender, id) => manager.select(id === null ? null : idOf(id)));
   handle(REMOTE_CHANNELS.openContext, async (sender, id, scope) => {
@@ -157,7 +181,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
   });
   const emit = (channel: string, payload: unknown): void => { for (const sender of [...senders]) { if (sender.isDestroyed()) releaseSender(sender); else sender.send(channel, payload); } };
   const offEvent = manager.onEvent(event => emit(REMOTE_CHANNELS.event, event));
-  const offChanged = manager.onChanged(() => emit(REMOTE_CHANNELS.changed, {}));
+  const offChanged = manager.onChanged(() => { pruneContexts(); emit(REMOTE_CHANNELS.changed, {}); });
   return { cancelPending, dispose() {
     disposed = true;
     void cancelPending().catch(() => {});

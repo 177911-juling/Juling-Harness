@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-18
+
+### Changed
+
+- 缩短工作区内切换会话时的等待，保留各会话的草稿、滚动位置和已展开内容。重新打开近期会话时优先复用已加载首屏。
+- 减少对话流式输出期间的重复渲染、重排和语法高亮工作，归档读取复用索引，关闭会话时回收相关终端资源。
+- 开发环境的生产预览会复用输入未变且文件完整的构建产物，启动时继续验证 Runtime 签名和身份。
+- 内置 Runtime 更新为 `18.20.2-harness.14`。
+
+### Fixed
+
+- 保存自定义提供商或模型时，保留数字形式、含引号或 YAML 特殊字符的字符串凭据，修复重复编辑后对话模型列表丢失自定义模型的问题。 [#42](https://github.com/177911-juling/juling-harness/issues/42) · [#43](https://github.com/177911-juling/juling-harness/pull/43)
+- 用户消息中的 Markdown 链接始终带下划线，在深浅主题、键盘聚焦及选中文本时保持可读。 [#45](https://github.com/177911-juling/juling-harness/issues/45)
+- 修复会话归档失败回滚时可能丢失原会话、下次启动被误判为更新失败、以及空闲会话无法按预期回收的问题。
+- 修复二级页面的审批、提问和表单有时不可见，以及多窗口重复执行快捷键的问题。切换界面语言时保留正在填写的草稿和连接。
+- 修复预览数据可能写入真实偏好、关闭未保存的文件时对话框卡住，以及中文输入补全斜杠命令时可能清除已附加图片的问题。
+- 评测图片导入仅使用评测目录内的有效文件。Runtime 修复了流式任务异常结束后可能出现的未处理错误。
+
+## [0.2.3] - 2026-11-18
+
+### Added
+
+- Linux x64 桌面客户端（`AppImage` 与 `deb`）接入应用内差分更新：支持在「设置 → 更新与维护」自动检查、验签、后台差分下载与重启更新；`deb` 经系统 polkit 授权后由 `apt` 安装，不受外部包升级干扰，新版启动失败时自动尝试回滚至上一版本。0.2.2 及之前的 Linux 安装需先手动安装一次本版安装包以启用后续应用内更新。详见 [Linux 客户端说明](docs/linux.md#更新与卸载)。
+- Agent Hub 的「代理」页新增「指挥台」名册视图，排在「平铺 / 按父代理」之前，每次进入 Agent Hub 都先打开指挥台。左侧是指挥台的编队、时间线、星图和通讯，读取与工作台指挥台同一段运行记录；右侧仍是 Hub 详情，两边共用选中项，停止、恢复、发消息和 BTW 沿用 Hub 现有的确认与权限。详见[停靠说明](docs/workbench-docking.md#agents-与子-agent-对话)。
+- Agent 之间的消息接入了真实数据（内置 Runtime 升至 `18.20.2-harness.8`）。Agent Hub 详情的「消息」标签按时间列出所选 Agent 发出和收到的消息，包括 `@` 的对象、回复的原文和进度标记；点对方的名字会切到那个 Agent。指挥台的「通讯」视图和星图连线也改用同一份真实记录，一次广播合并为一条。消息从各 Agent 会话里已经送达的记录读出，因此停驻、结束的 Agent 和重启后的历史也能看到；旧 Runtime 会显示「读不到 Agent 间通讯」。
+- 模型配置从供应商接口拉取可用模型后，支持按名称或 ID 搜索、按「全部 / 新增 / 待匹配 / 已选」筛选与批量勾选；命中多个内置目录项的模型可直接切换目录匹配以自动补全推荐参数。
+
+### Changed
+
+- 选择性提交面板里的参与 Agent 和每个改动片段的归属，改用与指挥台一致的像素头像：同一个 Agent 在指挥台、Agent Hub 和提交面板里是同一张脸，主代理带皇冠，仍在运行的睁眼。人工或未知来源的改动仍显示人像图标。
+- 重新设计 Agent Hub 的右侧详情面板（Agent 档案）。
+  - 头部依次是父代理入口、与指挥台一致的像素头像、唯一的状态标签、运行时长、模型（回退模型琥珀色标出），以及按状态出现的操作：「打开对话」合并了原来的「打开」和「发消息」；「恢复」只对停驻的代理出现，「释放」只对已结束的代理出现。
+  - 标签栏改为下划线式，每个标签有各自的图标；「后台任务」和「消息」标签显示数量角标。切换标签时内容按方向交叠过渡。
+  - 概览分为当前、任务、用量（数据格加上下文条）、谱系、产物与变更；「模型与思考」和「技术信息」收进底部的折叠节。
+  - BTW 铺满整个面板。
+  - 列表视图下详情列固定在视口内，长列表滚动时不会跟着滚走；对话面顶栏显示当前代理。
+- 新建但尚未发送消息的空白对话保持欢迎引导界面，并在主动展开前默认收起右侧工具栏；左侧导航栏「工作台」入口换用分栏工作台图标。
+- 渲染层新增独立的官网实时演示嵌入模式（`website-embed.html`，不进入桌面安装包），官网改版并直接嵌入可交互界面；生产预览隔离运行目录且不再随源码改动自动刷新。
+
+### Fixed
+
+- 配置更改审批按「允许一次」或「本会话允许」绑定确认凭据，修复点击批准后提交失败、最终超时的问题（[#32](https://github.com/177911-juling/juling-harness/issues/32)、[#33](https://github.com/177911-juling/juling-harness/pull/33)）。
+- 工作区模型列表与刷新操作先连接当前 Runtime，避免已配置模型一直显示未验证、对话模型列表为空或刷新本地缓存无法完成（[#33](https://github.com/177911-juling/juling-harness/pull/33)）。
+- 会话标题已内嵌 emoji 和短码时不再额外绘制一份标签，避免工作区、侧栏和历史会话标题重复显示（[#34](https://github.com/177911-juling/juling-harness/issues/34)、[#35](https://github.com/177911-juling/juling-harness/pull/35)）。
+- 未初始化的客户端首次提交命令前建立回执订阅，修复模型配置、子代理开关及同类操作已生效却一直等待、需手动刷新才显示的问题（[#36](https://github.com/177911-juling/juling-harness/issues/36)、[#37](https://github.com/177911-juling/juling-harness/pull/37)）。
+- 启动时识别失效工作区并回退到有效项目；诊断页可重新选择项目、新建对话或清除失效记录。清理前保存注册表副本，保留项目文件和历史会话，避免旧安装目录与保存的失效会话阻断恢复（[#31](https://github.com/177911-juling/juling-harness/issues/31)、[#39](https://github.com/177911-juling/juling-harness/pull/39)）。
+- 对话模型目录从当前会话的 Runtime 读取，避免项目共享上下文返回空目录或串用其他会话的授权模型；保留辅助读取等待正文呈现的调度（[#38](https://github.com/177911-juling/juling-harness/issues/38)、[#40](https://github.com/177911-juling/juling-harness/pull/40)）。
+
+## [0.2.2] - 2026-11-16
+
+### Added
+
+- 新增 Linux x64 桌面客户端，提供 AppImage 和 deb 安装包。以 Ubuntu 24.04、glibc 2.39 和支持 AVX2 的 x64 处理器为基线；安装包内含 Runtime 和原生终端。Linux 桌面手动下载安装包升级，Runtime 仍可在应用内更新。详见 [Linux 客户端说明](docs/linux.md)（[#5](https://github.com/177911-juling/juling-harness/issues/5)、[#22](https://github.com/177911-juling/juling-harness/pull/22)）。
+- 新增[文件浏览器](docs/file-browser.md)，可浏览本机或 SSH 目标上的项目外文件。支持树、列表和分栏视图、固定文件夹、筛选，以及在内置窗口中打开和编辑文件；本机还可使用系统打开方式和回收站。
+- SSH 工作区终端可以附加 tmux 3.2 及以上版本的会话，查看窗口和分屏、调整布局、隐藏窗口以及断线后重新附加。退出 Harness 会分离连接，远端会话继续运行。详见 [tmux 使用说明](docs/tmux.md)。
+- Agents 放到侧栏、底栏或浮窗后有了新的指挥台：可以按派生关系查看编队，在时间线回看本次运行中记录的状态，也可以用星图查看 Agent 之间的层级。选中 Agent 后可查看详情、打开对话或发起 BTW；停止和恢复沿用现有的确认与权限。Agent 间通讯暂未接入真实消息。
+- 新增四档界面光效：关闭、柔和、标准和绚丽，可在外观设置中调整。
+- 接入 OMP 18.20.2 的选择性提交和输入历史，以及模型授权目录、Antigravity 就绪状态、Provider 政策和 Benchmark 账户选择。选择性提交支持先查看选中的文件和改动，再确认提交。详见 [18.20.2 适配交接](docs/migrations/omp-18.20.2-frontend-handoff.md)。
+
 ### Changed
 
 - **合入 OMP Studio 0.2.2 工作台能力**：在保留 Juling 品牌、Quiet Precision 主题和既有 Runtime 适配的前提下，接收上游 0.2.2 的 78 个提交 —— 文件浏览器（本机 / SSH 项目外文件）、SSH tmux 附加、Agent 指挥台（编队 / 时间线 / 星图）、选择性提交、输入历史、原生表单题组、浏览器原生页面与 Console/Network、GitHub Actions 展开、四档光效以及补全的英文界面。Runtime pin 同步升级到 **OMP 18.20.2**，Harness patchset 为 `18.20.2-harness.13`。
@@ -540,7 +599,9 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 Juling Harness 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/177911-juling/juling-harness/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/177911-juling/juling-harness/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/177911-juling/juling-harness/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/177911-juling/juling-harness/compare/v0.2.2...v0.2.3
 [0.2.0]: https://github.com/177911-juling/juling-harness/compare/v0.1.17...v0.2.0
 [0.1.17]: https://github.com/177911-juling/juling-harness/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/177911-juling/juling-harness/compare/v0.1.15...v0.1.16

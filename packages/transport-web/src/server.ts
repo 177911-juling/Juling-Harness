@@ -30,7 +30,17 @@ function token(bytes = 24): string { return randomBytes(bytes).toString("base64u
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string,string> = {}): void {
   const data = JSON.stringify(body); res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", ...headers }); res.end(data);
 }
-function parseCookies(value: string | undefined): Record<string,string> { const out: Record<string,string> = {}; for (const p of (value ?? "").split(";")) { const i = p.indexOf("="); if (i > 0) out[p.slice(0,i).trim()] = decodeURIComponent(p.slice(i+1).trim()); } return out; }
+function parseCookies(value: string | undefined): Record<string,string> {
+  const out: Record<string,string> = {};
+  for (const p of (value ?? "").split(";")) {
+    const i = p.indexOf("=");
+    if (i <= 0) continue;
+    const key = p.slice(0, i).trim();
+    if (!key) continue;
+    try { out[key] = decodeURIComponent(p.slice(i + 1).trim()); } catch { /* ignore malformed cookie value */ }
+  }
+  return out;
+}
 
 /** Loopback HTTP adapter implementing pairing, session/CSRF and semantic query/command routes. */
 export class LoopbackWebAdapter {
@@ -44,6 +54,12 @@ export class LoopbackWebAdapter {
   }
   get pairingCode(): string { return this.#pairing.code; }
   private now(): number { return (this.#options.now ?? Date.now)(); }
+  private pruneSessions(): void {
+    const now = this.now();
+    for (const [id, session] of this.#sessions) {
+      if (session.revoked || session.expiresAt <= now) void this.closeSession(id, session).catch(() => {});
+    }
+  }
   private originAllowed(req: IncomingMessage, allowSameOriginGet = false): boolean {
     const origin = req.headers.origin;
     if (origin !== undefined) return typeof origin === "string" && this.#options.origins.includes(origin);
@@ -64,6 +80,7 @@ export class LoopbackWebAdapter {
     return session.closing;
   }
   private session(req: IncomingMessage): [string, Session] | undefined {
+    this.pruneSessions();
     const id = parseCookies(req.headers.cookie).harness_session;
     if (!id) return;
     const session = this.#sessions.get(id);
@@ -90,6 +107,7 @@ export class LoopbackWebAdapter {
     const path = (req.url ?? "").split("?")[0];
     try {
       if (path === "/api/v1/pair" && req.method === "POST") {
+        this.pruneSessions();
         const b = await this.body(req); const code = b !== null && typeof b === "object" && "code" in b ? String((b as { code?: unknown }).code ?? "") : "";
         if (this.#pairing.used || this.#pairing.expiresAt <= this.now() || code.length !== this.#pairing.code.length || !timingSafeEqual(Buffer.from(code), Buffer.from(this.#pairing.code))) return json(res, 401, { error: "unauthenticated" });
         this.#pairing.used = true; const sid = token(32), csrf = token(24); const s: Session = { contexts: new Map(), csrf, expiresAt: this.now()+this.#options.sessionTtlMs, scope: { scope: "all" }, outstanding: 0, revoked: false }; this.#sessions.set(sid,s);

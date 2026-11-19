@@ -773,6 +773,7 @@ function buildFacade(context: FacadeContext): HarnessHostClientFacade {
       deleteService = new HarnessSessionDeleteService({
         allowedCwd: cwd,
         purgeRows: input => context.sessionPurge.run(input),
+        timeTravel: timeTravelService(context.profileDirectory),
         isResident: (sessionId) =>
           context.runtimeSession?.isResident?.(sessionId) === true
           || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
@@ -1157,6 +1158,7 @@ async function openSessionContext(root: FacadeContext, scope: import("@juling-ha
       catalog: createWorkspaceSessionCatalog(() => workspace.current.cwd, async id => (await resolveWorkspace(id)).cwd),
       ...(root.seams.workspaces ? { workspaces: {
         list,
+        ...(root.seams.workspaces.forgetUnavailable ? { forgetUnavailable: () => root.seams.workspaces!.forgetUnavailable!() } : {}),
         open: async ({ workspaceId }) => {
           if (workspaceId !== workspace.current.workspaceId) {
             workspace.current = await resolveWorkspace(workspaceId);

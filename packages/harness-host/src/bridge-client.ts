@@ -133,6 +133,7 @@ export class HarnessBridgeClient {
   #hello: HarnessHelloResponse | undefined;
   #readyDataListener: ((chunk: Buffer) => void) | undefined;
   #readyDecoder: FrameDecoder | undefined;
+  #snapshotPromise: Promise<HarnessSnapshotResponse> | undefined;
   readonly #pendingRequests = new Map<string, PendingRequest>();
   readonly #pendingComputerQueries = new Map<string, PendingComputerQuery>();
   readonly #computerListeners = new Set<(event: HarnessComputerEventEnvelope) => void>();
@@ -202,6 +203,7 @@ export class HarnessBridgeClient {
     this.#state = "disconnected";
     this.#detachReadyListener();
     this.#readyDecoder = undefined;
+    this.#snapshotPromise = undefined;
     this.#rejectPending("OUTCOME_UNKNOWN");
     this.#socket?.destroy();
     this.#socket = undefined;
@@ -219,6 +221,7 @@ export class HarnessBridgeClient {
     this.#state = "closed";
     this.#detachReadyListener();
     this.#readyDecoder = undefined;
+    this.#snapshotPromise = undefined;
     this.#rejectPending("OUTCOME_UNKNOWN");
     this.#socket?.destroy();
     this.#socket = undefined;
@@ -226,6 +229,9 @@ export class HarnessBridgeClient {
   }
 
   async requestSnapshot(): Promise<HarnessSnapshotResponse> {
+    if (this.#state === "snapshotting" && this.#snapshotPromise !== undefined) {
+      return this.#snapshotPromise;
+    }
     if (this.#state !== "negotiated" && this.#state !== "snapshot-required" && this.#state !== "ready") {
       throw new Error(`Cannot request Harness Bridge snapshot from ${this.#state}`);
     }
@@ -248,7 +254,7 @@ export class HarnessBridgeClient {
       operation: { kind: "runtime.snapshot", ...(this.options.onTimeTravelCapture && this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === "timeTravel.capture" && capability.grade !== "unavailable") ? { timeTravelCapture: true } : {}) },
     };
 
-    return new Promise<HarnessSnapshotResponse>((resolve, reject) => {
+    const pending = new Promise<HarnessSnapshotResponse>((resolve, reject) => {
       let settled = false;
       const timer = setTimeout(() => fail("HANDSHAKE_TIMEOUT"), this.options.handshakeTimeoutMs ?? 10_000);
       const cleanup = (): void => {
@@ -323,6 +329,12 @@ export class HarnessBridgeClient {
       socket.once("close", onClose);
       socket.write(encodeFrame(`snapshot:${requestId}`, runtimeEpoch, request));
     });
+    this.#snapshotPromise = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.#snapshotPromise === pending) this.#snapshotPromise = undefined;
+    }
   }
 
   async invoke(request: HarnessRequest, onReceipt?: (receipt: HarnessReceipt) => void, timeoutMs: number | null | undefined = this.options.requestTimeoutMs): Promise<HarnessReceipt> {
@@ -622,10 +634,28 @@ export class HarnessBridgeClient {
 
   async shutdown(): Promise<HarnessReceipt> {
     const runtimeEpoch = this.#runtimeEpoch;
-    if (runtimeEpoch === undefined) throw new Error("Harness Bridge negotiation is incomplete");
+    const socket = this.#socket;
+    if (runtimeEpoch === undefined || socket === undefined) {
+      throw new Error("Harness Bridge negotiation is incomplete");
+    }
     const requestId = (this.options.createRequestId ?? randomUUID)();
     let unsubscribe = (): void => undefined;
+    let onSocketClose = (): void => undefined;
+    let onResync = (): void => undefined;
+    let settled = false;
     const completed = new Promise<void>((resolve) => {
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        unsubscribe();
+        socket.off("close", onSocketClose);
+        this.#resyncListeners.delete(onResync);
+        resolve();
+      };
+      onSocketClose = finish;
+      onResync = finish;
+      socket.once("close", onSocketClose);
+      this.#resyncListeners.add(onResync);
       unsubscribe = this.onEvent(event => {
         if (
           event.event === null ||
@@ -633,8 +663,7 @@ export class HarnessBridgeClient {
           !("kind" in event.event) ||
           event.event.kind !== "runtime.shutdownComplete"
         ) return;
-        unsubscribe();
-        resolve();
+        finish();
       });
     });
     try {
@@ -644,16 +673,27 @@ export class HarnessBridgeClient {
         runtimeEpoch,
         operation: { kind: "runtime.shutdown", drain: true },
       });
-      await completed;
+      if (
+        receipt.status === "completed" &&
+        !settled &&
+        !socket.destroyed &&
+        this.#socket === socket &&
+        this.#state === "ready"
+      ) {
+        await completed;
+      }
       return receipt;
     } finally {
       unsubscribe();
+      socket.off("close", onSocketClose);
+      this.#resyncListeners.delete(onResync);
     }
   }
 
   async #handshake(isReconnect: boolean): Promise<HarnessHelloResponse> {
     this.#state = "connecting";
     this.#readyDecoder = undefined;
+    this.#snapshotPromise = undefined;
     const socket = (this.options.connectSocket ?? createConnection)(this.options.endpoint);
     this.#socket = socket;
     const timeoutMs = this.options.handshakeTimeoutMs ?? 10_000;
@@ -853,7 +893,13 @@ export class HarnessBridgeClient {
       frame.body.type === "harness.receipt"
     ) {
       const receipt = parseHarnessReceipt(frame.body);
-      if (frame.header.runtimeEpoch !== receipt.runtimeEpoch || receipt.runtimeEpoch !== this.#runtimeEpoch) {
+      if (frame.header.runtimeEpoch !== receipt.runtimeEpoch) {
+        throw new Error("Receipt epoch mismatch");
+      }
+      if (this.#runtimeEpoch !== undefined && receipt.runtimeEpoch < this.#runtimeEpoch) {
+        return true;
+      }
+      if (receipt.runtimeEpoch !== this.#runtimeEpoch) {
         throw new Error("Receipt epoch mismatch");
       }
       // A receipt for a request this connection never sent (for example a late
@@ -931,6 +977,7 @@ export class HarnessBridgeClient {
     if (this.#socket === socket) {
       this.#socket = undefined;
       this.#readyDecoder = undefined;
+      this.#snapshotPromise = undefined;
     }
     if (this.#state === "closed" || this.#state === "disconnected" || this.#state === "idle") return;
     this.#state = "disconnected";

@@ -18,8 +18,21 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { hostErrorMessage } from "../hostError";
 import { useWideLayout } from "../layout/useWideLayout";
 import { GitPatch } from "../git/GitPatch";
+import { useOptionalGitWorkspace } from "../git/GitWorkspaceContext";
 import { previewCommitSource, realCommitSource, type SelectiveCommitSource } from "./selectiveCommitSource";
+import { AgentAvatar } from "../agents/AgentAvatar";
 import "./selectiveCommit.css";
+
+/**
+ * The change journal names agents by their Runtime agent id (the same id the Hub
+ * and the deck use) and the session's own agent by OMP's MAIN_AGENT_ID.
+ */
+const MAIN_AGENT_ID = "Main";
+
+/** An agent's face in the draft: the deck's sigil, eyes open while it is still editing. */
+function DraftAgentAvatar({ id, running }: { id: string; running: boolean }) {
+  return <AgentAvatar agentId={id} main={id === MAIN_AGENT_ID} tone={running ? "running" : "idle"} size={14} />;
+}
 
 /** Opened from Git, Changes or `/commit`. `draft` is the native builtin.commit handle. */
 export interface SelectiveCommitIntent {
@@ -40,7 +53,7 @@ export function selectiveCommitHandoff(result: unknown): Omit<SelectiveCommitInt
 
 type Step = "select" | "confirm" | "done";
 type Filter = "all" | SelectiveCommitOwnership;
-type Body = { text: string | null; totalChars: number; nextOffset?: number | undefined; loading: boolean; error?: string };
+type Body = { text: string | null; totalChars: number; nextOffset?: number | undefined; loading: boolean; error?: string; revision?: number | undefined };
 
 const OWNERSHIP: readonly SelectiveCommitOwnership[] = ["own", "other", "review"];
 
@@ -81,7 +94,8 @@ function parseFixes(text: string): Array<string | number> {
 /** Tri-state box drawn from the native selection value; it never infers state from children. */
 function TriBox({ state, label, disabled, onToggle }: { state: SelectiveCommitSelectionState; label: string; disabled?: boolean; onToggle(): void }) {
   return <button type="button" role="checkbox" className="scm-box" aria-checked={state === "all" ? "true" : state === "partial" ? "mixed" : "false"} aria-label={label} disabled={disabled}
-    onClick={event => { event.stopPropagation(); onToggle(); }}>
+    onClick={event => { event.stopPropagation(); onToggle(); }}
+    onKeyDown={event => { if (event.key === " " || event.key === "Enter") event.stopPropagation(); }}>
     {state === "all" ? <Icon name="check" extra="sm" /> : state === "partial" ? <i aria-hidden="true" /> : null}
   </button>;
 }
@@ -100,6 +114,7 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
   const tr = (zhText: string, enText: string) => zh ? zhText : enText;
   const { preview, marks } = usePreviewMode();
   const [wideRef, wide] = useWideLayout<HTMLElement>(760);
+  const gitWorkspace = useOptionalGitWorkspace();
 
   const source = useMemo<SelectiveCommitSource | undefined>(() => {
     if (preview) return previewCommitSource();
@@ -113,6 +128,7 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
   const [step, setStep] = useState<Step>("select");
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState("");
+  const [repoChanged, setRepoChanged] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [onlyText, setOnlyText] = useState("");
   const [scopeText, setScopeText] = useState("");
@@ -129,28 +145,60 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
   const [now, setNow] = useState(() => Date.now());
   const epoch = useRef(0);
   const patchEpoch = useRef(0);
+  const bodyEpoch = useRef(0);
   const held = useRef<{ source: SelectiveCommitSource; draftId: string } | undefined>(undefined);
+  const draftRef = useRef<SelectiveCommitDraft | undefined>(undefined);
+  draftRef.current = draft;
+  const busyRef = useRef<string | undefined>(undefined);
+  busyRef.current = busy;
+  const intentRef = useRef(intent);
+  intentRef.current = intent;
+  const sessionRef = useRef(sessionId);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
-  const releaseHeld = useCallback(() => {
+  const releaseHeld = useCallback((preserveDraftId?: string) => {
     const current = held.current;
     held.current = undefined;
-    if (current) current.source.release(current.draftId);
+    if (current && current.draftId !== preserveDraftId) current.source.release(current.draftId);
   }, []);
   const invalidatePatch = useCallback(() => { patchEpoch.current++; setPatch(undefined); }, []);
+  const invalidateBodies = useCallback(() => { bodyEpoch.current++; setBodies({}); }, []);
   const adopt = useCallback((next: SelectiveCommitDraft) => {
-    if (source && (held.current?.source !== source || held.current?.draftId !== next.view.id)) { releaseHeld(); held.current = { source, draftId: next.view.id }; }
+    if (source && (held.current?.source !== source || held.current?.draftId !== next.view.id)) { releaseHeld(next.view.id); held.current = { source, draftId: next.view.id }; }
+    setRepoChanged(false);
     setDraft(next);
   }, [source, releaseHeld]);
-  const reset = useCallback(() => {
+  const resetState = useCallback((preserveDraftId?: string) => {
     epoch.current += 1;
-    releaseHeld();
-    setDraft(undefined); setFrozen(undefined); setOutcome(undefined); setStep("select"); setBusy(undefined); setError("");
-    setExpanded(new Set()); setFocused(undefined); setBodies({}); invalidatePatch(); setOnlyText("");
+    releaseHeld(preserveDraftId);
+    setDraft(undefined); setFrozen(undefined); setOutcome(undefined); setStep("select"); setBusy(undefined); setError(""); setRepoChanged(false);
+    setExpanded(new Set()); setFocused(undefined); invalidateBodies(); invalidatePatch(); setOnlyText("");
     setSubject(""); setMessageBody(""); setFixes(""); setAmend(false); setNoVerify(false); setInstructions("");
-  }, [releaseHeld, invalidatePatch]);
+  }, [releaseHeld, invalidateBodies, invalidatePatch]);
+  const reset = useCallback(() => { resetState(); }, [resetState]);
 
   /* A draft belongs to one session, Runtime epoch and data source. */
-  useEffect(() => reset, [reset, sessionId, runtimeEpoch, source]);
+  useEffect(() => {
+    const boundSession = sessionId;
+    sessionRef.current = boundSession;
+    return () => {
+      const keepDraftId = mountedRef.current && sessionRef.current === boundSession ? intentRef.current?.draft?.draftId : undefined;
+      resetState(keepDraftId);
+    };
+  }, [resetState, sessionId, runtimeEpoch, source]);
+
+  /* Watch external repository mutations while a draft or frozen preview is open. */
+  useEffect(() => {
+    if (preview || !client?.subscribe || !draft || step === "done") return;
+    const expectedWorkspaceId = gitWorkspace?.repository?.workspaceId;
+    return client.subscribe({ scope: "all" }, event => {
+      if (event.kind !== "git.repository.changed") return;
+      if (expectedWorkspaceId && event.repository.workspaceId !== expectedWorkspaceId) return;
+      if (busyRef.current === "execute") return;
+      setRepoChanged(true);
+    });
+  }, [preview, client, draft?.view.id, step, gitWorkspace?.repository?.workspaceId]);
 
   const run = useCallback(async <T,>(label: string, work: (current: SelectiveCommitSource) => Promise<T>, apply: (value: T) => void, discard?: (value: T, owner: SelectiveCommitSource) => void) => {
     if (!source) return;
@@ -166,8 +214,11 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
       if (generation === epoch.current) setBusy(undefined);
     }
   }, [source, zh]);
-  const acquire = useCallback((work: (current: SelectiveCommitSource) => Promise<SelectiveCommitDraft>) => {
-    void run("prepare", work, adopt, (value, owner) => owner.release(value.view.id));
+  const acquire = useCallback((work: (current: SelectiveCommitSource) => Promise<SelectiveCommitDraft>, preserveOnEpochShift = false) => {
+    void run("prepare", work, adopt, (value, owner) => {
+      if (preserveOnEpochShift && mountedRef.current && intentRef.current?.draft?.draftId === value.view.id) return;
+      owner.release(value.view.id);
+    });
   }, [run, adopt]);
 
   const prepare = useCallback((scope?: string | readonly string[]) => {
@@ -176,16 +227,19 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
   }, [reset, acquire]);
 
   /* Intents: `/commit` hands over a native draft; Git/Changes ask for a fresh one. */
-  const lastIntent = useRef<number | undefined>(undefined);
+  const lastIntent = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!intent || intent.key === lastIntent.current || !ready || !visible) return;
-    lastIntent.current = intent.key;
-    reset();
-    if (intent.instructions?.trim()) setInstructions(intent.instructions.trim());
+    if (!intent || !ready || !visible) return;
     const handle = intent.draft;
-    if (handle) acquire(current => current.open(handle.draftId, handle.revision));
+    if (handle?.runtimeEpoch !== undefined && runtimeEpoch !== undefined && handle.runtimeEpoch !== runtimeEpoch) return;
+    const intentSignature = `${intent.key}:${sessionId ?? ""}:${runtimeEpoch ?? ""}:${preview ? "preview" : "real"}`;
+    if (lastIntent.current === intentSignature) return;
+    lastIntent.current = intentSignature;
+    resetState(handle?.draftId);
+    if (intent.instructions?.trim()) setInstructions(intent.instructions.trim());
+    if (handle) acquire(current => current.open(handle.draftId, handle.revision), true);
     else acquire(current => current.prepare());
-  }, [intent, ready, visible, reset, acquire]);
+  }, [intent, ready, visible, sessionId, runtimeEpoch, preview, resetState, acquire]);
 
   const expiresAt = draft ? expiryMs(frozen && step === "confirm" ? frozen.expiresAt : draft.expiresAt) : undefined;
   useEffect(() => {
@@ -201,8 +255,8 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
     if (!draft || busy || expired) return;
     void run("select", current => current.select(draft, selection), next => {
       adopt(next);
-      /* A new revision invalidates any frozen preview and its patch. */
-      setFrozen(undefined); invalidatePatch();
+      /* A new revision invalidates any frozen preview, its patch and per-file body chunks. */
+      setFrozen(undefined); invalidatePatch(); invalidateBodies();
     });
   };
   const togglePath = (path: SelectiveCommitPath) => select(path.selected === "all" ? { action: "drop", path: path.path } : { action: "take", path: path.path });
@@ -210,20 +264,30 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
 
   const loadBody = (path: string, append = false) => {
     if (!draft || !source) return;
-    const existing = bodies[path];
+    const targetDraftId = draft.view.id;
+    const targetRevision = draft.view.revision;
+    const existing = bodies[path]?.revision === targetRevision ? bodies[path] : undefined;
     const offset = append ? existing?.nextOffset : undefined;
     if (append && offset === undefined) return;
     const generation = epoch.current;
-    setBodies(map => ({ ...map, [path]: { text: append ? existing?.text ?? "" : null, totalChars: existing?.totalChars ?? 0, nextOffset: existing?.nextOffset, loading: true } }));
+    const readGeneration = bodyEpoch.current;
+    setBodies(map => ({ ...map, [path]: { text: append ? existing?.text ?? "" : null, totalChars: existing?.totalChars ?? 0, nextOffset: existing?.nextOffset, loading: true, revision: targetRevision } }));
     void source.read(draft, { kind: "file", path, ...(offset === undefined ? {} : { offset }) }).then(result => {
-      if (generation !== epoch.current || !result.body) return;
+      const latestDraft = draftRef.current;
+      if (generation !== epoch.current || readGeneration !== bodyEpoch.current || latestDraft?.view.id !== targetDraftId || latestDraft.view.revision !== targetRevision || !result.body) return;
       const body = result.body;
-      setBodies(map => ({ ...map, [path]: {
-        text: body.text === null ? null : `${append ? map[path]?.text ?? "" : ""}${body.text}`,
-        totalChars: body.totalChars, nextOffset: body.nextOffset, loading: false,
-      } }));
+      setBodies(map => {
+        const current = map[path]?.revision === targetRevision ? map[path] : undefined;
+        return { ...map, [path]: {
+          text: body.text === null ? null : `${append ? current?.text ?? "" : ""}${body.text}`,
+          totalChars: body.totalChars, nextOffset: body.nextOffset, loading: false, revision: targetRevision,
+        } };
+      });
     }, cause => {
-      if (generation === epoch.current) setBodies(map => ({ ...map, [path]: { text: null, totalChars: 0, loading: false, error: hostErrorMessage(cause, tr("差异读取失败", "Diff unavailable")) } }));
+      const latestDraft = draftRef.current;
+      if (generation === epoch.current && readGeneration === bodyEpoch.current && latestDraft?.view.id === targetDraftId && latestDraft.view.revision === targetRevision) {
+        setBodies(map => ({ ...map, [path]: { text: null, totalChars: 0, loading: false, revision: targetRevision, error: hostErrorMessage(cause, tr("差异读取失败", "Diff unavailable")) } }));
+      }
     });
   };
   const loadPatch = (append = false) => {
@@ -246,14 +310,19 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
     setFocused(path.path);
     if (path.kind !== "text") return;
     setExpanded(set => { const next = new Set(set); if (next.has(path.path)) next.delete(path.path); else next.add(path.path); return next; });
-    if (!bodies[path.path] || bodies[path.path]?.error) loadBody(path.path);
+    const cached = bodies[path.path];
+    if (!cached || cached.revision !== draft?.view.revision || cached.error) loadBody(path.path);
   };
 
   const freeze = () => {
     if (!draft || busy || expired) return;
-    void run("preview", current => current.preview(draft), next => { setFrozen(next); invalidatePatch(); setStep("confirm"); });
+    void run("preview", current => current.preview(draft), next => { setFrozen(next); setRepoChanged(false); invalidatePatch(); setStep("confirm"); });
   };
-  const frozenValid = !!frozen && !!draft && frozen.revision === draft.view.revision && frozen.draftId === draft.view.id;
+  const liveHead = !preview ? gitWorkspace?.repository?.headOid : undefined;
+  const headDrifted = Boolean(draft && liveHead && draft.view.head && liveHead !== draft.view.head);
+  const frozenHeadDrifted = Boolean(frozen && liveHead && frozen.head && liveHead !== frozen.head);
+  const externalRepoDrift = step !== "done" && (repoChanged || headDrifted || frozenHeadDrifted);
+  const frozenValid = !!frozen && !!draft && frozen.revision === draft.view.revision && frozen.draftId === draft.view.id && !frozenHeadDrifted;
   const execute = () => {
     if (!draft || !frozen || !frozenValid || busy || expired || !subject.trim()) return;
     const body = messageBody.trim();
@@ -263,6 +332,7 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
       setOutcome(result); setStep("done");
       /* The native draft is consumed; release frees its store slot without another commit. */
       releaseHeld();
+      void gitWorkspace?.refresh();
     });
   };
 
@@ -292,6 +362,7 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
     }
   };
   const actorLabel = (actor: string | null) => actor ?? tr("人工或未知", "Manual or unknown");
+  const running = (actor: string) => draft?.view.agents.some(agent => agent.id === actor && agent.running) ?? false;
   const owners = (list: readonly SelectiveCommitOwnership[]) => <span className="scm-owners">{list.map(owner => <span key={owner} className={`scm-owner is-${owner}`}>{ownerLabel(owner)}</span>)}</span>;
   const demo = preview && marks ? <span className="chip gray xs">{tr("演示", "Demo")}</span> : null;
 
@@ -368,8 +439,9 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
             <span><b className="mono">{short(frozen.head)}</b>HEAD</span>
           </div>
           <ul className="scm-frozen-files">{frozen.paths.map(path => <li key={path} className="mono">{path}</li>)}</ul>
-          {!frozenValid ? <p className="scm-warn">{tr("选择已变化，请重新冻结预览后再提交。", "The selection changed. Freeze a new preview before committing.")}</p> : null}
+          {!frozenValid ? <p className="scm-warn">{frozenHeadDrifted ? tr("HEAD 已变化，请重新准备草稿后再提交。", "HEAD changed. Prepare a new draft before committing.") : tr("选择已变化，请重新冻结预览后再提交。", "The selection changed. Freeze a new preview before committing.")}</p> : null}
         </section>
+        {externalRepoDrift ? <div className="scm-expired" role="alert"><Icon name="alert" extra="sm" /><span>{tr("仓库或工作区已在外部发生变化，当前冻结预览可能过期。", "The repository or worktree changed externally. This frozen preview may be stale.")}</span><button type="button" className="btn small outline" disabled={!!busy} onClick={() => prepare(draft.view.scope)}>{tr("重新准备", "Prepare again")}</button></div> : null}
         {!wide ? patchView : null}
         {instructions ? <div className="scm-instructions" role="note"><Icon name="message" extra="sm" /><div><b>{tr("/commit 附带的说明", "Notes passed to /commit")}</b><p>{instructions}</p>
           <button type="button" className="btn small outline" onClick={() => setMessageBody(current => current ? `${current}\n\n${instructions}` : instructions)}>{tr("加入正文", "Add to body")}</button></div></div> : null}
@@ -408,9 +480,9 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
     body = <div className={`scm-pick${wide ? " is-wide" : ""}`}>
       <div className="scm-pick-main">
         {draft.view.agents.length ? <div className="scm-agents" aria-label={tr("参与的 Agent", "Agents involved")}>
-          {draft.view.agents.map(agent => <span key={agent.id} className={`scm-agent${agent.inScope ? "" : " is-out"}${agent.running ? " is-running" : ""}`}
+          {draft.view.agents.map(agent => <span key={agent.id} className={`scm-agent${agent.id === draft.view.caller ? " is-caller" : ""}${agent.inScope ? "" : " is-out"}${agent.running ? " is-running" : ""}`}
             data-tip={[agent.id === draft.view.caller ? tr("发起者", "Caller") : "", agent.inScope ? tr("在范围内", "In scope") : tr("不在范围", "Out of scope"), agent.running ? tr("仍在运行，结果可能变化", "Still running; results may change") : ""].filter(Boolean).join(" · ")}>
-            <Icon name={agent.id === draft.view.caller ? "user" : "bot"} extra="sm" />{agent.id}{agent.running ? <i className="scm-pulse" aria-hidden="true" /> : null}
+            <DraftAgentAvatar id={agent.id} running={agent.running} />{agent.id}{agent.running ? <i className="scm-pulse" aria-hidden="true" /> : null}
           </span>)}
           {draft.view.scope.length ? <span className="scm-scope mono" data-tip={tr("草稿范围", "Draft scope")}><Icon name="filter" extra="sm" />{draft.view.scope.join(" ")}</span> : null}
         </div> : null}
@@ -433,18 +505,20 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
             const open = expanded.has(path.path) && path.kind === "text";
             const whole = path.kind !== "text";
             return <li key={path.path} className={`scm-path${focused === path.path ? " is-focused" : ""}${path.selected === "none" ? " is-unpicked" : ""}`}>
-              <div className="scm-path-row" role="button" tabIndex={0} aria-expanded={whole ? undefined : open} onClick={() => openPath(path)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openPath(path); } }}>
+              <div className="scm-path-row" onClick={() => openPath(path)}>
                 <TriBox state={path.selected} disabled={!!busy || expired} label={tr(`选择 ${path.path}`, `Select ${path.path}`)} onToggle={() => togglePath(path)} />
-                <span className={`scm-change is-${path.change}`} data-tip={changeLabel(path.change)}>{changeMark(path.change)}</span>
-                <span className="scm-path-name"><span className="scm-dir">{dir}</span>{name}</span>
-                {whole ? <span className="chip gray xs" data-tip={tr("只能整项选择", "Selected as a whole")}>{kindLabel(path.kind)}</span> : null}
-                {path.kind === "mode" ? <span className="mono small muted">{path.beforeMode}→{path.afterMode}</span> : null}
-                {!whole ? <span className="scm-lines"><span className="add">+{lines.added}</span><span className="del">−{lines.removed}</span></span> : null}
-                {owners(path.ownership)}
-                {!whole ? <span className={`scm-chev${open ? " open" : ""}`} aria-hidden="true"><Icon name="chevron-r" extra="sm" /></span> : null}
+                <button type="button" className="scm-path-toggle" aria-expanded={whole ? undefined : open} onClick={event => { event.stopPropagation(); openPath(path); }}>
+                  <span className={`scm-change is-${path.change}`} data-tip={changeLabel(path.change)}>{changeMark(path.change)}</span>
+                  <span className="scm-path-name"><span className="scm-dir">{dir}</span>{name}</span>
+                  {whole ? <span className="chip gray xs" data-tip={tr("只能整项选择", "Selected as a whole")}>{kindLabel(path.kind)}</span> : null}
+                  {path.kind === "mode" ? <span className="mono small muted">{path.beforeMode}→{path.afterMode}</span> : null}
+                  {!whole ? <span className="scm-lines"><span className="add">+{lines.added}</span><span className="del">−{lines.removed}</span></span> : null}
+                  {owners(path.ownership)}
+                  {!whole ? <span className={`scm-chev${open ? " open" : ""}`} aria-hidden="true"><Icon name="chevron-r" extra="sm" /></span> : null}
+                </button>
               </div>
               {open ? <div className="scm-hunks">
-                {path.hunks.map(hunk => <HunkView key={hunk.id} hunk={hunk} path={path} busy={!!busy || expired} zh={zh} owners={owners} actorLabel={actorLabel} reasonText={reasonText} onToggle={toggleUnit} />)}
+                {path.hunks.map(hunk => <HunkView key={hunk.id} hunk={hunk} path={path} busy={!!busy || expired} zh={zh} owners={owners} actorLabel={actorLabel} running={running} reasonText={reasonText} onToggle={toggleUnit} />)}
                 {!wide ? <PatchPanel body={bodies[path.path]} zh={zh} title={tr("文件差异", "File diff")} onLoad={() => loadBody(path.path)} onMore={() => loadBody(path.path, true)} /> : null}
               </div> : null}
               {whole && focused === path.path && !wide ? <p className="scm-whole-note">{tr("该文件没有逐行差异，只能整项纳入或排除。", "This file has no line diff; include or exclude it as a whole.")}{path.hunks[0]?.units[0]?.reasons.map(reason => <span key={reasonText(reason)}> {reasonText(reason)}</span>)}</p> : null}
@@ -456,6 +530,7 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
           {draft.view.skipped.length ? <p><Icon name="eye-off" extra="sm" /><span><b>{tr("已跳过", "Skipped")}</b><span className="mono">{draft.view.skipped.join(", ")}</span></span></p> : null}
         </div> : null}
         {draft.view.state !== "open" ? <p className="scm-warn">{draft.view.state === "busy" ? tr("草稿正被另一操作使用，稍后再试。", "The draft is busy with another operation.") : tr("草稿已被消费，请重新准备。", "This draft was consumed. Prepare a new one.")}</p> : null}
+        {externalRepoDrift && !expired ? <div className="scm-expired" role="alert"><Icon name="alert" extra="sm" /><span>{tr("仓库或工作区已在外部发生变化，建议按最新工作区重新准备草稿。", "The repository or worktree changed externally. Prepare again from the latest worktree.")}</span><button type="button" className="btn small outline" disabled={!!busy} onClick={() => prepare(draft.view.scope)}>{tr("重新准备", "Prepare again")}</button></div> : null}
         {expired ? <div className="scm-expired" role="alert"><Icon name="clock" extra="sm" /><span>{tr("草稿已过期，选择需要按最新工作区重新准备。", "The draft expired. Prepare it again from the current worktree.")}</span><button type="button" className="btn small primary" onClick={() => prepare(draft.view.scope)}>{tr("重新准备", "Prepare again")}</button></div> : null}
         {error ? <SelectiveCommitError message={error} zh={zh} onOpenSettings={onOpenSettings} /> : null}
         <div className="scm-foot">
@@ -482,9 +557,9 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
   </section>;
 }
 
-function HunkView({ hunk, path, busy, zh, owners, actorLabel, reasonText, onToggle }: {
+function HunkView({ hunk, path, busy, zh, owners, actorLabel, running, reasonText, onToggle }: {
   hunk: SelectiveCommitHunk; path: SelectiveCommitPath; busy: boolean; zh: boolean;
-  owners(list: readonly SelectiveCommitOwnership[]): ReactNode; actorLabel(actor: string | null): string; reasonText(reason: SelectiveCommitReason): string;
+  owners(list: readonly SelectiveCommitOwnership[]): ReactNode; actorLabel(actor: string | null): string; running(actor: string): boolean; reasonText(reason: SelectiveCommitReason): string;
   onToggle(path: SelectiveCommitPath, unit: SelectiveCommitUnit): void;
 }) {
   return <div className="scm-hunk">
@@ -492,7 +567,7 @@ function HunkView({ hunk, path, busy, zh, owners, actorLabel, reasonText, onTogg
     {hunk.units.map(entry => <div key={entry.id} className={`scm-unit${entry.selected === "none" ? " is-unpicked" : ""}`}>
       <TriBox state={entry.selected} disabled={busy} label={zh ? `选择片段 ${entry.id}` : `Select unit ${entry.id}`} onToggle={() => onToggle(path, entry)} />
       <span className="scm-unit-id mono">{entry.id}</span>
-      <span className="scm-unit-actor"><Icon name={entry.actor ? "bot" : "user"} extra="sm" />{actorLabel(entry.actor)}</span>
+      <span className="scm-unit-actor">{entry.actor ? <DraftAgentAvatar id={entry.actor} running={running(entry.actor)} /> : <Icon name="user" extra="sm" />}{actorLabel(entry.actor)}</span>
       <span className="scm-lines"><span className="add">+{entry.added}</span><span className="del">−{entry.removed}</span></span>
       {owners(entry.ownership)}
       {entry.likely ? <span className="chip blue xs" data-tip={zh ? "Runtime 推测属于本会话" : "Runtime thinks this belongs to the session"}>{zh ? "推测" : "Likely"}</span> : null}

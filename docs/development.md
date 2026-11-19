@@ -73,6 +73,28 @@ The top-bar **预览** switch is a renderer display flag
 (`apps/renderer/src/preview/mode.ts`). It is **not** a Host capability and
 must not enter `client-contract`.
 
+On Windows, `启动生产版.cmd` builds the current desktop and checks the Runtime
+identity from the pinned upstream and patch series before opening it. It reuses
+a matching signed artifact, downloads one from a release with the same source
+digest when available, or builds and signs it locally. A new artifact is
+verified and smoke-tested before activation. The Runtime, downloaded artifacts,
+and update transactions are kept under `outputs/production-preview/`; the
+installed application's Runtime is not replaced. Workspaces, conversations,
+model credentials, and other profile data continue to use the normal user
+profile. Close another running Harness instance before opening this preview.
+After a successful build, the launcher caches its source and dependency
+fingerprint and checks the output files on later starts. Unchanged inputs and
+intact outputs skip the workspace build and reuse the staged Electron copy;
+Runtime identity and signatures are still checked on every start. A changed or
+missing input/output triggers a rebuild, and the last successful workspace build
+remains in `outputs/production-preview/build-snapshots/` if that build fails.
+The first launch after adding the cache builds once before it can be reused.
+The production preview loads the build made at startup and does not watch or
+automatically reload when source files change; restart it to pick up changes.
+`启动预览.cmd` and `启动预览版.cmd` retain their development-preview behaviour.
+If the vendor overlay or patches have uncaptured changes, preserve and capture
+them using the normal Runtime workflow before starting production preview.
+
 | | Read surfaces | Mutations |
 |---|---|---|
 | Preview on | Fixtures overlay the snapshot | Still the real API |
