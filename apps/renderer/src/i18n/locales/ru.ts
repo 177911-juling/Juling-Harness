@@ -1,6 +1,21 @@
 import type { LocaleDictionary } from "./zh";
 
 export const ru: LocaleDictionary = {
+  workspaceRecovery: {
+    title: "Восстановление рабочей области",
+    description: "Если старую папку или сеанс восстановить нельзя, начните новый разговор в доступном проекте. История и черновики сохраняются. Перенести старый сеанс можно на странице истории.",
+    choose: "Выбрать проект и начать разговор",
+    newChat: "Начать разговор в {name}",
+    unavailable: "Папка недоступна",
+    staleCount: "Недоступных записей рабочей области: {count}",
+    forget: "Забыть недоступные записи",
+    confirmForget: "Забыть текущие недоступные записи рабочей области? Файлы проектов и история сеансов сохраняются. Копия записей будет сохранена в каталоге данных приложения.",
+    forgotten: "Недоступные записи забыты",
+    chosen: "Выбран доступный проект",
+    empty: "Доступный проект не выбран. Выберите папку, чтобы продолжить.",
+    loadFailed: "Не удалось прочитать записи рабочей области. Вы всё ещё можете выбрать проект.",
+    actionFailed: "Не удалось восстановить рабочую область",
+  },
   fileBrowser: { open: "Открыть файловый браузер", showInBrowser: "Показать в файловом браузере", outsideProject: "Вне проекта" },
   agentDeck: {
     label: "Панель агентов",
@@ -63,6 +78,7 @@ export const ru: LocaleDictionary = {
     },
     orbit: { fit: "Сбросить вид", legendSpawn: "Запущены", legendComms: "Связь", commsPending: "Связь · нет подключения" },
     comms: {
+      loading: "Загрузка сообщений…", emptyAgent: "Сообщений с {name} пока нет", older: "Более старые сообщения не показаны",
       unavailable: "Обмен сообщениями между агентами пока не подключён",
       unavailableDetail: "Runtime пока не передаёт в Harness сообщения между агентами. Как только это заработает, здесь по порядку появятся каждое сообщение, его получатели и ответы.",
       people: "Фильтр по агенту", showAll: "Все", filterAgent: "Только {name}", all: "все", progress: "Прогресс", replyTo: "Ответить {name}",
@@ -1212,6 +1228,16 @@ export const ru: LocaleDictionary = {
   },
 
   "modelConfig": {
+    "fetchFilterSearchPlaceholder": "Поиск по имени или ID модели…",
+    "fetchFilterClearSearch": "Очистить поиск",
+    "fetchFilterAll": "Все",
+    "fetchFilterNew": "Новые",
+    "fetchFilterAmbiguous": "Нужно сопоставление",
+    "fetchFilterPicked": "Выбранные",
+    "fetchSelectedSummary": "Выбрано {picked} из {total}",
+    "fetchNoFilterMatches": "Нет моделей, соответствующих фильтру",
+    "fetchAmbiguousHint": "Совпадений в каталоге: {count} — выберите одно, чтобы применить рекомендуемые параметры",
+    "fetchMatchedHint": "Рекомендуемые параметры применены из выбранной записи каталога",
     "title": "Конфигурация моделей",
     "subtitle": "Пресеты провайдеров, учётные данные API, маршрутизация моделей и назначение ролей",
     "providersTab": "Провайдеры",
@@ -2251,6 +2277,7 @@ export const ru: LocaleDictionary = {
   },
 
   "diagnostics": {
+    "localArtifactChecked": "Проверены локальные артефакты Runtime; онлайн-обновления не проверялись",
     "title": "Центр диагностики",
     "subtitle": "Состояние процесса Runtime, протокол связи Harness Bridge и системные журналы Host",
     "runtimeStatus": "Состояние Runtime",
@@ -2820,6 +2847,8 @@ export const ru: LocaleDictionary = {
     "visitGithub": "Открыть репозиторий на GitHub"
   },
   "appUpdate": {
+    "systemAuthorization": "При перезапуске для установки система запросит права администратора.",
+    "waitingAuthorization": "Завершите авторизацию администратора в системном окне…",
     "downloadInstaller": "Скачать установщик",
     "linuxManualInstall": "Скачайте новую версию, закройте Juling Harness и установите deb либо замените AppImage. Настройки и сессии сохранятся. Обновления Runtime по-прежнему доступны в приложении.",
     "dialogTitle": "Доступно обновление",

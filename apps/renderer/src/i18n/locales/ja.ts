@@ -1,6 +1,21 @@
 import type { LocaleDictionary } from "./zh";
 
 export const ja: LocaleDictionary = {
+  workspaceRecovery: {
+    title: "ワークスペースの復元",
+    description: "古いディレクトリやセッションを復元できない場合は、利用可能なプロジェクトで新しい会話を開始してください。履歴と下書きは保持されます。古いセッションの移動は履歴ページから行えます。",
+    choose: "プロジェクトを選択して会話を開始",
+    newChat: "{name} で会話を開始",
+    unavailable: "ディレクトリを利用できません",
+    staleCount: "利用できないワークスペース記録 {count} 件",
+    forget: "利用できない記録を削除",
+    confirmForget: "現在利用できないワークスペース記録を削除しますか？プロジェクトのファイルとセッション履歴は保持されます。記録のコピーはアプリのデータディレクトリに保存されます。",
+    forgotten: "利用できない記録を削除しました",
+    chosen: "利用可能なプロジェクトを選択しました",
+    empty: "利用可能なプロジェクトが選択されていません。続行するにはディレクトリを選択してください。",
+    loadFailed: "ワークスペース記録を読み取れませんでした。プロジェクトの選択は引き続き可能です。",
+    actionFailed: "ワークスペースの復元に失敗しました",
+  },
   fileBrowser: { open: "ファイルブラウザーを開く", showInBrowser: "ファイルブラウザーで表示", outsideProject: "プロジェクト外" },
   agentDeck: {
     label: "エージェントデッキ",
@@ -63,6 +78,7 @@ export const ja: LocaleDictionary = {
     },
     orbit: { fit: "表示をリセット", legendSpawn: "生成", legendComms: "通信", commsPending: "通信 · 未接続" },
     comms: {
+      loading: "メッセージを読み込み中…", emptyAgent: "{name} とのメッセージはまだありません", older: "以前のメッセージは表示されていません",
       unavailable: "エージェント間メッセージングはまだ接続されていません",
       unavailableDetail: "Runtime はまだエージェント間メッセージを Harness と共有していません。共有されると、各メッセージ、宛先、返信が順にここに表示されます。",
       people: "エージェントでフィルター", showAll: "すべて", filterAgent: "{name} のみ", all: "全員", progress: "進捗", replyTo: "{name} に返信",
@@ -1204,6 +1220,16 @@ export const ja: LocaleDictionary = {
     "terminatedCount": "終了：{count}"
   },
   "modelConfig": {
+    "fetchFilterSearchPlaceholder": "モデル名または ID を検索…",
+    "fetchFilterClearSearch": "検索をクリア",
+    "fetchFilterAll": "すべて",
+    "fetchFilterNew": "新規",
+    "fetchFilterAmbiguous": "照合が必要",
+    "fetchFilterPicked": "選択済み",
+    "fetchSelectedSummary": "{picked} / {total} 件を選択",
+    "fetchNoFilterMatches": "現在のフィルターに一致するモデルはありません",
+    "fetchAmbiguousHint": "カタログ候補が {count} 件あります。1 つ選ぶと推奨パラメーターを適用します",
+    "fetchMatchedHint": "選択したカタログ項目の推奨パラメーターを適用しました",
     "title": "モデル設定",
     "subtitle": "プロバイダーのプリセット、API 認証情報、モデルルーティング、ロールの割り当て",
     "providersTab": "プロバイダー",
@@ -2236,6 +2262,7 @@ export const ja: LocaleDictionary = {
     }
   },
   "diagnostics": {
+    "localArtifactChecked": "ローカルの Runtime アーティファクトを確認しました。オンライン更新は確認していません",
     "title": "診断センター",
     "subtitle": "Runtime プロセスの状態、Harness Bridge 通信プロトコル、Host システムログ",
     "runtimeStatus": "Runtime の状態",
@@ -2750,6 +2777,8 @@ export const ja: LocaleDictionary = {
     "visitGithub": "GitHub リポジトリを開く"
   },
   "appUpdate": {
+    "systemAuthorization": "再起動してインストールする際に、システムが管理者の認可を求めます。",
+    "waitingAuthorization": "システムのダイアログで管理者の認可を完了してください…",
     "downloadInstaller": "インストーラーをダウンロード",
     "linuxManualInstall": "新しいバージョンをダウンロードして Juling Harness を終了し、deb をインストールするか AppImage を置き換えてください。設定とセッションは保持されます。Runtime の更新はアプリ内で引き続き利用できます。",
     "dialogTitle": "アップデートがあります",

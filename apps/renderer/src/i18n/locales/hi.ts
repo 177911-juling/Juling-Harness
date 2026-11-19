@@ -1,6 +1,21 @@
 import type { LocaleDictionary } from "./zh";
 
 export const hi: LocaleDictionary = {
+  workspaceRecovery: {
+    title: "वर्कस्पेस रिकवरी",
+    description: "यदि पुरानी निर्देशिका या सत्र बहाल नहीं हो सकता, तो उपलब्ध प्रोजेक्ट में नई बातचीत शुरू करें। इतिहास और ड्राफ़्ट सुरक्षित रहते हैं। पुराने सत्र को इतिहास पेज से स्थानांतरित करें।",
+    choose: "प्रोजेक्ट चुनें और बातचीत शुरू करें",
+    newChat: "{name} में बातचीत शुरू करें",
+    unavailable: "निर्देशिका उपलब्ध नहीं है",
+    staleCount: "{count} अनुपलब्ध वर्कस्पेस रिकॉर्ड",
+    forget: "अनुपलब्ध रिकॉर्ड भूलें",
+    confirmForget: "वर्तमान अनुपलब्ध वर्कस्पेस रिकॉर्ड भूलें? प्रोजेक्ट फ़ाइलें और सत्र इतिहास सुरक्षित रहते हैं। रिकॉर्ड की एक प्रति ऐप डेटा निर्देशिका में सहेजी जाएगी।",
+    forgotten: "अनुपलब्ध रिकॉर्ड भुला दिए गए",
+    chosen: "उपलब्ध प्रोजेक्ट चुना गया",
+    empty: "कोई उपलब्ध प्रोजेक्ट नहीं चुना गया। जारी रखने के लिए निर्देशिका चुनें।",
+    loadFailed: "वर्कस्पेस रिकॉर्ड पढ़े नहीं जा सके। आप अभी भी प्रोजेक्ट चुन सकते हैं।",
+    actionFailed: "वर्कस्पेस रिकवरी विफल",
+  },
   fileBrowser: { open: "फ़ाइल ब्राउज़र खोलें", showInBrowser: "फ़ाइल ब्राउज़र में दिखाएँ", outsideProject: "प्रोजेक्ट के बाहर" },
   agentDeck: {
     label: "एजेंट डेक",
@@ -63,6 +78,7 @@ export const hi: LocaleDictionary = {
     },
     orbit: { fit: "व्यू रीसेट करें", legendSpawn: "उत्पन्न", legendComms: "कॉम्स", commsPending: "कॉम्स · कनेक्ट नहीं" },
     comms: {
+      loading: "संदेश लोड हो रहे हैं…", emptyAgent: "{name} के साथ अभी कोई संदेश नहीं", older: "पुराने संदेश नहीं दिखाए गए हैं",
       unavailable: "एजेंट मैसेजिंग अभी जुड़ी नहीं है",
       unavailableDetail: "Runtime अभी एजेंट-से-एजेंट संदेश Harness के साथ साझा नहीं करता। जब करेगा, तो प्रत्येक संदेश, उसके प्राप्तकर्ता और उत्तर यहाँ क्रम में दिखेंगे।",
       people: "एजेंट के अनुसार फ़िल्टर करें", showAll: "सभी", filterAgent: "केवल {name}", all: "सभी", progress: "प्रगति", replyTo: "{name} को जवाब दें",
@@ -1204,6 +1220,16 @@ export const hi: LocaleDictionary = {
     terminatedCount: "समाप्त: {count}",
   },
   modelConfig: {
+    fetchFilterSearchPlaceholder: "मॉडल का नाम या ID खोजें…",
+    fetchFilterClearSearch: "खोज साफ़ करें",
+    fetchFilterAll: "सभी",
+    fetchFilterNew: "नए",
+    fetchFilterAmbiguous: "मिलान आवश्यक",
+    fetchFilterPicked: "चुने गए",
+    fetchSelectedSummary: "{picked} / {total} चुने गए",
+    fetchNoFilterMatches: "वर्तमान फ़िल्टर से कोई मॉडल मेल नहीं खाता",
+    fetchAmbiguousHint: "{count} कैटलॉग मिलान — सुझाए गए पैरामीटर लागू करने के लिए एक चुनें",
+    fetchMatchedHint: "चुनी गई कैटलॉग प्रविष्टि से सुझाए गए पैरामीटर लागू हुए",
     title: "मॉडल कॉन्फ़िगरेशन",
     subtitle: "प्रोवाइडर प्रीसेट, API क्रेडेंशियल, मॉडल रूटिंग और भूमिका असाइनमेंट",
     providersTab: "प्रोवाइडर",
@@ -2236,6 +2262,7 @@ export const hi: LocaleDictionary = {
     },
   },
   diagnostics: {
+    localArtifactChecked: "स्थानीय Runtime आर्टिफ़ैक्ट जाँचे गए; ऑनलाइन अपडेट नहीं जाँचे गए",
     title: "निदान केंद्र",
     subtitle: "Runtime प्रक्रिया स्वास्थ्य, Harness Bridge संचार प्रोटोकॉल और Host सिस्टम लॉग",
     runtimeStatus: "Runtime स्थिति",
@@ -2750,6 +2777,8 @@ export const hi: LocaleDictionary = {
     visitGithub: "GitHub रिपॉज़िटरी देखें",
   },
   appUpdate: {
+    systemAuthorization: "इंस्टॉल के लिए पुनः आरंभ करते समय सिस्टम व्यवस्थापक प्राधिकरण माँगेगा।",
+    waitingAuthorization: "सिस्टम संवाद में व्यवस्थापक प्राधिकरण पूरा करें…",
     downloadInstaller: "इंस्टॉलर डाउनलोड करें",
     linuxManualInstall: "नया संस्करण डाउनलोड करें, Juling Harness बंद करें, फिर deb इंस्टॉल करें या AppImage बदलें। आपकी सेटिंग्स और सत्र सुरक्षित रहते हैं। Runtime अपडेट ऐप में उपलब्ध रहते हैं।",
     dialogTitle: "अपडेट उपलब्ध",

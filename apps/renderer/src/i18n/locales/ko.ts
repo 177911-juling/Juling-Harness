@@ -1,6 +1,21 @@
 import type { LocaleDictionary } from "./zh";
 
 export const ko: LocaleDictionary = {
+  "workspaceRecovery": {
+    "title": "워크스페이스 복구",
+    "description": "이전 디렉터리나 세션을 복원할 수 없으면 사용 가능한 프로젝트에서 새 대화를 시작하세요. 기록과 초안은 보존됩니다. 이전 세션은 기록 페이지에서 옮길 수 있습니다.",
+    "choose": "프로젝트 선택 후 대화 시작",
+    "newChat": "{name}에서 대화 시작",
+    "unavailable": "디렉터리를 사용할 수 없음",
+    "staleCount": "사용할 수 없는 워크스페이스 기록 {count}개",
+    "forget": "사용할 수 없는 기록 삭제",
+    "confirmForget": "현재 사용할 수 없는 워크스페이스 기록을 삭제할까요? 프로젝트 파일과 세션 기록은 보존됩니다. 기록 사본은 앱 데이터 디렉터리에 저장됩니다.",
+    "forgotten": "사용할 수 없는 기록을 삭제했습니다",
+    "chosen": "사용 가능한 프로젝트를 선택했습니다",
+    "empty": "사용 가능한 프로젝트가 선택되지 않았습니다. 계속하려면 디렉터리를 선택하세요.",
+    "loadFailed": "워크스페이스 기록을 읽을 수 없습니다. 프로젝트 선택은 계속할 수 있습니다.",
+    "actionFailed": "워크스페이스 복구 실패",
+  },
   "fileBrowser": {
     "open": "파일 탐색기 열기",
     "showInBrowser": "파일 탐색기에서 보기",
@@ -146,6 +161,7 @@ export const ko: LocaleDictionary = {
       "commsPending": "통신 · 연결되지 않음"
     },
     "comms": {
+      "loading": "메시지 불러오는 중…", "emptyAgent": "{name}과(와) 주고받은 메시지가 없습니다", "older": "이전 메시지는 표시되지 않습니다",
       "unavailable": "에이전트 메시징이 아직 연결되지 않았습니다",
       "unavailableDetail": "Runtime은 아직 에이전트 간 메시지를 Harness와 공유하지 않습니다. 연결되면 각 메시지와 수신자, 응답이 순서대로 여기에 표시됩니다.",
       "people": "에이전트로 필터링",
@@ -1434,6 +1450,16 @@ export const ko: LocaleDictionary = {
     "terminatedCount": "종료됨: {count}"
   },
   "modelConfig": {
+    "fetchFilterSearchPlaceholder": "모델 이름 또는 ID 검색…",
+    "fetchFilterClearSearch": "검색 지우기",
+    "fetchFilterAll": "전체",
+    "fetchFilterNew": "신규",
+    "fetchFilterAmbiguous": "일치 필요",
+    "fetchFilterPicked": "선택됨",
+    "fetchSelectedSummary": "{picked} / {total} 선택됨",
+    "fetchNoFilterMatches": "현재 필터와 일치하는 모델이 없습니다",
+    "fetchAmbiguousHint": "카탈로그 일치 {count}개 — 하나를 선택하면 권장 매개변수가 적용됩니다",
+    "fetchMatchedHint": "선택한 카탈로그 항목의 권장 매개변수를 적용했습니다",
     "title": "모델 구성",
     "subtitle": "제공자 프리셋, API 자격 증명, 모델 라우팅 및 역할 할당",
     "providersTab": "제공자",
@@ -2466,6 +2492,7 @@ export const ko: LocaleDictionary = {
     }
   },
   "diagnostics": {
+    "localArtifactChecked": "로컬 Runtime 아티팩트를 확인했습니다. 온라인 업데이트는 확인하지 않았습니다",
     "title": "진단 센터",
     "subtitle": "Runtime 프로세스 상태, Harness Bridge 통신 프로토콜 및 Host 시스템 로그",
     "runtimeStatus": "Runtime 상태",
@@ -3030,6 +3057,8 @@ export const ko: LocaleDictionary = {
     "visitGithub": "GitHub 저장소 방문"
   },
   "appUpdate": {
+    "systemAuthorization": "다시 시작하여 설치할 때 시스템이 관리자 권한을 요청합니다.",
+    "waitingAuthorization": "시스템 대화상자에서 관리자 권한을 완료하세요…",
     "downloadInstaller": "설치 프로그램 다운로드",
     "linuxManualInstall": "새 버전을 다운로드하고 Juling Harness를 종료한 뒤 deb를 설치하거나 AppImage를 교체하세요. 설정과 세션은 유지됩니다. Runtime 업데이트는 앱에서 계속 사용할 수 있습니다.",
     "dialogTitle": "업데이트 사용 가능",
