@@ -9,17 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **合入 OMP Studio 0.2.2 工作台能力**：在保留 Juling 品牌、Quiet Precision 主题和既有 Runtime 适配的前提下，接收上游 0.2.2 的 78 个提交 —— 文件浏览器（本机 / SSH 项目外文件）、SSH tmux 附加、Agent 指挥台（编队 / 时间线 / 星图）、选择性提交、输入历史、原生表单题组、浏览器原生页面与 Console/Network、GitHub Actions 展开、四档光效以及补全的英文界面。Runtime pin 同步升级到 **OMP 18.20.2**，Harness patchset 为 `18.20.2-harness.11`。
+- **合入 OMP Studio 0.2.2 工作台能力**：在保留 Juling 品牌、Quiet Precision 主题和既有 Runtime 适配的前提下，接收上游 0.2.2 的 78 个提交 —— 文件浏览器（本机 / SSH 项目外文件）、SSH tmux 附加、Agent 指挥台（编队 / 时间线 / 星图）、选择性提交、输入历史、原生表单题组、浏览器原生页面与 Console/Network、GitHub Actions 展开、四档光效以及补全的英文界面。Runtime pin 同步升级到 **OMP 18.20.2**，Harness patchset 为 `18.20.2-harness.13`。
 - **界面重设计「静默精确 / Quiet Precision」**：整套视觉系统从「蓝图 HUD」切换为单一表面系统 —— 浅色瓷白 / 深色石墨双主题，靛蓝作为唯一交互主色、青绿只表达数据，语义色只表达状态；圆角阶梯 6 / 8 / 10 / 14px，控件统一为 26 / 32 / 38px 三档，正文基准字号提升到 13px，层级改由字重、留白与细线承担；保留极轻投影给菜单、弹窗、卡片与 Composer，不再用网格、四角刻度、双线框或深色舱壁制造技术感。标题栏、原生窗口按钮、导航 rail、侧栏、顶栏、二级页头、状态条使用同一主题表面；工作台对话（消息、工具卡、Plan 入口、队列、空态）、首页 / 历史 / 能力中心 / Agent Hub / 模型配置 / 设置 / 诊断 / 媒体 / 评估 / 统计 / 教程全部跟版；`linework.css` 及其装饰语法退役，动效数值与既有门禁不变。
 - **Runtime 身份统一为 Juling**：`omp.exe` / `omp` 更名为 `juling.exe` / `juling`，Runtime 的 `APP_NAME`、用户代理、帮助与登录提示、进程标题都改为 `juling`；`omp --mode harness-host` 变为 `juling --mode harness-host`。用户配置目录从 `~/.omp` 迁移到 `~/.juling`（首次启动整目录改名，失败则改为复制并继续使用旧目录），项目级 `.juling/` 与 `~/.juling/` 取代 `.omp`；旧的 `~/.omp`、项目 `.omp/`、`OMP_*` / `PI_*` 环境变量与已安装的 `omp.exe`（`runtime-manifest.json.entrypoint` 为准）继续可读，不再写入。上述旧名兼容由 vendor 接缝补丁 `0005-juling-identity.patch` 与 Host 侧发现/迁移逻辑共同保证。安装包新增随包分发的 `third-party-notices.txt`（MIT 全文与版权声明），满足随 Runtime 二进制分发的许可要求。
 - **产品展示品牌统一为 Juling**：对话作者、顶栏状态、工作台文档面板（Juling Logs）、统计面板、审批卡片、各页说明、安装向导、更新发布标题与诊断报告中的产品名由 OMP 改为 Juling / Juling Runtime；上游项目名（oh-my-pi）、`omp` CLI、`~/.omp` 路径、`OMP_*` 环境变量与线协议标识保持不变（CLI、路径与环境变量已由上方 Runtime 身份统一改名取代）。同时补齐 Agent Hub 恢复命令、预览演示项目名与安装完成页中的旧品牌展示。
-- Runtime 升级至 **OMP 18.20.2**，上游固定为 `7c49c11aa5bbaf3f418406583096168ad5b8c6dc`，Harness patchset 为 `18.20.2-harness.11`；完整接收 18.19.0–18.20.2 修复链，详见 [18.20.2 迁移报告](docs/migrations/omp-18.20.2.md)。Skillshare 已验证来源展示统一为 `Reported Juling`。
+- Runtime 升级至 **OMP 18.20.2**，上游固定为 `7c49c11aa5bbaf3f418406583096168ad5b8c6dc`，Harness patchset 为 `18.20.2-harness.13`；完整接收 18.19.0–18.20.2 修复链，详见 [18.20.2 迁移报告](docs/migrations/omp-18.20.2.md)。Skillshare 已验证来源展示统一为 `Reported Juling`。
 - Agent Hub 跟随上游移除 `taskFile`，任务内容统一通过 inline `assignment` 提交；不再保留私有文件任务校验、审批或恢复 shim。
 - Browser 接入 18.19 的 `insecure`、`app` 字符串、`argv` 与顶层 `target` 参数；托管浏览器保留会话绑定、人工控制和下载生命周期，普通 relay 仍拒绝不安全连接。
 - Ask/Tree 重答改用原生 HTML form；Context 查看器新增 `instruction-files` 分类；Codex 与 Claude 重置券设置按 5h、weekly 及 Fable 窗口拆分，不再提供已删除的总开关。
+- **左侧导航补齐目的地**：rail 按「工作台、首页、会话历史、能力中心、模型配置、评测、媒体、设置、诊断中心」排列，末尾新增「主题」明暗切换；评测与诊断中心改用不同图标（量杯 / 波形）。rail 外框改为浮动胶囊：2px 内描边（`--rail-border`，深色为 24% 白，保证暗色下仍看得见）、两端为扁椭圆（横向半径取半宽 30px、纵向 16px），顶底是宽而平的弧而不是正半圆；画布、侧栏、标题栏与 rail 共用同一壳面（浅色 `#e2e6ec` / 深色 `#05060a`），左右背景不再分成两种灰，内容卡片仍保持白色；收起时宽度与四周留白一起收到 0，内容回补整条 rail 的占位。
+- **六语界面选择**：左侧 rail 新增「多语言」入口（地球图标菜单），可在简体中文 / English / Русский / 日本語 / 한국어 / हिन्दी 之间切换，设置页的「界面语言」同步提供六项；`AppLanguage`/`Locale` 扩展为六语，`html lang`、窗口标题、系统语言检测、语言包回退链（缺失键 → 英文）一并跟上。组件里约 2,800 处内联 `zh ? … : …` 文案在四种新语言下暂回退英文，待后续迁入词库。
+- **统计面板中文化与换标**：统计页内嵌的原生 `omp stats` 面板随界面语言切换（Harness iframe 追加 `?lang=zh`）：导航、指标、表格、图表图例、空态与 tooltip 全部中英双语，英文原句仍内置为回退；顶栏品牌改为 Juling Harness + 新图标（favicon 同步），正文中的 omp 产品名改为 Juling，stop reason 等枚举显示中文标签。Runtime patchset 增至 `18.20.2-harness.13`；面板需随下一次 Runtime 构建生效。
+- **二级页顶部导航删除**：首页 / 历史 / 能力中心等页面不再有页头那一行（返回、标题、标签行、主题按钮），导航只在左侧 rail；正文直接铺到标题栏下，顶部多出 48px。返回 / 前进仍用窗口标题栏按钮，主题用 rail 末项或命令面板。
+- **产品图标换新**：桌面窗口 / 任务栏、侧栏与关于页、浏览器 favicon、安装向导和官网统一换用新的 Harness 徽标；桌面端 ICO 由 1024 px 源图生成 16–256 px 七档，macOS 菜单栏继续使用单色 template 图标。
 
 ### Fixed
 
+- 修复侧栏左侧卡区（Explorer 等）在浅色主题下用纸白 `--surface` 铺底、与侧栏舱壁色不一致的问题；卡片底改用 `--cocoon-inset`，跟随侧栏同一表面。
+- 修复 Windows 安装器构建依赖 GNU tar 解包 WebView2 nupkg/ZIP 失败的问题，改用 Node ZIP 解码。
+- 修复 Benchmark 取消后模型行仍显示 `done` 的问题；取消的运行保留已完成测量，并将当前及排队模型标记为 `cancelled`。
+- 修复开发预览传入错误的 Renderer 地址环境变量，导致 Electron 仍加载 `file://` 构建产物、Vite/HMR 未生效的问题。
 - 修复浏览器安装演示完成后退回欢迎页或停留死页的问题；勾选运行时进入软件预览，否则离开完成页，文件演示可通过 `appUrl` 指定软件入口。
 - 修复新建、恢复及自动重连时客户端 snapshot 尚未就绪就发送 `core.prompt` 或检查听写状态所产生的 `UNAVAILABLE`；发送现在等待目标会话的实时快照，听写不再使用 stale-connected 状态发命令。
 - 修复隔离 profile 共用全局 Windows authority 命名管道导致 Host 启动失败、界面进入只读不可用状态的问题。
