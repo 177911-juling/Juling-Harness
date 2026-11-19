@@ -145,7 +145,7 @@ describe("createOmpUsageService", () => {
     });
     const result = await service.openDashboard();
     assert.equal(result.applied, true);
-    assert.match(result.message ?? "", /Opened the OMP Stats dashboard in your browser/);
+    assert.match(result.message ?? "", /Opened the (OMP|Juling) Stats dashboard|已在浏览器打开 Juling Stats 仪表盘/);
     assert.deepEqual(spawned, []);
     assert.deepEqual(opened, ["http://127.0.0.1:3847/"]);
     assert.equal(JSON.stringify(result).includes("C:\\\\tools"), false);

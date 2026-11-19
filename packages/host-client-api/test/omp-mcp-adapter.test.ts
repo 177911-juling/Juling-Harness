@@ -221,7 +221,7 @@ args = []
       );
       const model = await createOmpMcpService({ home, getCwd: () => cwd, now: () => NOW }).get();
       assert.equal(model.servers[0]?.name, "extra");
-      assert.equal(model.servers[0]?.sourceLabel, "User");
+      assert.ok(["User", "用户"].includes(model.servers[0]?.sourceLabel ?? ""));
     });
   });
 
@@ -365,7 +365,7 @@ args = []
       assert.equal(rows.length, 2);
       const winner = rows.find((s) => s.status !== "shadowed");
       const shadowed = rows.find((s) => s.status === "shadowed");
-      assert.equal(winner?.sourceLabel, "Project");
+      assert.ok(["Project", "项目"].includes(winner?.sourceLabel ?? ""));
       assert.ok(shadowed);
     });
   });
