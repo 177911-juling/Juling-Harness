@@ -33,6 +33,9 @@ function fetcher(envelopes: SignedUpdateManifest[], counter: string[] = []): typ
     const u = String(url); counter.push(u);
     if (u.includes("api.github.com")) return new Response(JSON.stringify(envelopes.map(envelope => ({ assets: [{ name: assetName(envelope), browser_download_url: `https://github.com/owner/repo/releases/download/v${envelopes.indexOf(envelope)}/${assetName(envelope)}` }] }))));
     const requested = u.split("/").at(-1) ?? "";
+    const versionMatch = /\/v(\d+)\//.exec(u);
+    const versioned = versionMatch ? envelopes[Number(versionMatch[1])] : undefined;
+    if (versioned && requested === assetName(versioned)) return new Response(JSON.stringify(versioned));
     const index = envelopes.findIndex(envelope => assetName(envelope) === requested);
     if (index >= 0) return new Response(JSON.stringify(envelopes[index]));
     const bytes = u.endsWith("blockmap") ? map : binary;
@@ -65,7 +68,7 @@ test("Linux waits for a required manual desktop upgrade before downloading an in
     prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, restart: () => {}, quit: () => {},
     fetcher: fetcher([signed({ platform: "linux-x64", app: component("new.AppImage"), runtime: { ...component("runtime.zip", "18.0.0-harness.2"), minAppVersion: "2.0.0" } })], requests) });
   await coordinator.initialize(); await coordinator.check(); await coordinator.prepare("all");
-  assert.match(coordinator.state.runtime.blockedReason!, /update the desktop app first/u);
+  assert.match(coordinator.state.runtime.blockedReason!, /update the desktop app first|请先更新桌面/u);
   assert.equal(coordinator.state.error, undefined);
   assert.equal(requests.some(url => url.endsWith("runtime.zip")), false);
 });
@@ -146,9 +149,9 @@ test("deb discovers its signed catalog beside independent Runtime releases and r
   assert.equal(upgraded.state.rollbackAppVersion, "1.0.0");
   const discovery = { repo: "owner/repo", platform: "linux-x64", keys, mirror: "", channel: "stable" as const, signal: new AbortController().signal, watermarks: {}, currentVersions: { app: "1.0.0" }, linuxDesktopFormat: "deb" as const, fetcher: source };
   rows[1] = [primary(next)];
-  await assert.rejects(discoverUpdates(discovery), /no deb update catalog/u);
+  await assert.rejects(discoverUpdates(discovery), /no deb update catalog|缺少 deb 更新清单/u);
   rows[1] = [primary(next), debEnvelope({ ...next, minAppVersion: "9.0.0" })];
-  await assert.rejects(discoverUpdates(discovery), /catalogs do not match/u);
+  await assert.rejects(discoverUpdates(discovery), /catalogs do not match|清单.*不一致/u);
 });
 
 for (const scenario of [
@@ -306,7 +309,7 @@ test("discovery reports an incomplete catalog when one signed manifest is invali
   const broken = signed({ app: { ...component("old.exe", "1.5.0"), sequence: 1 } });
   broken.manifest.app!.version = "9.9.9"; // Mutating after signing breaks the signature.
   const valid = signed({ app: { ...component(), sequence: 3 } });
-  await assert.rejects(discoverUpdates({ repo: "owner/repo", platform: "win32-x64", channel: "stable", mirror: "", keys, signal: new AbortController().signal, fetcher: fetcher([broken, valid]), watermarks: {} }), /latest version cannot be determined/u);
+  await assert.rejects(discoverUpdates({ repo: "owner/repo", platform: "win32-x64", channel: "stable", mirror: "", keys, signal: new AbortController().signal, fetcher: fetcher([broken, valid]), watermarks: {} }), /latest version cannot be determined|无法确定最新版本/u);
 });
 test("discovery still rejects conflicting signed sequences for one component", async () => {
   const first = signed({ app: { ...component(), sequence: 2 } });

@@ -42,10 +42,10 @@ test("deb installer refuses altered packages and cancels the supervisor when aut
     spawnHelper: async (_script, planPath) => { plan = JSON.parse(await readFile(planPath, "utf8")) as Record<string, unknown>; },
     waitForReady: async () => ({ status: "failed", message: "cancelled" }) });
   installer.preflight = async () => undefined;
-  await assert.rejects(installer.install(nextPath, next.manifest.app!, false, next, { path: oldPath, envelope: old }), /verification/u);
+  await assert.rejects(installer.install(nextPath, next.manifest.app!, false, next, { path: oldPath, envelope: old }), /verification|校验失败/u);
   assert.equal(plan, undefined);
   await writeFile(nextPath, "next");
-  await assert.rejects(installer.install(nextPath, next.manifest.app!, false, next, { path: oldPath, envelope: old }), /authorization.*cancelled/iu);
+  await assert.rejects(installer.install(nextPath, next.manifest.app!, false, next, { path: oldPath, envelope: old }), /authorization.*cancelled|授权被取消/iu);
   const captured = plan as Record<string, unknown> | undefined;
   assert.ok(captured);
   await assert.rejects(readFile(String(captured.control)), { code: "ENOENT" });
