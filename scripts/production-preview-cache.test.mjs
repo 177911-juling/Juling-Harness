@@ -181,6 +181,7 @@ test("the production launcher builds once, reuses it, and rebuilds when source c
   await mkdir(join(root, "scripts"));
   await copyFile(join(repo, "scripts/preview.mjs"), join(root, "scripts/preview.mjs"));
   await copyFile(join(repo, "scripts/production-preview-cache.mjs"), join(root, "scripts/production-preview-cache.mjs"));
+  await put(root, "scripts/preview-live-ui.mjs", `export async function startLiveUiPreview(){}`);
   await put(root, "scripts/preload-bundle.mjs", `import {writeFileSync} from 'node:fs'; export function bundlePreload(){writeFileSync('apps/desktop/dist/preload.cjs','preload');}`);
   await put(root, "scripts/production-preview-runtime.mjs", `
 import {mkdir,writeFile} from 'node:fs/promises'; import {join} from 'node:path';

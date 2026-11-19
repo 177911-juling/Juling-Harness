@@ -86,7 +86,7 @@ test("Linux Runtime uses ELF targets; only x64 has a desktop catalog", () => {
   elf.writeUInt16LE(183, 18);
   assert.equal(elfArchitecture(elf), "arm64");
   assert.equal(runtimeEntrypointFor("linux-arm64"), "juling");
-  assert.equal(UPDATE_PLATFORMS.includes("linux-x64"), false);
+  assert.equal(UPDATE_PLATFORMS.includes("linux-x64"), true);
   assert.throws(() => elfArchitecture(pe(0x8664)), /ELF/u);
 });
 
