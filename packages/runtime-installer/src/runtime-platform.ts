@@ -18,7 +18,7 @@ export type LegacyRuntimeEntrypoint = (typeof LEGACY_RUNTIME_ENTRYPOINTS)[Runtim
 export type AnyRuntimeEntrypoint = RuntimeEntrypoint | LegacyRuntimeEntrypoint;
 
 /** Platforms with signed update catalogs. */
-export const UPDATE_PLATFORMS = Object.freeze(["win32-x64", "win32-arm64", "darwin-arm64"] as const);
+export const UPDATE_PLATFORMS = Object.freeze(["win32-x64", "win32-arm64", "darwin-arm64", "linux-x64"] as const);
 export type UpdatePlatform = (typeof UPDATE_PLATFORMS)[number];
 
 /** Runtime build targets; adding a remote target does not add a desktop updater. */

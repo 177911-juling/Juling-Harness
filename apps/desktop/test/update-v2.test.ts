@@ -23,15 +23,18 @@ function file(asset: string, bytes: Buffer): UpdateFile { return { asset, url: `
 const map = gzipSync(JSON.stringify({ version: "2", files: [{ name: "file", offset: 0, checksums: ["checksum"], sizes: [3] }] }));
 const binary = Buffer.from("new");
 function component(name = "setup.exe", version = "2.0.0"): ComponentRelease { return { version, sequence: 2, channel: "stable", file: file(name, binary), blockmap: file(`${name}.blockmap`, map), minAppVersion: "1.0.0", harnessProtocol: { min: 1, max: 1 } }; }
-function signed(parts: Partial<Pick<UpdateManifest, "app" | "runtime">>): SignedUpdateManifest {
+function signed(parts: Partial<Pick<UpdateManifest, "app" | "runtime" | "platform" | "firstInstall">>): SignedUpdateManifest {
   const manifest: UpdateManifest = { schema: 2, repo: "owner/repo", platform: "win32-x64", generatedAt: "2026-09-17T00:00:00Z", releaseNotesUrl: "https://github.com/owner/repo/releases/tag/v2", ...parts };
   return { manifest, signature: { algorithm: "ed25519", keyId: "test", value: sign(null, updateSigningBytes(manifest), pair.privateKey).toString("base64url") } };
 }
 function fetcher(envelopes: SignedUpdateManifest[], counter: string[] = []): typeof fetch {
+  const assetName = (envelope: SignedUpdateManifest) => `updates-${envelope.manifest.platform}.json`;
   return (async (url: string | URL | Request) => {
     const u = String(url); counter.push(u);
-    if (u.includes("api.github.com")) return new Response(JSON.stringify(envelopes.map((e, i) => ({ assets: [{ name: "updates-win32-x64.json", browser_download_url: `https://github.com/owner/repo/releases/download/v${i}/updates-win32-x64.json` }] }))));
-    if (u.endsWith("updates-win32-x64.json")) { const index = Number(/\/v(\d+)\//.exec(u)![1]); return new Response(JSON.stringify(envelopes[index])); }
+    if (u.includes("api.github.com")) return new Response(JSON.stringify(envelopes.map(envelope => ({ assets: [{ name: assetName(envelope), browser_download_url: `https://github.com/owner/repo/releases/download/v${envelopes.indexOf(envelope)}/${assetName(envelope)}` }] }))));
+    const requested = u.split("/").at(-1) ?? "";
+    const index = envelopes.findIndex(envelope => assetName(envelope) === requested);
+    if (index >= 0) return new Response(JSON.stringify(envelopes[index]));
     const bytes = u.endsWith("blockmap") ? map : binary;
     return new Response(new Uint8Array(bytes), { headers: { "content-length": String(bytes.length) } });
   }) as typeof fetch;

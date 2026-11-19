@@ -8,7 +8,7 @@ import { GitPatch } from "../git/GitPatch";
 import { repositoryPathForWorkspaceFile } from "../git/workspacePaths";
 import { DiffDisplayMode } from "../conversation/ChangesPanel";
 import { Icon } from "../icons";
-import { useI18n } from "../i18n";
+import { pickLocale, useI18n } from "../i18n";
 import { fileManagerName } from "../platformCopy";
 import type { FileMenuAction } from "../menus";
 import { usePreviewMode } from "../preview/PreviewContext";

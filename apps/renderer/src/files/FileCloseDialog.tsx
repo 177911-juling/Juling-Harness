@@ -51,7 +51,7 @@ export function FileCloseDialog() {
     return () => portalDoc.removeEventListener("keydown", onKeyDown);
   }, [active, portalDoc, saving]);
   useEffect(() => {
-    if (globalThis.ompHarnessChrome?.files) return;
+    if (globalThis.julingHarnessChrome?.files) return;
     const before = (event: BeforeUnloadEvent) => {
       if (!dirtyFileDocuments().length) return;
       event.preventDefault();
