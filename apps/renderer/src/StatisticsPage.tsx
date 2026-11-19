@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HarnessClient } from "@juling-harness/client-contract";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_STATS_TOTALS } from "./preview/fixtures";
@@ -32,6 +32,17 @@ export function StatisticsPage({ client }: { client: HarnessClient }) {
   const [reason, setReason] = useState("");
   const [attempt, setAttempt] = useState(0);
   const framedRef = useRef(false);
+  /* The dashboard ships English copy; tell it which language to speak. */
+  const framedUrl = useMemo(() => {
+    if (url === undefined) return undefined;
+    try {
+      const parsed = new URL(url);
+      parsed.searchParams.set("lang", zh ? "zh" : "en");
+      return parsed.toString();
+    } catch {
+      return url;
+    }
+  }, [url, zh]);
 
   useEffect(() => {
     if (preview) return;
@@ -124,7 +135,7 @@ export function StatisticsPage({ client }: { client: HarnessClient }) {
         {url !== undefined ? (
           <iframe
             className="stats-frame-body"
-            src={url}
+            src={framedUrl}
             title={zh ? "Juling 统计面板" : "Juling statistics panel"}
             onLoad={onFrameLoad}
           />

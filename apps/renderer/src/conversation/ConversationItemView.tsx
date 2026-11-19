@@ -2,7 +2,7 @@ import { AnnotationButton } from "../annotations/Annotations";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ConversationMessageError } from "@juling-harness/client-contract";
 import type { HarnessAgentSnapshot } from "@juling-harness/harness-protocol";
-import { Icon } from "../icons";
+import { AppIcon, Icon } from "../icons";
 import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
 import { useAppSettings, type ToolActivityDetail } from "../settings/appSettings";
 import { useI18n } from "../i18n";
@@ -401,7 +401,7 @@ function AssistantRunViewInner({
     <div className={`ev ev-assistant${process ? " ev-process" : ""}`} data-item-id={first.row.itemId}>
       {process ? null : (
         <div className="ev-head">
-          <span className="who"><span className="role-badge a">π</span>Juling</span>
+          <span className="who"><span className="role-badge a"><AppIcon size={12} /></span>Juling</span>
           <span className="muted">{formatTime(first.row.createdAt)}</span>
           <AssistantStatus status={last.row.status} />
         </div>
@@ -658,7 +658,7 @@ export const ConversationItemView = memo(function ConversationItemView({
       <div className={`ev ev-assistant${process ? " ev-process" : ""}`} data-item-id={row.itemId}>
         {process ? null : (
           <div className="ev-head">
-            <span className="who"><span className="role-badge a">π</span>Juling</span>
+            <span className="who"><span className="role-badge a"><AppIcon size={12} /></span>Juling</span>
             <span className="muted">{formatTime(row.createdAt)}</span>
             <AssistantStatus status={row.status} />
           </div>

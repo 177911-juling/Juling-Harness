@@ -59,7 +59,7 @@ export function LocalSettings({ ctl, section }: { ctl: SettingsCtl; section: "ge
   return <>
     <SettingSection title={t("settings.general.sectionApp")}>
       <SettingRow label={t("settings.general.language")} desc={t("settings.general.languageDesc")} source={source("language")}>
-        <Select label={t("settings.general.language")} value={app.language} options={[["system", t("settings.general.langSystem")], ["zh", t("settings.general.langZh")], ["en", t("settings.general.langEn")]]} onChange={language => updateApp({ language })} />
+        <Select label={t("settings.general.language")} value={app.language} options={[["system", t("settings.general.langSystem")], ["zh", t("settings.general.langZh")], ["en", t("settings.general.langEn")], ["ru", t("settings.general.langRu")], ["ja", t("settings.general.langJa")], ["ko", t("settings.general.langKo")], ["hi", t("settings.general.langHi")]]} onChange={language => updateApp({ language })} />
       </SettingRow>
     </SettingSection>
     <SettingSection title={t("settings.general.sectionStartup")}>

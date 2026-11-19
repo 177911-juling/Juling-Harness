@@ -93,3 +93,25 @@ export function transitionMs(element: HTMLElement): number {
 export function transitionDelayMs(element: HTMLElement): number {
   return firstTime(getComputedStyle(element).transitionDelay, 0);
 }
+
+/** The first entry of a comma-separated CSS list, ignoring commas inside
+ *  functions such as `cubic-bezier(0.32, 0.72, 0, 1)`. */
+function firstItem(value: string): string {
+  let depth = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === "(") depth += 1;
+    else if (char === ")") depth = Math.max(0, depth - 1);
+    else if (char === "," && depth === 0) return value.slice(0, index).trim();
+  }
+  return value.trim();
+}
+
+/**
+ * The easing of the element's first transition. A multi-property `transition`
+ * computes to a comma list, and WAAPI rejects a list as `easing`, so read the
+ * curve the same way {@link transitionMs} reads the duration: first entry.
+ */
+export function transitionEase(element: HTMLElement, fallback: string = MOTION_EASE.nav): string {
+  return firstItem(getComputedStyle(element).transitionTimingFunction) || fallback;
+}

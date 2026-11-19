@@ -49,7 +49,7 @@ import { runtimeSocketDirectory } from "./runtime-session.js";
 import { artifactResponse, registerArtifactIpc } from "./chrome-artifacts.js";
 import { graphicAssetResponse } from "./graphic-protocol.js";
 import {
-  TITLEBAR_OVERLAY,
+  WINDOW_BACKGROUND,
   applyTitleBarOverlay,
   registerTitleBarOverlayIpc,
 } from "./titlebar-overlay.js";
@@ -641,7 +641,7 @@ export async function main(): Promise<void> {
         show: false,
         title: "Juling Harness",
         ...(validAppIcon !== undefined ? { icon: validAppIcon } : appIcon !== undefined ? { icon: appIcon } : {}),
-        backgroundColor: TITLEBAR_OVERLAY.light.color,
+        backgroundColor: WINDOW_BACKGROUND.light,
         ...windowChromeOptions(process.platform, "light"),
       },
       preloadPath,

@@ -7,6 +7,7 @@
  * 不调用 Host。演示路径、容量与时间都不是 Host 真相。
  */
 import { PLATFORM } from "../platform";
+import type { Locale } from "../i18n";
 import { DEMO_TOOLS } from "./demoPaths";
 import { PREVIEW_FILE_TREE, PREVIEW_PROJECTS, type PreviewFileNode } from "./fixtures";
 import { baseName, COMPUTER, driveDisplayName, joinPath, parentPath, samePath, within, type FileBrowserSource, type FsDirectory, type FsDrive, type FsEntry, type FsPeek, type FsPlaces } from "../fileBrowser/model";
@@ -125,7 +126,7 @@ const TEXT_SAMPLE: Record<string, string> = {
 const CODE_SAMPLE = "import { useState } from \"react\";\n\nexport function Counter() {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(count + 1)}>{count}</button>;\n}\n";
 const IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#172c43"/><stop offset="1" stop-color="#3b3f8f"/></linearGradient></defs><rect width="480" height="300" fill="url(#g)"/><circle cx="240" cy="130" r="70" fill="#72cbb4"/><text x="240" y="250" text-anchor="middle" fill="white" font-size="26" font-family="sans-serif">Juling Harness</text></svg>')}`;
 
-export function createPreviewFileBrowserSource(platform: "win32" | "darwin" = PLATFORM === "darwin" ? "darwin" : "win32", now = Date.now(), language: "zh" | "en" = "zh"): FileBrowserSource {
+export function createPreviewFileBrowserSource(platform: "win32" | "darwin" = PLATFORM === "darwin" ? "darwin" : "win32", now = Date.now(), language: Locale = "zh"): FileBrowserSource {
   const copy = (zh: string, en: string) => language === "zh" ? zh : en;
   const sep = platform === "win32" ? "\\" : "/";
   const driveLabels: Record<string, string> = { 系统: "System", 数据: "Data", "U 盘": "USB drive" };

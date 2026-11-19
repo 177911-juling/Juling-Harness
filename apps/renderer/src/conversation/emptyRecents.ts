@@ -1,5 +1,6 @@
 import type { SessionHistoryEntry } from "@juling-harness/client-contract";
 import { getPreviewProjects, type PreviewThread } from "../preview/fixtures";
+import type { Locale } from "../i18n";
 
 export type EmptyRecentStatus = "running" | "approval" | "idle";
 
@@ -26,7 +27,7 @@ function previewAgeMinutes(time: string): number {
   return amount * 1440;
 }
 
-function previewStatus(thread: PreviewThread, lang: "zh" | "en" = "zh"): { status: EmptyRecentStatus; statusLabel: string } {
+function previewStatus(thread: PreviewThread, lang: Locale = "zh"): { status: EmptyRecentStatus; statusLabel: string } {
   if (thread.status === "running") return { status: "running", statusLabel: lang === "en" ? "Running" : "运行中" };
   if (thread.wait === "approval" || thread.wait === "plan" || thread.wait === "ask") {
     return {
@@ -42,7 +43,7 @@ function previewStatus(thread: PreviewThread, lang: "zh" | "en" = "zh"): { statu
 /** Preview recents: flatten ver1 projects, skip archived / the blank t0 thread. */
 export function collectPreviewRecents(
   hiddenIds: ReadonlySet<string> = new Set(),
-  lang: "zh" | "en" = "zh",
+  lang: Locale = "zh",
 ): EmptyRecentRow[] {
   return getPreviewProjects(lang === "zh")
     .flatMap((project) => project.threads.map((thread) => ({ project: project.name, thread })))
@@ -63,7 +64,7 @@ export function collectPreviewRecents(
     });
 }
 
-export function relativeTime(iso: string, now = Date.now(), lang: "zh" | "en" = "zh"): string {
+export function relativeTime(iso: string, now = Date.now(), lang: Locale = "zh"): string {
   const then = Date.parse(iso);
   if (!Number.isFinite(then)) return "";
   const seconds = Math.max(0, Math.round((now - then) / 1000));
@@ -80,7 +81,7 @@ export function collectHistoryRecents(input: {
   readonly runningSessionId?: string;
   readonly waitingSessionId?: string;
   readonly now?: number;
-  readonly lang?: "zh" | "en";
+  readonly lang?: Locale;
 }): EmptyRecentRow[] {
   const lang = input.lang ?? "zh";
   return input.entries

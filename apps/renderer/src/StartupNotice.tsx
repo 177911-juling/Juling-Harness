@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Brand } from "./brands";
-import { Icon } from "./icons";
+import { AppIcon, Icon } from "./icons";
 import { useI18n } from "./i18n";
 import { usePreviewMode } from "./preview/PreviewContext";
 import {
-  PROJECT_GITHUB_HOST,
-  PROJECT_GITHUB_URL,
+  PROJECT_SITE_HOST,
+  PROJECT_SITE_URL,
   getStartupNoticeCopy,
   dismissStartupNoticeForever,
   shouldShowStartupNotice,
@@ -37,20 +36,20 @@ export function StartupNoticeDialog({
     const clipboard = typeof navigator === "object" ? navigator.clipboard : undefined;
     if (!clipboard) return;
     try {
-      await clipboard.writeText(PROJECT_GITHUB_URL);
+      await clipboard.writeText(PROJECT_SITE_URL);
       setCopied(true);
     } catch {
       /* 剪贴板被拒绝时地址仍可见，用户可手选复制。 */
     }
   }, []);
-  const openGithub = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
+  const openSite = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     const openUrl = globalThis.julingHarnessChrome?.openUrl;
     if (openUrl !== undefined) {
-      void openUrl({ url: PROJECT_GITHUB_URL });
+      void openUrl({ url: PROJECT_SITE_URL });
       return;
     }
-    window.open(PROJECT_GITHUB_URL, "_blank", "noopener,noreferrer");
+    window.open(PROJECT_SITE_URL, "_blank", "noopener,noreferrer");
   }, []);
   useEffect(() => {
     if (!copied) return;
@@ -79,16 +78,16 @@ export function StartupNoticeDialog({
           <div className="startup-notice-repo">
             <a
               className="startup-notice-repo-main"
-              href={PROJECT_GITHUB_URL}
+              href={PROJECT_SITE_URL}
               target="_blank"
               rel="noreferrer noopener"
-              aria-label={`${copy.repoLabel} ${PROJECT_GITHUB_URL}`}
-              onClick={openGithub}
+              aria-label={`${copy.repoLabel} ${PROJECT_SITE_URL}`}
+              onClick={openSite}
             >
-              <span className="create-folder-icon" aria-hidden="true"><Brand id="github" extra="lg" /></span>
+              <span className="create-folder-icon" aria-hidden="true"><AppIcon size={20} /></span>
               <span className="create-folder-copy">
                 <b>{copy.repoLabel}</b>
-                <span className="mono">{PROJECT_GITHUB_HOST}</span>
+                <span className="mono">{PROJECT_SITE_HOST}</span>
               </span>
               <Icon name="external" extra="sm" />
             </a>

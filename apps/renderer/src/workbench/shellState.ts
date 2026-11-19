@@ -2,7 +2,6 @@ import { CLIENT_CONTRACT_VERSION } from "@juling-harness/client-contract";
 import type { AuthorityEpoch, AuthorityId, ClientBootstrap, ClientError, ClientEvent } from "@juling-harness/client-contract";
 import { shouldRecordShellEvent, toShellEventLogEntry } from "../shellMemory";
 import type { OperatorStateSnapshot } from "@juling-harness/harness-protocol";
-import { type IconName } from "../icons";
 import { type TranslationParams } from "../i18n";
 import { getAppSettings, readLastRoute } from "../settings/appSettings";
 import { desktopNotice, notifyAskConfirmation, clearAskConfirmationNotice } from "../settings/desktopNotice";
@@ -45,19 +44,6 @@ export function notifyFromEvent(event: ClientEvent, t: (key: string, params?: Tr
 export function isSecondary(route: Route): route is SecondaryRoute {
   return route === "home" || route === "history" || route === "agent-hub" || route === "capabilities" || route === "model-config" || route === "settings" || route === "diagnostics" || route === "media" || route === "evaluation" || route === "statistics";
 }
-
-export const SECONDARY_META: Record<SecondaryRoute, { titleKey: string; icon: IconName }> = {
-  statistics: {titleKey:"nav.statistics",icon:"pulse"},
-  home: { titleKey: "nav.home", icon: "home" },
-  history: { titleKey: "nav.history", icon: "history" },
-  "agent-hub": { titleKey: "nav.agentHub", icon: "bot" },
-  capabilities: { titleKey: "nav.capabilities", icon: "package" },
-  "model-config": { titleKey: "nav.modelConfig", icon: "server" },
-  settings: { titleKey: "nav.settings", icon: "settings" },
-  diagnostics: { titleKey: "nav.diagnostics", icon: "pulse" },
-  evaluation: { titleKey: "nav.evaluation", icon: "pulse" },
-  media: { titleKey: "media.title", icon: "image" },
-};
 
 export function reduce(state: ViewState, action: Action): ViewState {
   switch (action.type) {

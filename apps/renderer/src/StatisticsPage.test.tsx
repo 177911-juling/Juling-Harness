@@ -33,8 +33,21 @@ it("embeds the loopback dashboard the Host reports", async () => {
   );
   await waitFor(() => expect(container.querySelector("iframe")).toBeTruthy());
   const frame = container.querySelector("iframe");
-  expect(frame?.getAttribute("src")).toBe("http://127.0.0.1:3847/#/overview?range=all");
+  expect(frame?.getAttribute("src")).toBe("http://127.0.0.1:3847/?lang=zh#/overview?range=all");
   expect(frame?.getAttribute("title")).toBe("Juling 统计面板");
+});
+
+it("passes the interface language through to the embedded dashboard", async () => {
+  const client = clientReturning({ available: true, url: "http://127.0.0.1:3847/#/overview?range=all" });
+  const { container } = render(
+    <I18nProvider forcedLanguage="en">
+      <PreviewModeProvider switchEnabled>
+        <StatisticsPage client={client} />
+      </PreviewModeProvider>
+    </I18nProvider>,
+  );
+  await waitFor(() => expect(container.querySelector("iframe")).toBeTruthy());
+  expect(container.querySelector("iframe")?.getAttribute("src")).toBe("http://127.0.0.1:3847/?lang=en#/overview?range=all");
 });
 
 it("states the reason and renders no frame when no panel answered", async () => {

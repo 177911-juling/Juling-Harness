@@ -13,7 +13,8 @@
   gap: var(--sp-8);
   padding: 0 var(--sp-16);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-inset);
+  /* Aurora Glass：顶栏透出玻璃底板，与主体同一块面。 */
+  background: transparent;
   position: relative;
   z-index: var(--z-topbar);
 }
@@ -30,6 +31,9 @@
   container-type: inline-size;
   container-name: tb-left;
 }
+/* 行内的普通图标按钮（fork/handoff）高度固定 30px，stretch 对定高项退化为
+   flex-start，会顶到顶栏上缘；显式居中，与右区图标按钮同一条中轴。 */
+.tb-left > .icon-btn { align-self: center; }
 .tb-crumb {
   display: flex;
   align-items: stretch;
@@ -38,9 +42,9 @@
   flex: 0 1 auto;
   font-size: var(--fs-12);
 }
-/* title block 格：竖线分隔 + 标签行。P10 修正：竖排导致图标被顶到文字上方、
-   高度参差 —— 改回**单行**布局：图标与值同行，mono 小标签作为前置前缀
-   （PROJECT omp-web），格间竖线保留。 */
+/* title block 格：竖线分隔 + 标签行。Aurora Glass 精修：标签前缀（PROJECT/
+   BRANCH/SESSION）统一为 10px 大写宽字距 eyebrow（与侧栏区块头同一套仪表
+   文字）；格间 1px 竖线极淡；hover 从矩形块改为胶囊软底，融入玻璃语言。 */
 .tb-crumb .crumb-item {
   position: relative;
   display: inline-flex;
@@ -49,34 +53,50 @@
   gap: var(--sp-6);
   height: var(--topbar-h);
   min-height: 0;
-  padding: 0 var(--sp-10);
+  padding: 0 var(--sp-12);
   border-radius: 0;
 }
 .tb-crumb .crumb-item + .crumb-item { border-left: none; }
-.tb-crumb .crumb-item::before { content: none; }
-/* 标签与值之间加一点间距：用 ::after 不行（在值后面），改给 icon 后的
-   label 一个左边距由 gap 处理，图标色淡化为标签级。 */
+.tb-crumb .crumb-item + .crumb-item::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  translate: 0 -50%;
+  width: 1px;
+  height: 14px;
+  background: var(--border-strong);
+  opacity: 0.45;
+  pointer-events: none;
+}
 .tb-crumb .crumb-item > .icon { color: var(--text-faint); }
 /* 标签重色弱化：值才是主角。 */
-.tb-crumb .crumb-item .crumb-label { color: var(--text-2); font-weight: var(--fw-medium); }
+.tb-crumb .crumb-item .crumb-label {
+  color: var(--text-faint);
+  font-weight: var(--fw-medium);
+  font-size: calc(10px * var(--text-font-scale));
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 .tb-crumb .crumb-item .crumb-current { color: var(--text); font-weight: var(--fw-semibold); }
 /* 项目格固定青色标签；分支格 mono 值已有；会话格标签取「会话」语义词。 */
 .tb-crumb .crumb-item[id] { max-width: 240px; }
 .tb-crumb .crumb-sep { display: none; }
 /* ver2 面包屑段：项目 › 分支 › 标题，各段都是可点按钮，hover 高亮。
-   P7 title block 化后这里只保留颜色/省略行为，几何由上面的分格规则接管。 */
+   Aurora Glass：hover/open = 全高软底（玻璃语言），不再用 26px 小胶囊。 */
 .crumb-item {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-4);
-  height: 26px;
-  padding: 0 var(--sp-6);
-  border-radius: var(--r-4);
+  height: var(--topbar-h);
+  padding: 0 var(--sp-12);
+  border-radius: 0;
   color: var(--text-2);
   white-space: nowrap;
   max-width: 220px;
   min-width: 0;
   overflow: hidden;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .crumb-menu { display: inline-flex; min-width: 0; max-width: 100%; flex: 0 1 auto; }
 .crumb-item:hover,
@@ -117,13 +137,14 @@
    否则 26px 的两个方块半径差 2px，挨在一起会看成两个不同层级的控件。 */
 .topbar .tb-right .dock-rail-toggle { padding: 0; border-radius: var(--r-6); }
 
-/* ---------- Session Telemetry（紧凑 · 扁平化：无边框无背景，纯文字） ----------
-   蓝图 HUD：遥测读数 = 苍青 mono 坐标读数（--accent-2），token 热值仍用琥珀。 */
+/* ---------- Session Telemetry（仪表组胶囊） ----------
+   Aurora Glass 精修：Token/Context 读数收进一枚细边框胶囊 —— 内部分区之间
+   用极淡竖线，hover 只点亮分区软底；读数仍是苍青 mono + 琥珀热值。 */
 .telemetry {
   display: flex;
   align-items: center;
-  gap: var(--sp-10);
-  padding: 2px var(--sp-4);
+  gap: var(--sp-4);
+  padding: 3px 6px;
   min-width: 0;
   overflow: hidden;
   /* No cursor:pointer and no hover fill here any more. The wrapper has no click
@@ -135,7 +156,9 @@
   color: var(--accent-2);
   letter-spacing: 0.03em;
   font-variant-numeric: tabular-nums;
-  border-radius: var(--r-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--surface-2);
 }
 /* Telemetry 内部分区（Token / Context 独立点击）— real buttons now, so the
    inherited button defaults (font, padding, border) have to be neutralised. */
@@ -143,14 +166,14 @@
   display: inline-flex;
   align-items: center;
   gap: var(--sp-10);
-  padding: 2px 4px;
-  margin: -2px -4px;
+  padding: 2px 6px;
+  margin: 0;
   border: none;
   background: none;
   font-family: inherit;
   font-size: inherit;
   color: inherit;
-  border-radius: var(--r-4);
+  border-radius: var(--r-full);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease);
 }
@@ -164,7 +187,7 @@
 /* 压缩档用一张条形图图标替掉整串数字（切换规则在 App.css 的 chrome-size 段），
    宽档不占位，dom 里的数字读数保持完整。 */
 .telemetry .t-tok-icon { display: none; align-items: center; }
-.telemetry .t-sep { width: 1px; height: 12px; background: var(--border-strong); opacity: 0.6; }
+.telemetry .t-sep { width: 1px; height: 12px; background: var(--border-strong); opacity: 0.5; }
 .telemetry .ctx-ring {
   width: 16px; height: 16px; border-radius: var(--r-full); flex: none;
   background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--surface-3) 0);
@@ -251,6 +274,20 @@
   display: flex;
   flex-direction: column;
   position: relative;
+}
+/* Aurora Glass：浅色主题下工作台中间信息流用纯白纸面，与统计页右侧白色面板
+   同一底色；暗色主题与壁纸模式保持玻璃/场底。状态条同色，整块白纸延伸到
+   玻璃板底缘——板的 18px 圆角由 .app-body 的 overflow 裁切保留。 */
+:root:not([data-theme="dark"]):not([data-backdrop="on"]) .convo-wrap {
+  background: #ffffff;
+}
+:root:not([data-theme="dark"]):not([data-backdrop="on"]) .bp-statusbar {
+  background: #ffffff;
+  /* 白纸面离玻璃板底缘 5px：露出薄薄一条玻璃色，白纸看起来「浮」在板上；
+     白面底角收圆角，与玻璃板自身的 18px 外圆角形成内层曲率。 */
+  margin-bottom: 5px;
+  border-bottom-left-radius: var(--r-8);
+  border-bottom-right-radius: var(--r-8);
 }
 /* Runtime 状态条：浮在对话区顶部，不占布局高度。左右让开 minimap 与停靠栏，
    避免盖住可点击的圆点轨道 / 图标；红条在 surface 上混一点红做底，保持扁平配色。 */
@@ -554,7 +591,14 @@
 }
 /* 蓝图 HUD：U/A 徽章改刻章方块 —— U 中性强墨线，A 琥珀。 */
 .role-badge.u { background: var(--surface-3); color: var(--text-2); border: 1px solid var(--border-strong); border-radius: var(--r-4); }
-.role-badge.a { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-border); border-radius: var(--r-4); }
+/* A = 极光刻章：三色渐变底 + 白字，会话流里唯一的「时刻」标记。 */
+.role-badge.a { background: var(--aurora-line); color: #ffffff; border: none; border-radius: var(--r-4); box-shadow: 0 1px 4px color-mix(in srgb, var(--glow) 40%, transparent); }
+/* 徽章内的 logo 图像：渐变底上留 2px 呼吸边，圆角内裁切防出格。 */
+.role-badge.a > img {
+  border-radius: calc(var(--r-4) - 2px);
+  padding: 0;
+  background: color-mix(in srgb, #ffffff 22%, transparent);
+}
 
 /* 用户消息：右对齐软底气泡；assistant 保持文档式正文。 */
 .ev-user {
@@ -565,8 +609,8 @@
 .ev-user .ev-head { justify-content: flex-end; }
 .ev-user .ev-body {
   position: relative;
-  background: var(--accent-soft);
-  color: var(--text);
+  background: var(--accent);
+  color: var(--text-on-accent);
   border: 1px solid var(--accent-border);
   border-radius: var(--r-8);
   border-bottom-right-radius: var(--r-4);
@@ -579,7 +623,9 @@
   user-select: text;
   -webkit-user-select: text;
   -webkit-user-drag: none;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--glow) 35%, transparent);
 }
+.ev-user .ev-body a { color: inherit; }
 .ev-user .ev-body p:first-child { margin-top: 0; }
 .ev-user .ev-body p:last-child { margin-bottom: 0; }
 /* 纸片底色统一后，::selection 沿用全局半透明 accent，无需再开白罩。 */
@@ -678,8 +724,8 @@
   margin-top: var(--sp-12);
   border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border));
   border-radius: var(--r-8);
-  /* 亮色：纯白里掺一点品牌紫；暗色在下方覆盖为紫色薄罩 */
-  background: color-mix(in srgb, var(--accent) 6%, #ffffff);
+  /* Aurora Glass：底色从硬编码白改为玻璃表面混色，透出极光场。 */
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
   overflow: hidden;
 }
 :root[data-theme="dark"] .turn-diff {
@@ -809,13 +855,17 @@
   border: 1px solid var(--border);
   border-radius: var(--r-8);
   background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   box-shadow: var(--shadow-1);
   color: inherit;
   text-align: left;
   cursor: pointer;
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
-.plan-created:hover { border-color: var(--accent-border); box-shadow: var(--shadow-2); }
+.plan-created:hover {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-2), 0 0 18px color-mix(in srgb, var(--glow) 30%, transparent);
+}
 .plan-created:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .plan-created-title {
   font-family: var(--font-ui);
@@ -855,7 +905,7 @@
 .ev-assistant {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-10);
+  gap: var(--sp-12);
 }
 .ev-assistant > .ev-head { margin-bottom: 0; }
 .ev-assistant > .ev-batch { margin-bottom: 0; }
@@ -1854,7 +1904,8 @@
   border: 1px solid var(--border);
   border-radius: var(--r-10);
   background: var(--surface);
-  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: var(--shadow-2), 0 0 20px color-mix(in srgb, var(--amber) 14%, transparent);
   overflow: hidden;
 }
 .approval-head {
@@ -1914,6 +1965,8 @@
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   border-radius: var(--r-10);
   background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: var(--shadow-2), 0 0 20px color-mix(in srgb, var(--glow) 20%, transparent);
   overflow: hidden;
 }
 .ask-head {
@@ -3391,18 +3444,35 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   /* opacity：Deck 激活时变暗让位，平滑过渡 */
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), opacity var(--dur) var(--ease);
 }
-/* 聚焦 = 主色描边 + 一圈极淡光环；不再画扫描线。 */
-.composer::before { content: none; }
+/* Aurora Glass：Composer 顶缘一枚极光渐变条——「输入舱口」的身份标记。 */
+.composer::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 18px;
+  right: 18px;
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--aurora-line);
+  opacity: 0.5;
+  pointer-events: none;
+}
 .composer:hover { border-color: var(--border-strong); }
 .composer:focus-within,
 .composer:has(.approval-menu),
 .composer:has(.cmp-menu) {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-softer), var(--shadow-2);
+  box-shadow: 0 0 0 3px var(--accent-softer), var(--shadow-2),
+    0 0 24px color-mix(in srgb, var(--glow) 40%, transparent);
 }
+.composer:focus-within::before,
+.composer.running::before { opacity: 0.9; }
 .composer.running { border-color: var(--accent); }
-.composer.running:not(:focus-within) { box-shadow: 0 0 0 3px var(--accent-softer), var(--shadow-2); }
+.composer.running:not(:focus-within) {
+  box-shadow: 0 0 0 3px var(--accent-softer), var(--shadow-2),
+    0 0 32px color-mix(in srgb, var(--glow) 55%, transparent);
+}
 .composer-ctx {
   display: flex; flex-wrap: wrap; gap: var(--sp-6);
   padding: var(--sp-8) var(--sp-12) 0;
@@ -4003,17 +4073,17 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .composer-bar .cb-group { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
 .composer-bar .pill-btn {
-  display: inline-flex; align-items: center; gap: 4px;
-  height: 24px; padding: 0 var(--sp-8);
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 26px; padding: 0 var(--sp-10);
   border-radius: var(--r-full);
   font-size: var(--fs-11);
   color: var(--text-3);
   font-family: var(--font-mono);
   white-space: nowrap;
 }
-.composer-bar .pill-btn .icon { width: 13px; height: 13px; }
+.composer-bar .pill-btn .icon { width: 14px; height: 14px; }
 .composer-bar .pill-btn .cmp-pill-caret {
-  width: 10px; height: 10px;
+  width: 11px; height: 11px;
   color: var(--text-faint);
   flex: none;
 }
@@ -5398,8 +5468,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .side-panel {
   width: var(--panel-w);
   flex: none;
-  border-left: 1px solid var(--border);
-  background: var(--bg);
+  /* Aurora Glass：右面板透出玻璃底板，缘线用玻璃缘而非实线。 */
+  border-left: 1px solid var(--glass-edge, var(--border));
+  background: transparent;
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.7)) saturate(var(--glass-sat));
   display: flex;
   flex-direction: column;
   min-width: 360px;
@@ -6758,6 +6830,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   background: var(--accent-soft);
   border: 1px solid var(--accent-border);
   border-radius: var(--r-10);
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--glow) 14%, transparent),
+    0 0 36px color-mix(in srgb, var(--glow) 40%, transparent);
   -webkit-mask-image: none;
   mask-image: none;
 }
@@ -6769,6 +6844,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   stroke-miterlimit: 2;
   stroke-linecap: square;
   opacity: 1;
+  filter: drop-shadow(0 0 16px color-mix(in srgb, var(--glow) 55%, transparent));
 }
 .ce-greet, .ce-sub { position: relative; }
 

@@ -6,6 +6,7 @@ import { fileTypeOf, iconNameFor, isNoiseDir, isSensitive } from "../explorer-ty
 import { fileBadge, fileKind } from "../files/fileTypes";
 import { baseName, columnRoot, COMPUTER, driveDisplayName, within, formatModified, formatSize, parentPath, pathSegments, samePath, type FsEntry, type FsPeek, type FsPlaces, type SortKey } from "./model";
 import type { FileBrowserState } from "./useFileBrowser";
+import type { Locale } from "../i18n";
 
 export type Copy = (zh: string, en: string) => string;
 export interface RowActions {
@@ -28,7 +29,7 @@ function RowTools({ entry, list, actions, copy }: { entry: FsEntry; list: readon
       onClick={event => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); actions.select(entry, { ctrl: false, shift: false }, list); actions.context(entry, { x: rect.right - 220, y: rect.bottom + 4 }); }}><Icon name="more" extra="sm" /></button>
   </span>;
 }
-interface ViewProps { state: FileBrowserState; places: FsPlaces; actions: RowActions; copy: Copy; language: "zh" | "en" }
+interface ViewProps { state: FileBrowserState; places: FsPlaces; actions: RowActions; copy: Copy; language: Locale }
 
 const isMod = (event: { ctrlKey: boolean; metaKey: boolean }) => event.ctrlKey || event.metaKey;
 
@@ -54,7 +55,7 @@ function NameCell({ entry, copy }: { entry: FsEntry; copy: Copy }) {
   </span>;
 }
 
-export function EditInput({ state, places, copy, language }: { state: FileBrowserState; places: FsPlaces; copy: Copy; language: "zh" | "en" }) {
+export function EditInput({ state, places, copy, language }: { state: FileBrowserState; places: FsPlaces; copy: Copy; language: Locale }) {
   const edit = state.edit, input = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     const element = input.current;
@@ -319,7 +320,7 @@ export type PreviewSlot = (entry: FsEntry) => ReactNode;
 
 /* ---------- 预览卡（分栏末列） ---------- */
 
-export function PreviewCard({ entry, peek, copy, language, actions }: { entry: FsEntry; peek: FsPeek | "loading" | undefined; copy: Copy; language: "zh" | "en"; actions: { icon: IconName; label: string; primary?: boolean; disabled?: string | undefined; run(): void }[] }) {
+export function PreviewCard({ entry, peek, copy, language, actions }: { entry: FsEntry; peek: FsPeek | "loading" | undefined; copy: Copy; language: Locale; actions: { icon: IconName; label: string; primary?: boolean; disabled?: string | undefined; run(): void }[] }) {
   const kind = fileKind(entry.name);
   const ftype = fileTypeOf(entry.name);
   return <article className="fb-peek" aria-label={copy(`预览 ${entry.name}`, `Preview ${entry.name}`)}>

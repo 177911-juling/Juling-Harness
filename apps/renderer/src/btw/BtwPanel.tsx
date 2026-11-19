@@ -8,7 +8,7 @@ import type { ComposerSnapshot } from "../composer/types";
 import { emptySnapshot, IMAGE_MIME_TYPES } from "../composer/types";
 import { snapshotIsEmpty, snapshotFromTextAndImages } from "../composer/serialize";
 import type { BtwHistoryTurn, PromptImageInput } from "@juling-harness/client-contract";
-import { Icon } from "../icons";
+import { AppIcon, Icon } from "../icons";
 import { MarkdownText } from "../conversation/markdown";
 import { UserMessageBody } from "../conversation/UserMessageBody";
 import { MessageCopyButton } from "../conversation/ConversationItemView";
@@ -81,7 +81,7 @@ export function BtwPanel({ session, demo, onDemoNext, onClose, visible = true }:
       {historyTurns.map((turn, index) => <article key={index} className="btw-turn">
         <BtwQuestion question={index === 0 ? topics.find(topic => topic.topicId === session.selectedTopicId)?.title ?? turn.question : turn.question} images={turn.images} createdAt={turn.createdAt} />
         <div className="ev ev-assistant">
-          <div className="ev-head"><span className="who"><span className="role-badge a">π</span>Juling</span><HistoryStatus status={turn.status} /></div>
+          <div className="ev-head"><span className="who"><span className="role-badge a"><AppIcon size={12} /></span>Juling</span><HistoryStatus status={turn.status} /></div>
           <div className="ev-copy-host">
             <BtwAnswer text={turn.answer} injection={turn.injection} session={session} />
             <div className="ev-msg-actions"><MessageCopyButton text={turn.answer} /></div>
@@ -96,7 +96,7 @@ export function BtwPanel({ session, demo, onDemoNext, onClose, visible = true }:
       </div> : null : <article className="btw-turn btw-current-turn">
         {question ? <BtwQuestion question={question} images={session.questionImages} createdAt={session.turns?.[snapshot.turnIndex ?? 0]?.createdAt ?? session.startedAt ?? undefined} /> : null}
         <div className="ev ev-assistant">
-          <div className="ev-head"><span className="who"><span className="role-badge a">π</span>Juling</span>{session.historyStatus ? <HistoryStatus status={session.historyStatus} /> : <BtwStatusLine snapshot={snapshot} startedAt={session.startedAt} compact />}</div>
+          <div className="ev-head"><span className="who"><span className="role-badge a"><AppIcon size={12} /></span>Juling</span>{session.historyStatus ? <HistoryStatus status={session.historyStatus} /> : <BtwStatusLine snapshot={snapshot} startedAt={session.startedAt} compact />}</div>
           <div className="ev-copy-host">
             {!text && running ? <div className="btw-thinking" aria-label={t("common.loading")}><span /><span /><span /></div> : <BtwAnswer text={text} injection={snapshot.injection} session={session} streaming={running} />}
             {text || session.canCopy ? <div className="ev-msg-actions">

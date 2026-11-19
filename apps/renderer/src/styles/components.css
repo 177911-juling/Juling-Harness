@@ -33,7 +33,9 @@
   background: var(--accent);
   border-color: var(--accent);
   color: var(--text-on-accent);
-  box-shadow: var(--shadow-1);
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.05),
+    0 2px 10px color-mix(in srgb, var(--glow) 45%, transparent);
 }
 .btn.primary:hover {
   background: var(--accent-hover);
@@ -92,7 +94,7 @@
 .icon-btn:hover { background: var(--surface-hover); color: var(--text); }
 .icon-btn:active { background: var(--surface-active); color: var(--text); transform: scale(0.94); }
 .icon-btn.active { background: var(--accent-soft); color: var(--accent); }
-.icon-btn.small { width: 24px; height: 24px; }
+.icon-btn.small { width: 26px; height: 26px; }
 .icon-btn.lg { width: 34px; height: 34px; }
 .icon-btn.danger { color: var(--text-3); }
 .icon-btn.danger:hover,
@@ -153,6 +155,7 @@
   border: 1px solid var(--border-float);
   border-radius: var(--r-10);
   background: var(--surface);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   box-shadow: var(--shadow-menu);
   z-index: var(--z-menu);
   animation: var(--motion-pop);
@@ -333,7 +336,7 @@
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(11, 13, 18, 0.46);
+  background: rgba(8, 10, 18, 0.5);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -342,16 +345,17 @@
   overflow-y: auto;
   z-index: var(--z-modal);
   animation: var(--motion-fade);
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(3px);
 }
-:root[data-theme="dark"] .modal-backdrop { background: rgba(0, 0, 0, 0.62); }
+:root[data-theme="dark"] .modal-backdrop { background: rgba(2, 3, 8, 0.66); }
 .modal-backdrop.is-leaving { animation: var(--motion-fade-out); pointer-events: none; }
 .modal-backdrop.is-leaving .modal { animation: var(--motion-sheet-out); }
 .modal {
   width: 480px;
   max-width: calc(100vw - 48px);
   background: var(--surface);
-  border: 1px solid var(--border);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: 1px solid var(--border-float);
   border-radius: var(--r-10);
   box-shadow: var(--shadow-modal);
   animation: var(--motion-sheet);

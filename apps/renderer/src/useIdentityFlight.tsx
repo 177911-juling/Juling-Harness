@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-import { INSTANT_MS, MOTION_EASE, MOTION_MS, transitionMs } from "./motion";
+import { INSTANT_MS, MOTION_EASE, MOTION_MS, transitionEase, transitionMs } from "./motion";
 import { avatarInitial } from "./settings/operatorProfile";
 
 /**
@@ -145,7 +145,7 @@ export function useIdentityFlight({
       ],
       {
         duration,
-        easing: rail === null ? MOTION_EASE.nav : getComputedStyle(rail).transitionTimingFunction,
+        easing: rail === null ? MOTION_EASE.nav : transitionEase(rail),
         fill: "both",
       },
     );

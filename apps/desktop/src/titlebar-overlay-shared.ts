@@ -9,10 +9,19 @@
 export const TITLEBAR_OVERLAY_CHANNEL = "juling-harness:desktop:chrome-theme";
 export const TITLEBAR_OVERLAY_HEIGHT = 36;
 
-/** Matches renderer tokens: light chrome `#eef0f4` + `#4a5261`; dark `#08090d` + `#b4bbc8`. */
+/** Caption buttons paint the DEFAULT CANVAS colour so the strip reads as part
+ *  of the window background（浅色 #dde4f3 = --bg 瓷白雾蓝，暗色 #05070f = --bg
+ *  深空黑曜；符号用主题正文字色）。与 WINDOW_BACKGROUND 保持一致是硬要求。 */
 export const TITLEBAR_OVERLAY = {
-  light: { color: "#eef0f4", symbolColor: "#4a5261" },
-  dark: { color: "#08090d", symbolColor: "#b4bbc8" },
+  light: { color: "#dde4f3", symbolColor: "#37405e" },
+  dark: { color: "#05070f", symbolColor: "#b6bed6" },
+} as const;
+
+/** Window base paint (first-paint / resize flashes) follows the canvas, NOT the
+ *  caption accent — the aurora canvas colours live in renderer tokens. */
+export const WINDOW_BACKGROUND = {
+  light: "#dde4f3",
+  dark: "#05070f",
 } as const;
 
 export type TitlebarTheme = keyof typeof TITLEBAR_OVERLAY;

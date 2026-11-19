@@ -11,6 +11,7 @@ import {
   TITLEBAR_OVERLAY,
   TITLEBAR_OVERLAY_CHANNEL,
   TITLEBAR_OVERLAY_HEIGHT,
+  WINDOW_BACKGROUND,
   parseTitlebarThemePayload,
   type TitlebarThemePayload,
 } from "./titlebar-overlay-shared.js";
@@ -20,6 +21,7 @@ export {
   TITLEBAR_OVERLAY,
   TITLEBAR_OVERLAY_CHANNEL,
   TITLEBAR_OVERLAY_HEIGHT,
+  WINDOW_BACKGROUND,
   isHexColor,
   parseTitlebarThemePayload,
   type TitlebarTheme,
@@ -34,7 +36,7 @@ export function applyTitleBarOverlay(
 ): void {
   const colors = payload.tint ?? TITLEBAR_OVERLAY[payload.theme];
   if (canRecolorTitleBarOverlay(platform)) window.setTitleBarOverlay?.({ ...colors, height: TITLEBAR_OVERLAY_HEIGHT });
-  window.setBackgroundColor?.(colors.color);
+  window.setBackgroundColor?.(WINDOW_BACKGROUND[payload.theme]);
   nativeTheme.themeSource = payload.theme;
 }
 

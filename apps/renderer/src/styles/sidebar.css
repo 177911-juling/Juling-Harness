@@ -12,22 +12,23 @@
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: var(--bg-inset);
-  border-top: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  /* Aurora Glass：侧栏透出玻璃底板，不再自带实心底/右边线 ——
+     分隔交给主区内容自己的边界与 hover 高亮。 */
+  background: transparent;
+  border-top: none;
+  border-right: none;
   position: relative;
   z-index: var(--z-panel);
   transition: margin-left var(--dur-slow) var(--ease-out);
   overflow: visible;
 }
 .sidebar.collapsed { margin-left: calc(-1 * var(--sidebar-w)); }
-/* 蓝图 HUD：柔光阴影层退役，换成 0 阴影 + 墨线分离（面与面之间用 border 表达）。
-   ::after 仍保留为底色层，保持原有 z-index 关系。 */
+/* ::after 底色层退役为透明，保持原有 z-index 关系。 */
 .sidebar::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: var(--bg-inset);
+  background: transparent;
   pointer-events: none;
   z-index: -1;
 }
@@ -107,11 +108,13 @@
   align-items: center;
   gap: var(--sp-4);
   padding: var(--sp-8) var(--sp-12) var(--sp-4);
-  font-size: var(--fs-11);
+  /* Aurora Glass 精修：区块标题 = eyebrow 微标签（10px 大写 + 宽字距），
+     与状态条 mono、遥测读数同一套「仪表文字」语言。 */
+  font-size: calc(10px * var(--text-font-scale));
   font-weight: var(--fw-semibold);
-  color: var(--text-3);
-  letter-spacing: 0.04em;
-  text-transform: none;
+  color: var(--text-faint);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   font-family: var(--font-ui);
   flex: none;
   user-select: none;
@@ -260,10 +263,12 @@
    行背景不熄灭。active 行悬停仍保持 accent-soft。 */
 .thread-row:hover .thread { background: var(--surface-hover); }
 .thread-row:hover .thread.active { background: var(--accent-soft); }
-/* 激活会话 = 圆角软底 + 主色标题，不再加左侧刻度条。 */
+/* Aurora Glass 精修：激活会话 = 极淡玻璃底 + 左缘 2px 极光条 + 轻辉光
+   （专业编辑器选中语言，不再是通体 accent-soft 色块）。 */
 .thread.active {
-  background: var(--accent-soft);
-  box-shadow: none;
+  background: var(--accent-softer);
+  box-shadow: inset 2px 0 0 var(--accent),
+    0 2px 10px color-mix(in srgb, var(--glow) 18%, transparent);
 }
 .thread.active .t-title { color: var(--accent); font-weight: var(--fw-medium); }
 /* 会话行外壳：thread 是 button，归档/更多操作按钮不能嵌在里面（嵌套交互

@@ -1,5 +1,8 @@
-export type Locale = "zh" | "en";
-export type AppLanguage = "system" | "zh" | "en";
+import type { AppLanguage } from "../settings/appSettings";
+export type { AppLanguage };
+
+/** Interface language with the `system` preference resolved away. */
+export type Locale = Exclude<AppLanguage, "system">;
 
 export type TranslationParams = Record<string, string | number>;
 

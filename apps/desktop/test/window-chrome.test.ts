@@ -7,7 +7,7 @@ import { TRAFFIC_LIGHT_POSITION, canRecolorTitleBarOverlay, windowChromeOptions 
 test("Windows keeps its colored caption-button overlay exactly as before", () => {
   assert.deepEqual(windowChromeOptions("win32"), {
     titleBarStyle: "hidden",
-    titleBarOverlay: { color: "#fbfbfc", symbolColor: "#1d2129", height: 36 },
+    titleBarOverlay: { color: "#dde4f3", symbolColor: "#37405e", height: 36 },
   });
   assert.deepEqual(windowChromeOptions("win32", "dark").titleBarOverlay, { ...TITLEBAR_OVERLAY.dark, height: TITLEBAR_OVERLAY_HEIGHT });
   assert.equal(canRecolorTitleBarOverlay("win32"), true);

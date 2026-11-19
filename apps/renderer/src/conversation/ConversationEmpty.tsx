@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { SessionHistoryEntry, SessionHistoryReadModel, HarnessClient, TokenUsageReadModel } from "@juling-harness/client-contract";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
+import type { Locale } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useOperatorProfile } from "../settings/operatorProfile";
 import {
@@ -14,7 +15,7 @@ import { startUsagePolling } from "../usage/usagePolling";
 import { buildActivityHeatmap, heatCellTip } from "./activityHeatmap";
 import { collectHistoryRecents, collectPreviewRecents, type EmptyRecentRow } from "./emptyRecents";
 
-export function greetingPart(now = new Date(), lang: "zh" | "en" = "zh"): string {
+export function greetingPart(now = new Date(), lang: Locale = "zh"): string {
   const hour = now.getHours();
   if (hour < 5) return lang === "en" ? "Good late night" : "夜深了";
   if (hour < 11) return lang === "en" ? "Good morning" : "上午好";
@@ -122,10 +123,10 @@ export function ConversationEmpty({
       <div className="ce-hero">
         <svg className="ce-pi ce-anim" style={{ ["--beat" as string]: 0 }} viewBox="0 0 321 309" aria-hidden="true">
           <defs>
-            <linearGradient id="piStroke" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="var(--accent)" stopOpacity=".95" />
-              <stop offset=".5" stopColor="var(--accent)" stopOpacity=".75" />
-              <stop offset="1" stopColor="var(--accent-2)" stopOpacity=".65" />
+            <linearGradient id="piStroke" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stopColor="var(--aurora-2)" stopOpacity=".95" />
+              <stop offset=".55" stopColor="var(--aurora-1)" stopOpacity=".85" />
+              <stop offset="1" stopColor="var(--aurora-3)" stopOpacity=".8" />
             </linearGradient>
           </defs>
           <path className="ce-pi-glyph" d="M20 20 H301 V79 H231 V289 H173 V79 H116 V219 H58 V79 H20 Z" />

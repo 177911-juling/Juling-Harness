@@ -69,7 +69,7 @@ it("a named session refreshes history once instead of looping after the result c
 it("blocks secondary navigation and forward when model configuration is dirty", async () => {
   await mount();
   await open("Project Home");
-  expect(document.querySelector('nav.page-nav [data-nav="home"]')).not.toBeNull();
+  expect(document.querySelector("nav.page-nav")).toBeNull();
   expect(screen.getByRole("navigation", { name: "Primary" })).toBeTruthy();
   await open("Model Configuration");
   await screen.findByRole("heading", { name: "Model editor" });
@@ -111,7 +111,7 @@ it("keeps the application appearance authoritative when the active shell is in a
   root.setAttribute("data-theme", "light");
   try {
     await mount(child);
-    fireEvent.click(within(child.body).getByRole("button", { name: /theme/i }));
+    fireEvent.click(within(child.body).getByRole("button", { name: /toggle theme/i }));
     await waitFor(() => expect(root.getAttribute("data-theme")).toBe("dark"));
   } finally {
     cleanup();
@@ -137,7 +137,7 @@ it.each([false, true])("theme changes use a window dissolve unless reduced motio
   Object.defineProperty(document, "startViewTransition", { configurable: true, value: start });
   try {
     const before = root.getAttribute("data-theme");
-    fireEvent.click(screen.getByRole("button", { name: /theme/i }));
+    fireEvent.click(screen.getByRole("button", { name: /toggle theme/i }));
     await waitFor(() => expect(root.getAttribute("data-theme")).toBe(before === "dark" ? "light" : "dark"));
     expect(start).toHaveBeenCalledTimes(reduced ? 0 : 1);
     expect(root.hasAttribute("data-theme-transition")).toBe(!reduced);

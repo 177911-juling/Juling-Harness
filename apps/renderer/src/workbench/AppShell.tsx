@@ -77,7 +77,7 @@ import { createResumeGenerationGate, ensureSelectedSessionActive, waitForRuntime
 import { createSerialTaskQueue } from "../workspaceActionQueue";
 import { type ArchivePending, type ClientStateSource, type ProjectShellActionResult, type Route, type SecondaryRoute, type ShellChrome, type ShellDialog, type ThreadRowActionKind, type ViewState } from "./types";
 import { CURRENT_PROJECT, PROJECT_THREADS_INITIAL, PROJECT_THREADS_PAGE, PROJECT_THREADS_QUERY_MAX, type SelectedProject } from "./sessionSelection";
-import { SECONDARY_META, isSecondary, snapshotFrom } from "./shellState";
+import { isSecondary, snapshotFrom } from "./shellState";
 import { archiveConfirmIsStreaming, partialSessionDeletionNotice, resumePreparedHistoryEntry, runtimeSettingsPropsOf, shouldOpenLiveProvisional } from "./sessionActions";
 import { TitleMenu, execEditCommand, type EditCommand } from "./menus";
 import { setSlashUiIntent } from "./slashUiIntent";
@@ -317,6 +317,24 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const refreshViewedTelemetry = useCallback(() => {
     setTelemetryRefreshToken((value) => value + 1);
   }, []);
+  /** 更新入口：有版本直接开弹窗；没有就当场检查一次，并把结果说清楚。 */
+  const requestAppUpdate = useCallback(async () => {
+    if (effectiveUpdate !== null) {
+      setShowAppUpdateDialog(true);
+      return;
+    }
+    try {
+      const info = await appUpdate.check(false);
+      if (info?.available) {
+        setShowAppUpdateDialog(true);
+        return;
+      }
+      const current = info?.currentVersion ?? localAppVersion;
+      setShellNotice({ text: `${t("diagnostics.latestArtifact")}${current ? ` · v${current}` : ""}`, icon: "check" });
+    } catch (error) {
+      setShellNotice({ text: `${t("appUpdate.checkFailed")}: ${error instanceof Error ? error.message : String(error)}`, icon: "alert" });
+    }
+  }, [appUpdate.check, effectiveUpdate, localAppVersion, t]);
   const [paletteInventory, setPaletteInventory] = useState<DrawerItem[]>([]);
   const paletteRef = useRef<CommandPaletteHandle>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -361,7 +379,6 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const workbenchHidden = showPage && (!mdi || mdi.view?.placement === "main");
   useLayoutEffect(() => { if (mdi) mdi.store.updateDocument(mdi.document.id, { page: showPage, pagePhase: shellPhase }); }, [mdi?.store, mdi?.document.id, showPage, shellPhase]);
   const pageRoute = isSecondary(state.route) ? state.route : lastPageRoute.current;
-  const pageMeta = SECONDARY_META[pageRoute];
   const shellClass = pagePhaseClass(shellPhase);
   const layout = useWorkbenchLayout({ collapsed: mdi ? true : collapsed, sidebarWidth, sideOpen: mdi ? false : sideOpen, panelWidth, bottomVisible: mdi ? false : bottomVisible, bottomOpen, bottomHeight, railMode: dock.layout.rail.mode, railWidth: dock.layout.rail.width }, !workbenchHidden);
   const toggleSidebar = useCallback(() => {
@@ -2505,7 +2522,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           collapsed={railCollapsed}
           onToggleCollapsed={() => setRailCollapsedWithFlight(!railCollapsed)}
           onNavigate={navigateFromRail}
-          onOpenUpdate={() => setShowAppUpdateDialog(true)}
+          onOpenUpdate={() => { void requestAppUpdate(); }}
           menuOpen={chrome.ompMenuOpen}
           /* The same control lives in the rail (expanded) and in the sidebar
              footer (collapsed); the menu anchors to whichever one was clicked. */
@@ -2518,21 +2535,15 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
              dock has to be re-measured on every frame of the slide. */
           onLayoutShift={dock.hosts.flush}
           avatarRef={railAvatarRef}
+          theme={appSettings.theme}
+          onToggleTheme={() => updateAppSettings({ theme: appSettings.theme === "dark" ? "light" : "dark" })}
         />
         </SharedSurface>
       {showPage ? (
         <SharedSurface region="page">
         <SecondaryPage
           route={pageRoute}
-          title={t(pageMeta.titleKey)}
-          titleIcon={pageMeta.icon}
-          theme={theme}
           className={shellClass}
-          onRoute={go}
-          /* 统计页的唯一入口在首页 Token 用量卡右上角，页头返回就回首页；
-             其余二级页仍回工作台。 */
-          backRoute={pageRoute === "statistics" ? "home" : "workbench"}
-          onToggleTheme={chrome.onToggleTheme}
         >
           {state.hostError && (
             <div className="banner amber" role="alert">

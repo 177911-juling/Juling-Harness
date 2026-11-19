@@ -12,7 +12,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { LIGHT_LEVELS, type LightLevel } from "../lux/lightLevel";
 
-export type AppLanguage = "system" | "zh" | "en";
+export type AppLanguage = "system" | "zh" | "en" | "ru" | "ja" | "ko" | "hi";
 export type AppTheme = "light" | "dark";
 export type InfoDensity = "compact" | "standard" | "cozy";
 export type AgentRosterDensity = "standard" | "minimal";
@@ -107,7 +107,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 const APP_SETTINGS_STORAGE_KEY = "omp.appSettings";
 
-const LANGUAGES: ReadonlyArray<AppLanguage> = ["system", "zh", "en"];
+const LANGUAGES: ReadonlyArray<AppLanguage> = ["system", "zh", "en", "ru", "ja", "ko", "hi"];
 const THEMES: ReadonlyArray<AppTheme> = ["light", "dark"];
 const DENSITIES: ReadonlyArray<InfoDensity> = ["compact", "standard", "cozy"];
 const FILE_TYPE_PALETTES: ReadonlyArray<FileTypePalette> = ["cat", "tri"];

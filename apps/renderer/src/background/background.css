@@ -14,6 +14,35 @@ body {
   isolation: isolate;
 }
 
+/* ---------- Aurora 场（Aurora Glass 画布） ----------
+   没有壁纸时，画布就是极光场：色斑（--aurora-1/2/3 × --aurora-k）+
+   一层极淡的工程网格（--grid-line）。壁纸开启（[data-backdrop="on"]）
+   时 .app-backdrop 画在同级更晚的子树里，自然盖住这片场，两层互不干扰。
+   只画一次、不动画：动效留给 light.css 的环境场。 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(52rem 36rem at 12% -6%, color-mix(in srgb, var(--aurora-2) calc(100% * var(--aurora-k)), transparent), transparent 68%),
+    radial-gradient(44rem 30rem at 108% 4%, color-mix(in srgb, var(--aurora-1) calc(92% * var(--aurora-k)), transparent), transparent 66%),
+    radial-gradient(56rem 40rem at 62% 112%, color-mix(in srgb, var(--aurora-3) calc(78% * var(--aurora-k)), transparent), transparent 70%),
+    repeating-linear-gradient(0deg, var(--grid-line) 0 1px, transparent 1px 44px),
+    repeating-linear-gradient(90deg, var(--grid-line) 0 1px, transparent 1px 44px);
+}
+
+/* 暗角：把视线压回中央，也是暗色主题里给场留出的「夜空边缘」。 */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(130% 100% at 50% 0%, transparent 58%, color-mix(in srgb, var(--bg) 62%, transparent));
+}
+
 .app {
   position: relative;
 }
@@ -140,12 +169,10 @@ body {
   background: color-mix(in srgb, var(--bg) 35%, transparent);
 }
 
-/* 用户气泡：浅色主题的淡紫与深色主题的强调色都改成带背景的玻璃。 */
-:root[data-backdrop="on"][data-theme="light"] .ev-user .ev-body {
-  background: color-mix(in srgb, #eee9ff 72%, transparent);
-}
-:root[data-backdrop="on"][data-theme="dark"] .ev-user .ev-body {
-  background: color-mix(in srgb, var(--accent) 88%, transparent);
+/* 用户气泡：Aurora Glass 下用户气泡本来就是实底主色 + 白字，
+   玻璃模式只把它变成带一点透的主色玻璃，白字在两种主题下都可读。 */
+:root[data-backdrop="on"] .ev-user .ev-body {
+  background: color-mix(in srgb, var(--accent) 92%, transparent);
 }
 
 /* ---------- 结构壳透出 ----------
@@ -170,29 +197,6 @@ body {
 
 :root[data-backdrop="on"][data-backdrop-scope="app"] .app-titlebar {
   background: color-mix(in srgb, var(--bg) var(--bd-shell, 100%), transparent);
-}
-
-/* 二级页头部不再整条铺底色：只给标签组一个圆角玻璃胶囊，避免出现带直角的
-   浅色长条。标题、返回、主题按钮直接落在背景上。 */
-:root[data-backdrop="on"] .page-head {
-  background: transparent;
-  border-bottom-color: color-mix(in srgb, var(--border) 55%, transparent);
-}
-
-:root[data-backdrop="on"] .page-nav {
-  isolation: isolate;
-}
-
-:root[data-backdrop="on"] .page-nav::before {
-  content: "";
-  position: absolute;
-  inset: -6px -10px;
-  z-index: -1;
-  border-radius: var(--r-8);
-  background: color-mix(in srgb, var(--bg) 42%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  backdrop-filter: blur(14px) saturate(1.05);
-  pointer-events: none;
 }
 
 :root[data-backdrop="on"][data-backdrop-scope="app"] .sidebar {

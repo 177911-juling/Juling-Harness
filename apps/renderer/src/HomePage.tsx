@@ -3,6 +3,7 @@ import type { ChangeEvent as ReactChangeEvent, PointerEvent as ReactPointerEvent
 import type { ClientBootstrap, HomeReadModel, SessionHistoryEntry, SessionHistoryReadModel, HarnessClient, TokenUsageReadModel, WorkspaceListReadModel } from "@juling-harness/client-contract";
 import type { OperatorStateSnapshot } from "@juling-harness/harness-protocol";
 import { Icon } from "./icons";
+import type { Locale } from "./i18n";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { getPreviewActivity, getPreviewProjects } from "./preview/fixtures";
 import { waitForCommandReceipt } from "./sessionLifecycle";
@@ -258,7 +259,7 @@ function ProfileEditDialog({
   );
 }
 
-function relativeTime(iso: string, lang: "zh" | "en", t: (key: string) => string): string {
+function relativeTime(iso: string, lang: Locale, t: (key: string) => string): string {
   const then = Date.parse(iso);
   if (!Number.isFinite(then)) return "";
   const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
@@ -305,7 +306,7 @@ function pointMax(point: ChartPoint): number {
 
 const MONTHS_SHORT_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 
-function dayLabel(ts: number, lang: "zh" | "en" = "zh"): string {
+function dayLabel(ts: number, lang: Locale = "zh"): string {
   const date = new Date(ts);
   if (lang === "en") {
     return `${MONTHS_SHORT_EN[date.getMonth()]} ${date.getDate()}`;

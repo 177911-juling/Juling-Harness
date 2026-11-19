@@ -1,4 +1,5 @@
 import { DAY_MS, fmtTokens, intensity, startOfDay } from "../usage/tokenUsage";
+import type { Locale } from "../i18n";
 
 export const MONTH_LABEL_MIN_GAP = 2;
 export const ACTIVITY_HEAT_WEEKDAYS_ZH = ["一", "二", "三", "四", "五", "六", "日"] as const;
@@ -36,7 +37,7 @@ export function usageLevel(tokens: number, cap: number): ActivityHeatLevel {
   return Math.min(4, Math.ceil(intensity(tokens, cap) * 5) - 1) as ActivityHeatLevel;
 }
 
-export function heatDayLabel(ts: number, lang: "zh" | "en" = "zh"): string {
+export function heatDayLabel(ts: number, lang: Locale = "zh"): string {
   const date = new Date(ts);
   const dowIndex = (date.getDay() + 6) % 7;
   if (lang === "en") {
@@ -48,7 +49,7 @@ export function heatDayLabel(ts: number, lang: "zh" | "en" = "zh"): string {
   return `${date.getMonth() + 1}月${date.getDate()}日 周${weekday}`;
 }
 
-export function heatCellTip(cell: ActivityHeatCell, lang: "zh" | "en" = "zh"): string {
+export function heatCellTip(cell: ActivityHeatCell, lang: Locale = "zh"): string {
   const day = heatDayLabel(cell.ts, lang);
   if (cell.future) return lang === "en" ? `Future · ${day}` : `未来 · ${day}`;
   if (cell.pad) return day;
@@ -75,7 +76,7 @@ export function yearWindowStart(now = Date.now()): {
 export function buildActivityHeatmap(
   totalsByDay: ReadonlyMap<number, number>,
   now = Date.now(),
-  lang: "zh" | "en" = "zh",
+  lang: Locale = "zh",
 ): ActivityHeatmap {
   const { today, yearStart, yearEnd, start, weeks } = yearWindowStart(now);
   const windowTotals: number[] = [];

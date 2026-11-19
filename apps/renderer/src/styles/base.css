@@ -82,7 +82,7 @@ code, pre, .mono { font-family: var(--font-mono); }
    included, exactly like the former bare `*`; :where() keeps them at zero
    specificity, so per-element overrides still win as before. */
 :where(:root:not([data-platform="darwin"]), :root:not([data-platform="darwin"]) *) { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
-:where(:root:not([data-platform="darwin"]), :root:not([data-platform="darwin"]) *)::-webkit-scrollbar { width: 8px; height: 8px; }
+:where(:root:not([data-platform="darwin"]), :root:not([data-platform="darwin"]) *)::-webkit-scrollbar { width: 6px; height: 6px; }
 :where(:root:not([data-platform="darwin"]), :root:not([data-platform="darwin"]) *)::-webkit-scrollbar-thumb {
   background: var(--scrollbar);
   border-radius: var(--r-full);
@@ -147,7 +147,8 @@ code, pre, .mono { font-family: var(--font-mono); }
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  /* Aurora Glass：主列不再自铺画布色，透出玻璃板与极光场。 */
+  background: transparent;
   position: relative;
 }
 

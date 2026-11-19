@@ -168,20 +168,12 @@ describe("HomePage Token usage chart", () => {
 describe("SecondaryPage body motion", () => {
   function renderPage(
     route: "home" | "settings",
-    title: string,
     body: string,
     className?: string,
   ) {
     return (
       <I18nProvider forcedLanguage="zh">
-        <SecondaryPage
-          route={route}
-          title={title}
-          theme="dark"
-          {...(className === undefined ? {} : { className })}
-          onRoute={() => undefined}
-          onToggleTheme={() => undefined}
-        >
+        <SecondaryPage route={route} {...(className === undefined ? {} : { className })}>
           <p>{body}</p>
         </SecondaryPage>
       </I18nProvider>
@@ -189,19 +181,19 @@ describe("SecondaryPage body motion", () => {
   }
 
   it("does not play page-in on the body after mount or a same-route shell rerender", () => {
-    const { rerender } = render(renderPage("home", "首页", "home-body"));
+    const { rerender } = render(renderPage("home", "home-body"));
     expect(document.getElementById("pageBody")?.className).toBe("page-body");
     expect(screen.getByText("home-body")).toBeTruthy();
 
-    rerender(renderPage("home", "首页", "home-body", "page-out"));
+    rerender(renderPage("home", "home-body", "page-out"));
     expect(document.getElementById("pageRoot")?.className).toBe("page page-out");
     expect(document.getElementById("pageBody")?.className).toBe("page-body");
   });
 
   it("plays page-out then page-in on the body when switching secondary routes", async () => {
     vi.useFakeTimers();
-    const { rerender } = render(renderPage("home", "首页", "home-body"));
-    rerender(renderPage("settings", "设置", "settings-body"));
+    const { rerender } = render(renderPage("home", "home-body"));
+    rerender(renderPage("settings", "settings-body"));
     expect(document.getElementById("pageBody")?.className).toBe("page-body page-out");
     expect(screen.getByText("home-body")).toBeTruthy();
     expect(screen.queryByText("settings-body")).toBeNull();
@@ -212,39 +204,5 @@ describe("SecondaryPage body motion", () => {
     expect(document.getElementById("pageBody")?.className).toBe("page-body page-in");
     expect(screen.getByText("settings-body")).toBeTruthy();
     expect(screen.queryByText("home-body")).toBeNull();
-  });
-});
-
-describe("SecondaryPage header back", () => {
-  function renderPage(route: "statistics" | "settings", backRoute?: "home" | "workbench") {
-    const onRoute = vi.fn();
-    render(
-      <I18nProvider forcedLanguage="zh">
-        <SecondaryPage
-          route={route}
-          title="统计"
-          theme="dark"
-          {...(backRoute === undefined ? {} : { backRoute })}
-          onRoute={onRoute}
-          onToggleTheme={() => undefined}
-        >
-          <p>page-body</p>
-        </SecondaryPage>
-      </I18nProvider>,
-    );
-    return onRoute;
-  }
-
-  /* 统计页只从首页 Token 卡进入：返回箭头回首页，不再是工作台。 */
-  it("returns the statistics page to home", () => {
-    const onRoute = renderPage("statistics", "home");
-    fireEvent.click(screen.getByRole("button", { name: "首页" }));
-    expect(onRoute).toHaveBeenCalledWith("home");
-  });
-
-  it("keeps the workbench as the default target of other pages", () => {
-    const onRoute = renderPage("settings");
-    fireEvent.click(screen.getByRole("button", { name: "工作台" }));
-    expect(onRoute).toHaveBeenCalledWith("workbench");
   });
 });

@@ -187,8 +187,66 @@
      scroll container, so the shell cannot be pushed under the titlebar. */
   overflow: clip;
   position: relative;
-  background: var(--bg);
+  background: transparent;
 }
+
+/* ============================================================
+   Aurora Glass — 浮动玻璃板
+   画布是极光场（background.css 的 body::before），窗口铬件全部改为
+   浮在场上的玻璃：标题栏隐去融入场中；工作台与二级页各是一块带 1px
+   玻璃缘 + 大圆角的半透明板（backdrop 模糊由 --glass-* 供给，L2 性能
+   档自动只剩半透明）；rail 是左侧悬浮胶囊。玻璃色由 --glass-tint ×
+   --shell-alpha 按主题给出，面板内部的次级面用 --glass-inset 再淡一档。
+   ============================================================ */
+:root {
+  --frame-gap: 10px;
+  --glass-tint: 255 255 255;
+  --glass-edge: rgba(255, 255, 255, 0.55);
+  --glass-inset: 42%;
+}
+:root[data-theme="dark"] {
+  --glass-tint: 10 14 26;
+  --glass-edge: rgba(148, 170, 255, 0.16);
+  --glass-inset: 30%;
+}
+
+.app-titlebar {
+  background: transparent;
+  border-bottom: none;
+}
+
+.app-body.adaptive-workbench {
+  margin: 0 var(--frame-gap) var(--frame-gap);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-shell);
+  background: color-mix(in srgb, rgb(var(--glass-tint)) var(--shell-alpha), transparent);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  overflow: hidden;
+}
+
+/* 二级页：rail 旁的另一块同规格玻璃板。 */
+.app-shell > .page {
+  margin: 0 var(--frame-gap) var(--frame-gap);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-shell);
+  background: color-mix(in srgb, rgb(var(--glass-tint)) var(--shell-alpha), transparent);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  overflow: hidden;
+}
+
+/* 板内的次级面全部透出底板：会话工作区、页签条、状态条、minimap。 */
+:is(.app-body, .cw-shell) .conversation-workspace { background: transparent; }
+.app-body.adaptive-workbench .cw-tab-strip { background: transparent; }
+:is(.app-body.adaptive-workbench, .conversation-workspace) .bp-statusbar {
+  background: transparent;
+  border-top-color: var(--cocoon-border);
+}
+.app-body.adaptive-workbench .minimap { background: transparent; }
+.cw-page-slot:has(.secondary-page) {
+  background: color-mix(in srgb, rgb(var(--glass-tint)) calc(var(--shell-alpha) - 8%), transparent);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+}
+.cw-content-loading { background: color-mix(in srgb, var(--bg) 72%, transparent); }
 
 /* Collapsible left rail + the page/workbench it navigates. The rail deliberately
    lives outside .app-body: the workbench ResizeObserver measures only the
@@ -235,31 +293,30 @@
   --cocoon-accent: var(--accent);
   --cocoon-accent-2: var(--accent-2);
 }
-.app-body.adaptive-workbench { background: var(--cocoon-bg); }
+.app-body.adaptive-workbench { background: transparent; }
 .app-body.adaptive-workbench > .sidebar,
 .cw-shell .sidebar {
-  background: var(--cocoon-inset);
-  border-color: var(--cocoon-border);
+  background: transparent;
+  border-color: transparent;
 }
 .app-body.adaptive-workbench > .sidebar::after,
-.cw-shell .sidebar::after { background: var(--cocoon-inset); }
+.cw-shell .sidebar::after { background: transparent; }
 .app-body.adaptive-workbench .app-rail,
 .cw-shell .app-rail {
-  background: var(--cocoon-inset);
+  /* rail 自带玻璃舱底色与辉光投影（App.css .app-rail），这里不再覆写背景。 */
+  background: color-mix(in srgb, rgb(var(--glass-tint)) var(--glass-inset), transparent);
 }
-.app-body.adaptive-workbench .app-rail::after,
-.cw-shell .app-rail::after { background: var(--cocoon-border); }
 .app-body.adaptive-workbench .app-rail-btn,
 .cw-shell .app-rail-btn { color: var(--cocoon-text-3); }
 .app-body.adaptive-workbench .app-rail-btn:hover,
 .cw-shell .app-rail-btn:hover { color: var(--cocoon-text); }
-.app-body.adaptive-workbench .app-rail-btn.active,
-.cw-shell .app-rail-btn.active { color: var(--accent); }
+/* 激活图标颜色不在此覆盖：.app-rail-window 是实底主色胶囊，
+   图标必须用 --text-on-accent 反色（App.css 基础规则），盖了就看不清。 */
 .app-body.adaptive-workbench .app-rail-avatar > span,
 .cw-shell .app-rail-avatar > span { background: var(--cocoon-accent); color: var(--text-on-accent); }
 .app-body.adaptive-workbench .topbar {
-  background: var(--cocoon-inset);
-  border-bottom-color: var(--cocoon-border-strong);
+  background: transparent;
+  border-bottom-color: transparent;
   color: var(--cocoon-text-2);
 }
 .app-body.adaptive-workbench .topbar :is(.crumb-item, .crumb-current) { color: var(--cocoon-text-2); }
@@ -286,17 +343,26 @@
 .cw-shell .sidebar .thread.active .t-title { color: var(--accent); }
 .app-body.adaptive-workbench .sb-divider,
 .cw-shell .sb-divider { background: var(--cocoon-border); }
-.app-body.adaptive-workbench .minimap { background: var(--cocoon-bg); border-right-color: var(--cocoon-border); }
-.app-body.adaptive-workbench .composer-region { background: var(--cocoon-bg); }
+.app-body.adaptive-workbench .minimap { background: transparent; border-right-color: transparent; }
+.app-body.adaptive-workbench .composer-region { background: transparent; }
 .app-body.adaptive-workbench .composer { background: var(--cocoon-surface); color: var(--cocoon-text); }
 .app-body.adaptive-workbench .queue-strip { background: var(--cocoon-surface); color: var(--cocoon-text-2); }
+:is(.app-body.adaptive-workbench, .conversation-workspace) .bp-statusbar { background: transparent; }
 .app-body.adaptive-workbench .banner { background: color-mix(in srgb, var(--amber) 10%, var(--cocoon-surface)); color: var(--cocoon-text); }
-/* 右/底 dock 面板壳与卡片：舱壁面。 */
+/* 右/底 dock 面板壳与卡片：Aurora Glass 下容器透出玻璃板，实底只剩卡片自己。 */
 .app-body.adaptive-workbench :is(.side-panel, .bottom-panel) {
-  background: var(--cocoon-inset);
+  background: transparent;
   border-color: var(--cocoon-border);
 }
-.app-body.adaptive-workbench .dock-card { background: var(--cocoon-surface); border-color: var(--cocoon-border); color: var(--cocoon-text); }
+.app-body.adaptive-workbench .dock-card {
+  background: color-mix(in srgb, rgb(var(--glass-tint)) var(--glass-inset), transparent);
+  border-color: var(--cocoon-border);
+  color: var(--cocoon-text);
+}
+/* 卡片头部与卡面同色：不再铺 --bg-inset 实灰条。 */
+.app-body.adaptive-workbench .dock-card-header,
+.conversation-workspace .dock-card-header,
+.cw-shell .dock-card-header { background: transparent; }
 .app-body.adaptive-workbench .side-panel .sp-head,
 .app-body.adaptive-workbench .bottom-panel .bp-head { background: var(--cocoon-surface-2); border-bottom-color: var(--cocoon-border); color: var(--cocoon-text-2); }
 .app-body.adaptive-workbench .env-card { color: var(--cocoon-text); }
@@ -306,11 +372,13 @@
    .app-body 子树里 —— 上面所有 .app-body.adaptive-workbench 前缀的规则都
    打不中它们。这里用 .conversation-workspace 前缀（变量已在此根定义）补齐
    同一套舱壁。 */
-.conversation-workspace :is(.topbar, .banner.is-floating) {
-  background: var(--cocoon-inset);
-  border-bottom-color: var(--cocoon-border-strong);
+.conversation-workspace .topbar {
+  /* Aurora Glass：顶栏透出玻璃底板，不再自带舱壁底色与底缘线。 */
+  background: transparent;
+  border-bottom-color: transparent;
   color: var(--cocoon-text-2);
 }
+.conversation-workspace .banner.is-floating { color: var(--cocoon-text-2); }
 .conversation-workspace .topbar :is(.crumb-item, .crumb-current, .crumb-label) { color: var(--cocoon-text-2); }
 .conversation-workspace .topbar .crumb-item:hover,
 .conversation-workspace .topbar .crumb-item.open { background: var(--surface-hover); color: var(--cocoon-text); }
@@ -352,14 +420,20 @@
 .conversation-workspace :is(.minimap, .composer-region) { background: var(--cocoon-bg); border-color: var(--cocoon-border); }
 .conversation-workspace .composer { background: var(--cocoon-surface); color: var(--cocoon-text); }
 .conversation-workspace .queue-strip { background: var(--cocoon-surface); color: var(--cocoon-text-2); }
-.conversation-workspace :is(.dock-card, .dock-card-region-left) { background: var(--cocoon-inset); border-color: var(--cocoon-border); color: var(--cocoon-text-2); }
+.conversation-workspace .dock-card {
+  background: color-mix(in srgb, rgb(var(--glass-tint)) var(--glass-inset), transparent);
+  border-color: var(--cocoon-border);
+  color: var(--cocoon-text-2);
+}
 .conversation-workspace .dock-card-region-left :is(.sb-section-head, .dock-files-title, .tree-row, .project-head .p-name) { color: var(--cocoon-text-2); }
 .conversation-workspace .dock-card-region-left .tree-row:hover { background: var(--surface-hover); color: var(--cocoon-text); }
-.conversation-workspace :is(.side-panel, .bottom-panel) { background: var(--cocoon-inset); border-color: var(--cocoon-border); }
-/* P10：dock 面板内容壳（portal 到 body>.dock-host-layer，不在任何舱根子树！）
-   —— 必须单独映射；它的浅底是最后一块拼布。 */
-body > .dock-host-layer > .dock-panel-content {
-  background: var(--cocoon-inset);
+.conversation-workspace :is(.side-panel, .bottom-panel) { background: transparent; border-color: var(--cocoon-border); }
+/* P10：dock 面板内容壳（portal 到 body>.dock-host-layer 或卡片内 .dock-card-body）
+   —— 必须单独映射；Aurora Glass：内容壳透明，表面交给玻璃板与卡片。 */
+body > .dock-host-layer > .dock-panel-content,
+.dock-card-body > .dock-slot > .dock-panel-content,
+.dock-panel-content {
+  background: transparent;
   color: var(--cocoon-text-2);
 }
 body > .dock-host-layer > .dock-panel-content :is(.sb-section-head, .dock-files-title, .tree-row, .project-head .p-name, .thread .t-title) {
@@ -372,12 +446,14 @@ body > .dock-host-layer > .dock-panel-content :is(.tree-row, .sb-user, .sb-brand
 body > .dock-host-layer > .dock-panel-content .sb-divider { background: var(--cocoon-border); }
 body > .dock-host-layer > .dock-panel-content .env-card { color: var(--cocoon-text); }
 body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoon-text-2); }
-/* P10：左侧卡区（Explorer 卡在侧栏内 .dock-left-cards）—— 侧栏已近黑，
-   但 .dock-card 基础底是 --bg-inset（浅色主题下是纸白）→ 白卡拼布的最后一块。 */
+/* 左侧卡区（Explorer 等）嵌在侧栏里：卡片底跟随侧栏的舱壁内凹色，
+   不要用 --surface 的纸白，否则侧栏中部会出现一块白卡拼布。 */
 .app-body.adaptive-workbench .dock-left-cards .dock-card,
 .conversation-workspace .dock-left-cards .dock-card,
 .cw-shell .dock-left-cards .dock-card {
-  background: var(--cocoon-surface);
+  /* Aurora Glass：左卡区不再叠一层玻璃底，直接继承侧栏/画布背景，
+     与上方会话列表同一底色（用户要求上下一致）。 */
+  background: transparent;
   border-color: var(--cocoon-border);
   color: var(--cocoon-text-2);
 }
@@ -394,13 +470,6 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
 }
 .conversation-workspace .env-card { color: var(--cocoon-text); }
 .conversation-workspace .context-card { color: var(--cocoon-text-2); }
-.conversation-workspace .page-head {
-  background: var(--cocoon-inset);
-  color: var(--cocoon-text-2);
-  border-bottom-color: var(--cocoon-border);
-}
-.conversation-workspace .page-head :is(.ph-title, .page-nav a) { color: var(--cocoon-text-2); }
-.conversation-workspace .page-head .page-nav a:hover { color: var(--cocoon-text); background: var(--surface-hover); }
 /* P10 终结拼布：workspace.css 第 1 行给 .conversation-workspace 根写了 background:var(--bg)
    —— 它加载在 App.css **之前**，同特异性下源顺序靠后者胜，但这是根容器底色，
    直接决定标题槽/画布外露的一切缝隙。这里在 App.css（更晚加载）重写为舱底。 */
@@ -415,12 +484,12 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
 /* P10 拼布修复：左侧卡区（dock-card-region-left，Explorer/Environment/Context
    所在）的卡片与区壳也纳入舱壁；dock-card-region-left 卡原本 transparent，
    但其宿主 .dock-left-stack / .sidebar 下的分区底色仍是主题浅色 —— 统一压进舱。 */
-.app-body.adaptive-workbench :is(.dock-left-stack, .dock-card-region-left) {
-  background: var(--cocoon-inset);
+:is(.app-body.adaptive-workbench, .cw-shell) :is(.dock-left-stack, .dock-card-region-left) {
+  background: transparent;
   color: var(--cocoon-text-2);
 }
-.app-body.adaptive-workbench .dock-card-region-left .dock-card {
-  background: var(--cocoon-inset);
+:is(.app-body.adaptive-workbench, .cw-shell) .dock-card-region-left .dock-card {
+  background: transparent;
   border-color: var(--cocoon-border);
 }
 .app-body.adaptive-workbench .dock-card-region-left :is(.sb-section-head, .dock-files-title, .sb-scroll, .tree-row) {
@@ -435,20 +504,6 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
 }
 /* 侧栏自身（非 portal 时）整体沉入舱；portal 到 .cw-shell 的侧栏走 .cw-shell .sidebar 规则。 */
 .app-body.adaptive-workbench > .sidebar { color: var(--cocoon-text-2); }
-/* P10：二级页（首页/历史等 route）的页头与状态区同属舱 —— 页头近黑，
-   页面画布保持纸色。选择器挂 .app-shell（页头在 .app-shell > .page 里）。 */
-.app-shell:has(.app-body.adaptive-workbench) .page-head {
-  background: var(--bg-inset);
-  color: var(--text-2);
-  border-bottom-color: var(--border);
-}
-.app-shell:has(.app-body.adaptive-workbench) .page-head :is(.ph-title, .page-nav a) {
-  color: var(--text-2);
-}
-.app-shell:has(.app-body.adaptive-workbench) .page-head .page-nav a:hover {
-  color: var(--text);
-  background: var(--surface-hover);
-}
 
 /* P11：composer 周边条 —— ctx-strip（目标选择条）在浅色主题下是 --surface 纸白，
    嵌在近黑舱里就是用户看到的"白条对话框"。连同 queue-strip/发送按钮统一舱面化。 */
@@ -502,13 +557,14 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
   border-radius: var(--r-full);
   flex: none;
 }
-.bp-dot.ok { background: var(--green); }
-.bp-dot.err { background: var(--red); animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
+.bp-dot.ok { background: var(--green); box-shadow: 0 0 6px color-mix(in srgb, var(--green) 55%, transparent); }
+.bp-dot.err { background: var(--red); box-shadow: 0 0 6px color-mix(in srgb, var(--red) 55%, transparent); animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
 
-/* Collapsible rail. Only the wrapper's width animates: the destination column is
-   a fixed-width strip clipped by .app-rail-clip, so collapsing hands the 56px
-   back to the page (it never overlays the workbench) and the handle can ride the
-   moving border instead of jumping from one state's position to the other's. */
+/* Collapsible rail, drawn as a floating capsule: a darker surface, a 1px
+   inset hairline, and a radius of half its width so both ends are true
+   semicircles. The gutters are part of the collapse animation — width and
+   margins go to zero together, so the page gets the whole rail footprint back
+   and the handle still lands flush against the screen edge. */
 .app-rail {
   --rail-btn-size: 40px;
   --rail-step: 44px;
@@ -516,30 +572,26 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
   --rail-handle-h: 46px;
   position: relative;
   flex: none;
-  width: var(--nav-rail-w);
+  width: calc(var(--nav-rail-w) + 8px);
+  margin: 12px 0 var(--frame-gap) 6px;
   display: flex;
-  background: var(--bg-inset);
-  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, rgb(var(--glass-tint)) var(--glass-inset), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.8)) saturate(var(--glass-sat));
+  /* 横向半径取半宽、纵向压到 16px：两端是扁椭圆而不是正半圆，
+     横向上仍是整条 rail 的外轮廓，顶端不会收成一个尖点。 */
+  border-radius: calc((var(--nav-rail-w) + 8px) / 2) / 18px;
+  border: 1px solid var(--glass-edge);
+  box-shadow:
+    0 18px 44px color-mix(in srgb, var(--glow) 30%, transparent),
+    0 2px 10px color-mix(in srgb, var(--bg) 45%, transparent);
   z-index: var(--z-panel);
   user-select: none;
   -webkit-user-select: none;
-  transition: width var(--dur-slow) var(--ease-nav);
+  transition: width var(--dur-slow) var(--ease-nav),
+    margin var(--dur-slow) var(--ease-nav),
+    box-shadow var(--dur-slow) var(--ease-nav);
 }
-.app-rail.is-collapsed { width: 0; }
-/* Painted divider rather than border-right: a border keeps a 1px box alive at
-   width:0 and leaves a seam against the sidebar once the rail is gone. */
-.app-rail::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 0;
-  width: 1px;
-  background: var(--border);
-  pointer-events: none;
-  transition: opacity var(--dur-slow) var(--ease-nav);
-}
-.app-rail.is-collapsed::after { opacity: 0; }
+.app-rail.is-collapsed { width: 0; margin: 0; box-shadow: none; }
 .app-rail-clip {
   width: 100%;
   height: 100%;
@@ -548,6 +600,9 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
 .app-rail-nav {
   width: var(--nav-rail-w);
   height: 100%;
+  /* Aurora Glass：rail 舱体比导航列宽（描边留白），列在本体内水平居中，
+     图标与激活窗胶囊（left: 50%）才在同一中轴上。 */
+  margin-inline: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -626,10 +681,8 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
   gap: var(--sp-4);
   position: relative;
 }
-/* Same clock as .nav-window in pages.css: the tab bubble and the rail
-   highlight move together on route changes. It travels on `translate`, which
-   the compositor runs by itself: the highlight keeps gliding while the main
-   thread is busy mounting the page it points at.
+/* 页面切换时激活窗滑动。它走 `translate`，由合成器自行执行：主线程忙着挂载
+   目标页时高亮仍然在滑，不会卡在旧入口上。
    P7：激活态改 **琥珀实底 + 左缘色条** —— 面积拉满按钮，图标反色，
    一眼可辨当前页（原来是若有若无的角标淡底）。 */
 .app-rail-window {
@@ -641,8 +694,10 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
   height: var(--rail-btn-size);
   transform: translateX(-50%);
   border-radius: var(--r-6);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent-border);
+  background: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent-border),
+    0 4px 16px color-mix(in srgb, var(--glow) 55%, transparent);
   pointer-events: none;
   transition: translate var(--dur-slow) var(--ease-nav);
 }
@@ -654,7 +709,7 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: var(--r-4);
+  border-radius: var(--r-6);
   color: var(--text-3);
   position: relative;
   z-index: 1;
@@ -662,9 +717,8 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
 }
 .app-rail-btn .icon { width: 18px; height: 18px; }
 .app-rail-btn:hover { background: var(--surface-hover); color: var(--text); }
-.app-rail-btn.active { color: var(--text); }
-/* Active icon takes the accent itself; the soft pill supplies the surface. */
-.app-rail-btn.active { color: var(--accent); }
+/* Active icon sits on the solid accent pill and flips to its on-accent ink. */
+.app-rail-btn.active { color: var(--text-on-accent); }
 .app-rail-btn:focus-visible,
 .app-rail-avatar:focus-visible {
   outline: 2px solid var(--accent);
@@ -695,7 +749,7 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 2px var(--bg-inset);
+  box-shadow: 0 0 0 2px var(--rail-bg);
 }
 .app-rail-avatar {
   width: 34px;
@@ -878,11 +932,6 @@ button.activity-row {
   width: 100%;
   text-align: left;
   font: inherit;
-}
-
-.page-nav a[aria-disabled="true"] {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .tk-scale i[data-s="0"] { background: var(--accent-softer); }

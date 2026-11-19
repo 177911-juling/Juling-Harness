@@ -5,26 +5,26 @@
  * 之后若要再提示一次，提高 STARTUP_NOTICE_ID 即可。
  */
 
-export const STARTUP_NOTICE_ID = "incomplete-v1";
+export const STARTUP_NOTICE_ID = "iteration-preview-v1";
 export const STARTUP_NOTICE_STORAGE_KEY = "omp.startupNotice.dismissed";
-export const PROJECT_GITHUB_URL = "https://github.com/177911-juling/juling-harness";
-export const PROJECT_GITHUB_HOST = "github.com/177911-juling/juling-harness";
+export const PROJECT_SITE_URL = "https://www.177911.com/apps";
+export const PROJECT_SITE_HOST = "www.177911.com/apps";
 
 export const STARTUP_NOTICE_COPY = {
-  kicker: "开发预览",
-  title: "应用尚未完成",
-  body: "Juling Harness 目前仍在开发中，部分功能尚未完成。使用过程中可能遇到不稳定、缺失或与最终形态不一致的能力。欢迎提交 bug、提 issue，也欢迎提供 idea。",
-  hint: "可在 GitHub 仓库查看进度，或直接开 issue 参与讨论。",
+  kicker: "迭代预告",
+  title: "内测打磨阶段",
+  body: "我们诚挚邀请开发者提交缺陷报告、提交标准化 Issue 记录问题，同时也十分欢迎各类场景化落地创意与功能优化提案。",
+  hint: "可在 177911.com 查看进度，或在论坛参与讨论。",
   repoLabel: "项目地址",
   thanks: "感谢使用 Juling Harness。",
 } as const;
 
 export const STARTUP_NOTICE_COPY_EN = {
-  kicker: "Development preview",
-  title: "Work in progress",
-  body: "Juling Harness is still under active development and some features are incomplete. You may encounter rough edges, missing capabilities, or behavior that differs from the final release. Bug reports, issues, and feature ideas are welcome.",
-  hint: "Track progress on the GitHub repository or open an issue to join the discussion.",
-  repoLabel: "Repository",
+  kicker: "Iteration preview",
+  title: "Internal beta · Polishing",
+  body: "We sincerely invite developers to file defect reports and standardized issues, and warmly welcome scenario-driven ideas and feature proposals.",
+  hint: "Track progress at 177911.com or join the discussion in the forum.",
+  repoLabel: "Project site",
   thanks: "Thank you for trying Juling Harness.",
 } as const;
 

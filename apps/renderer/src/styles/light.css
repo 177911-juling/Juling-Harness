@@ -48,19 +48,19 @@
    and soft shadow tinted toward the accent rather than grey. */
 :root {
   --lux-rim: rgb(255 255 255 / 0.9);
-  --lux-shade: rgb(52 40 120 / 0.07);
-  --lux-shade-deep: rgb(52 40 120 / 0.14);
+  --lux-shade: rgb(38 44 90 / 0.07);
+  --lux-shade-deep: rgb(38 44 90 / 0.14);
   --lux-glow: var(--accent);
   /* Peak alpha of the ambient field and the spotlight before --lux-k. */
-  --lux-field-a: 5%;
+  --lux-field-a: 6%;
   --lux-spot-a: 7%;
 }
 :root[data-theme="dark"] {
-  --lux-rim: rgb(255 255 255 / 0.065);
-  --lux-shade: rgb(0 0 0 / 0.28);
-  --lux-shade-deep: rgb(0 0 0 / 0.5);
-  --lux-field-a: 9%;
-  --lux-spot-a: 10%;
+  --lux-rim: rgb(190 205 255 / 0.10);
+  --lux-shade: rgb(0 0 0 / 0.38);
+  --lux-shade-deep: rgb(0 0 0 / 0.55);
+  --lux-field-a: 12%;
+  --lux-spot-a: 12%;
 }
 
 /* ==========================================================

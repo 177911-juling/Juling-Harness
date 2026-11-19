@@ -439,7 +439,7 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
         </div>
         <DockRailToggle />
         <button className={`icon-btn${sideOpen ? " active" : ""}`} data-tip={t("menu.rightPanel")} aria-controls="sidePanel" data-dock-entry="right" aria-expanded={sideOpen} onClick={onToggleSide}><Icon name="panel" /></button>
-        <button className="icon-btn" data-tip={t("shell.theme")} onClick={chrome.onToggleTheme} aria-label={t("shell.theme")}>
+        <button className="icon-btn" data-tip={t("shell.toggleTheme")} onClick={chrome.onToggleTheme} aria-label={t("shell.toggleTheme")}>
           <Icon name={chrome.theme === "dark" ? "moon" : "light"} />
         </button>
         <button className="icon-btn" data-tip={t("nav.home")} onClick={() => onRoute("home")}><Icon name="home" /></button>

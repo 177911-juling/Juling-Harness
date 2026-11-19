@@ -30,7 +30,7 @@ describe("i18n system tests", () => {
     expect(resolveLanguage("system")).toBe("zh");
   });
 
-  it("detects English when navigator.language is English or other", () => {
+  it("detects the system language when supported and English otherwise", () => {
     Object.defineProperty(globalThis, "navigator", {
       value: { language: "en-US", languages: ["en-US", "en"] },
       configurable: true,
@@ -41,6 +41,13 @@ describe("i18n system tests", () => {
 
     Object.defineProperty(globalThis, "navigator", {
       value: { language: "ja-JP", languages: ["ja-JP"] },
+      configurable: true,
+      writable: true,
+    });
+    expect(detectSystemLanguage()).toBe("ja");
+
+    Object.defineProperty(globalThis, "navigator", {
+      value: { language: "de-DE", languages: ["de-DE"] },
       configurable: true,
       writable: true,
     });
@@ -101,7 +108,7 @@ describe("i18n system tests", () => {
     expect([...zhMap.keys()].filter(k => !enMap.has(k))).toEqual([]);
     expect([...enMap.keys()].filter(k => !zhMap.has(k))).toEqual([]);
 
-    const allowedEnglishCjkKeys = new Set(["settings.general.langZh"]);
+    const allowedEnglishCjkKeys = new Set(["settings.general.langZh", "settings.general.langJa"]);
     const cjkFailures = [...enMap.entries()]
       .filter(([k, v]) => !allowedEnglishCjkKeys.has(k) && /[\u4e00-\u9fff]/.test(v))
       .map(([k, v]) => `${k}: ${v}`);

@@ -1,8 +1,9 @@
 /* ============================================================
-   Juling Harness — Design Tokens · Quiet Precision
-   单一表面系统：瓷白 / 石墨双主题，通过 html[data-theme] 切换。
-   层级 = 表面明度 + 1px 细线 + 极轻投影；靛蓝 = 唯一交互主色，
-   青绿 = 数据副色，语义色只表达状态。
+   Juling Harness — Design Tokens · Aurora Glass
+   画布即极光场：暗色 = Obsidian Aurora（深空黑曜 + 电光青紫辉光），
+   浅色 = Porcelain Aurora（瓷白雾蓝 + 极光微透）。
+   铬件都是浮在场上的玻璃：--shell-alpha 决定透度，--glass-* 供给模糊，
+   靛蓝→电光青的 --aurora-line 是唯一的「时刻」渐变，靛蓝仍是交互主色。
    ============================================================ */
 
 /* Bundled typefaces（仅 latin 子集 woff2，CJK 字形沿用下方系统栈回落。
@@ -72,12 +73,14 @@
   --lh-normal: 1.5;
   --tracking-tight: -0.015em;
 
-  /* Radius — soft but not bubbly. Nested corners keep a visible step:
-     chips 6 < controls 8 < cards 10 < sheets 14. */
+  /* Radius — glass architecture: chips stay tight, controls round up,
+     cards and slabs get real curvature. --r-shell is the floating-panel
+     corner (sidebar / main slab / rail). */
   --r-4: 6px;
-  --r-6: 8px;
-  --r-8: 10px;
-  --r-10: 14px;
+  --r-6: 9px;
+  --r-8: 12px;
+  --r-10: 16px;
+  --r-shell: 18px;
   --r-full: 999px;
 
   /* Spacing scale — 4/8-based, scaled by the density preference. */
@@ -115,6 +118,20 @@
   --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.05);
   --shadow-2: 0 4px 14px rgba(16, 24, 40, 0.09), 0 1px 3px rgba(16, 24, 40, 0.05);
   --shadow-3: 0 18px 44px rgba(16, 24, 40, 0.16), 0 4px 12px rgba(16, 24, 40, 0.06);
+
+  /* ---------------- Aurora Glass ----------------
+     The canvas is an aurora field (background.css paints it from these);
+     chrome sits on it as translucent glass. --aurora-k scales the field
+     colour strength per theme, --shell-alpha is how much canvas the glass
+     shell keeps, --glass-blur/--glass-sat feed backdrop-filter. */
+  --aurora-1: #22d3ee;
+  --aurora-2: #818cf8;
+  --aurora-3: #c084fc;
+  --aurora-k: 0.16;
+  --grid-line: rgba(53, 68, 145, 0.055);
+  --shell-alpha: 72%;
+  --glass-blur: 22px;
+  --glass-sat: 1.08;
 
   /* ---------------- Motion ----------------
      Numbers only. The rules that spend them are in styles/motion.css, and
@@ -203,43 +220,51 @@
 :root[data-density="compact"] { --density-scale: 0.85; }
 :root[data-density="cozy"] { --density-scale: 1.15; }
 
-/* ---------------- Light (default) ---------------- */
+/* ---------------- Light · Porcelain Aurora (default) ----------------
+   A bright porcelain canvas with a faint aurora breathing through it.
+   Chrome reads as frosted glass: translucent surfaces over the field,
+   hairlines of deep indigo ink instead of grey. */
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
 
-  /* Porcelain surfaces: the page is a soft grey, content sits on white. */
-  --bg: #f4f5f7;
-  --bg-inset: #eef0f4;
-  --surface: #ffffff;
-  --surface-2: #f8f9fb;
-  --surface-3: #f0f2f5;
-  --surface-hover: rgba(16, 24, 40, 0.045);
-  --surface-active: rgba(16, 24, 40, 0.08);
+  /* Canvas = the aurora field. Panels no longer repaint it — glass keeps
+     the same --shell-alpha and lets the field show through. */
+  --bg: #dde4f3;
+  --bg-inset: #d9e0ef;
+  --rail-bg: #e3e9f6;
 
-  --border: rgba(16, 24, 40, 0.10);
-  --border-strong: rgba(16, 24, 40, 0.18);
+  /* Glass chrome: translucent ink hairlines stay legible on any panel. */
+  --rail-border: rgba(38, 44, 80, 0.26);
+  --surface: rgba(255, 255, 255, 0.78);
+  --surface-2: rgba(255, 255, 255, 0.55);
+  --surface-3: rgba(255, 255, 255, 0.34);
+  --surface-hover: rgba(38, 48, 96, 0.055);
+  --surface-active: rgba(38, 48, 96, 0.095);
 
-  /* Text ramp measured against --surface (#ffffff):
-     text 17:1 · text-2 8.5:1 · text-3 5.5:1 · text-faint 4.6:1. */
-  --text: #14181f;
-  --text-2: #4a5261;
-  --text-3: #545d6c;
-  --text-faint: #636c7c;
+  --border: rgba(38, 44, 80, 0.12);
+  --border-strong: rgba(38, 44, 80, 0.22);
+
+  /* Text ramp measured against the brightest glass (#ffffff @ 78% over
+     porcelain): text 14.8:1 · text-2 7.9:1 · text-3 6.1:1 · faint 5.2:1. */
+  --text: #101526;
+  --text-2: #37405e;
+  --text-3: #454e6e;
+  --text-faint: #525b7a;
   --text-on-accent: #ffffff;
-  --glyph-faint: #798494;
+  --glyph-faint: #667190;
 
-  /* Indigo is the single interaction colour. */
+  /* Indigo→aurora interaction ramp: solid for actions, aurora for moments. */
   --accent: #4f46e5;
   --accent-hover: #4338ca;
   --accent-soft: rgba(79, 70, 229, 0.09);
   --accent-softer: rgba(79, 70, 229, 0.045);
   --accent-border: rgba(79, 70, 229, 0.28);
-  /* Teal is data / telemetry only, never the primary action. */
-  --accent-2: #0f766e;
-  --accent-2-hover: #0d5f59;
-  --accent-2-soft: rgba(15, 118, 110, 0.09);
-  --accent-2-border: rgba(15, 118, 110, 0.28);
+  --accent-2: #0e7490;
+  --accent-2-hover: #0c5f74;
+  --accent-2-soft: rgba(14, 116, 144, 0.09);
+  --accent-2-border: rgba(14, 116, 144, 0.28);
+  --aurora-line: linear-gradient(90deg, #4f46e5, #0e7490 55%, #7c3aed);
   --glow: rgba(79, 70, 229, 0.18);
 
   /* Status colours keep 4.5:1 for the small text they carry. */
@@ -301,18 +326,18 @@
   --diff-del-bg: rgba(180, 35, 24, 0.08);
   --diff-del-gutter: rgba(180, 35, 24, 0.18);
 
-  --code-bg: #f3f5f8;
-  --code-chip-bg: rgba(15, 118, 110, 0.09);
-  --code-chip-text: #0f5f59;
+  --code-bg: rgba(255, 255, 255, 0.6);
+  --code-chip-bg: rgba(8, 145, 178, 0.09);
+  --code-chip-text: #0c5a68;
 
   /* Detached surfaces use a real, restrained elevation. */
   --shadow-menu: var(--shadow-2);
   --shadow-modal: var(--shadow-3);
-  --border-float: #d5d9e0;
+  --border-float: rgba(255, 255, 255, 0.65);
 
-  --scrollbar: rgba(16, 24, 40, 0.16);
-  --scrollbar-hover: rgba(16, 24, 40, 0.30);
-  --minimap-viewport: rgba(16, 24, 40, 0.08);
+  --scrollbar: rgba(38, 44, 80, 0.18);
+  --scrollbar-hover: rgba(38, 44, 80, 0.32);
+  --minimap-viewport: rgba(38, 44, 80, 0.09);
   --selection: rgba(79, 70, 229, 0.18);
 
   /* Switch: off thumb is white on a translucent track; on thumb follows
@@ -339,35 +364,52 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #0b0d12;
-  --bg-inset: #08090d;
-  --surface: #14171f;
-  --surface-2: #1a1e28;
-  --surface-3: #232936;
-  --surface-hover: rgba(255, 255, 255, 0.055);
-  --surface-active: rgba(255, 255, 255, 0.09);
+  /* Obsidian canvas: near-black indigo night. The aurora field glows
+     through; panels are smoked glass, not painted slabs. */
+  --bg: #05070f;
+  --bg-inset: #070a14;
+  --rail-bg: #0a0e1c;
 
-  --border: rgba(255, 255, 255, 0.09);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --rail-border: rgba(148, 170, 255, 0.22);
+  --surface: rgba(23, 29, 48, 0.72);
+  --surface-2: rgba(29, 36, 58, 0.58);
+  --surface-3: rgba(38, 46, 72, 0.42);
+  --surface-hover: rgba(148, 170, 255, 0.07);
+  --surface-active: rgba(148, 170, 255, 0.11);
 
-  --text: #f1f4f8;
-  --text-2: #b4bbc8;
-  --text-3: #8b93a3;
-  --text-faint: #7d8697;
-  --glyph-faint: #646d7e;
-  --text-on-accent: #0b0c11;
+  --border: rgba(148, 170, 255, 0.11);
+  --border-strong: rgba(148, 170, 255, 0.20);
 
+  /* Text ramp measured on the brightest glass:
+     text 15.6:1 · text-2 9.2:1 · text-3 6.3:1 · faint 5.4:1. */
+  --text: #eef1fb;
+  --text-2: #b6bed6;
+  --text-3: #8d97b5;
+  --text-faint: #7c86a4;
+  --glyph-faint: #636e8d;
+  --text-on-accent: #0b0e18;
+
+  /* Electric aurora: periwinkle for actions, teal for data. */
   --accent: #8b8cf8;
   --accent-hover: #a5b4fc;
-  --accent-soft: rgba(139, 140, 248, 0.14);
+  --accent-soft: rgba(139, 140, 248, 0.15);
   --accent-softer: rgba(139, 140, 248, 0.07);
-  --accent-border: rgba(139, 140, 248, 0.34);
+  --accent-border: rgba(139, 140, 248, 0.36);
   --accent-2: #5eead4;
   --accent-2-hover: #99f6e4;
   --accent-2-soft: rgba(94, 234, 212, 0.12);
   --accent-2-border: rgba(94, 234, 212, 0.30);
-  --glow: rgba(139, 140, 248, 0.22);
+  --aurora-line: linear-gradient(90deg, #818cf8, #22d3ee 55%, #c084fc);
+  --glow: rgba(129, 140, 248, 0.24);
 
+  /* Night field breathes stronger, glass runs clearer. */
+  --aurora-k: 0.26;
+  --grid-line: rgba(129, 162, 255, 0.05);
+  --shell-alpha: 58%;
+  --glass-blur: 26px;
+  --glass-sat: 1.14;
+
+  /* Status colours keep 4.5:1 for the small text they carry. */
   --green: #4ade80;
   --green-soft: rgba(74, 222, 128, 0.14);
   --amber: #fbbf24;
@@ -379,7 +421,6 @@
   --danger-glow: #fed7aa;
   --blue: #60a5fa;
   --blue-soft: rgba(96, 165, 250, 0.14);
-
 
   --tint-green: #4ade80;
   --tint-green-soft: rgba(74, 222, 128, 0.14);
@@ -424,16 +465,16 @@
   --diff-del-bg: rgba(248, 113, 113, 0.11);
   --diff-del-gutter: rgba(248, 113, 113, 0.22);
 
-  --code-bg: #0b0f18;
+  --code-bg: rgba(10, 14, 26, 0.55);
   --code-chip-bg: rgba(94, 234, 212, 0.10);
   --code-chip-text: #99f6e4;
 
   --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.50), 0 2px 8px rgba(0, 0, 0, 0.35);
   --shadow-modal: 0 28px 64px rgba(0, 0, 0, 0.65);
-  --border-float: #394253;
+  --border-float: rgba(148, 170, 255, 0.16);
 
-  --scrollbar: rgba(255, 255, 255, 0.14);
-  --scrollbar-hover: rgba(255, 255, 255, 0.26);
+  --scrollbar: rgba(148, 170, 255, 0.16);
+  --scrollbar-hover: rgba(148, 170, 255, 0.28);
   --minimap-viewport: rgba(255, 255, 255, 0.08);
   --selection: rgba(139, 140, 248, 0.26);
 

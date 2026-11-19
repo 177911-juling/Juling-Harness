@@ -1,20 +1,26 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icons";
 import { INSTANT_MS, MOTION_MS, MOTION_SLACK_MS, transitionMs } from "./motion";
 import { useI18n } from "./i18n";
+import { MenuItem } from "./menus";
+import type { Locale } from "./i18n/types";
 import { avatarInitial } from "./settings/operatorProfile";
 import { usePreviewMode } from "./preview/PreviewContext";
 
-/** Top-level destinations owned by the collapsible rail. The page-head tab row
- *  stays in place as the primary in-page switcher; this rail is an additional
- *  entry point and the two active states animate on the same clock. */
+/** Top-level destinations owned by the collapsible rail. It is the single
+ *  navigation surface: secondary pages no longer repeat these links in a page
+ *  header, so the active state only has one place to show. */
 export type NavRailRoute =
   | "workbench"
   | "home"
   | "history"
   | "capabilities"
   | "model-config"
-  | "settings";
+  | "evaluation"
+  | "media"
+  | "settings"
+  | "diagnostics";
 
 const NAV_RAIL_ITEMS: ReadonlyArray<{ route: NavRailRoute; icon: IconName; labelKey: string }> = [
   /* `workbench` (three panes), not `layout`: the latter is the "toggle the left
@@ -25,13 +31,28 @@ const NAV_RAIL_ITEMS: ReadonlyArray<{ route: NavRailRoute; icon: IconName; label
   { route: "history", icon: "history", labelKey: "nav.history" },
   { route: "capabilities", icon: "package", labelKey: "nav.capabilities" },
   { route: "model-config", icon: "server", labelKey: "nav.modelConfig" },
+  /* `test`（量杯）与 `pulse`（波形）分开：两个目的地用同一个字形时，
+     一列 rail 里分不清是在跑基准还是在看体检。 */
+  { route: "evaluation", icon: "test", labelKey: "nav.evaluation" },
+  { route: "media", icon: "image", labelKey: "media.title" },
   { route: "settings", icon: "settings", labelKey: "nav.settings" },
+  { route: "diagnostics", icon: "pulse", labelKey: "nav.diagnostics" },
 ];
 
 /** How close the pointer must come to the border line before the handle shows.
  *  The band is symmetric on purpose: coming from the sidebar (the side you hover
  *  when you want the rail gone or back) has to work as well as coming down the
  *  rail itself. */
+/** Languages offered by the rail picker, each written in its own script. */
+const LANGUAGE_OPTIONS: ReadonlyArray<{ id: Locale; label: string }> = [
+  { id: "zh", label: "简体中文" },
+  { id: "en", label: "English" },
+  { id: "ru", label: "Русский" },
+  { id: "ja", label: "日本語" },
+  { id: "ko", label: "한국어" },
+  { id: "hi", label: "हिन्दी" },
+];
+
 const HANDLE_REACH_X = 14;
 const HANDLE_REACH_Y = 12;
 export function AppNavRail({
@@ -47,6 +68,8 @@ export function AppNavRail({
   onToggleMenu,
   onLayoutShift,
   avatarRef,
+  theme,
+  onToggleTheme,
 }: {
   readonly activeRoute: string;
   /* Collapsed state lives in the shell: the avatar falls back to the sidebar
@@ -59,6 +82,9 @@ export function AppNavRail({
   readonly onToggleCollapsed: () => void;
   readonly onNavigate: (route: NavRailRoute) => void;
   readonly onOpenUpdate: () => void;
+  /** 当前主题；rail 末项是切换按钮，图标随主题换日/月，按下态表示深色。 */
+  readonly theme: "light" | "dark";
+  readonly onToggleTheme: () => void;
   readonly menuOpen?: boolean;
   /** Anchor is passed back because the environment menu is anchored to whichever
    *  avatar (rail or sidebar footer) the user actually clicked. */
@@ -70,7 +96,7 @@ export function AppNavRail({
    *  identity block over to the sidebar footer without a blink. */
   readonly avatarRef?: RefObject<HTMLElement | null>;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage, setLanguage } = useI18n();
   const { marks } = usePreviewMode();
   const [handleNear, setHandleNear] = useState(false);
   const railRef = useRef<HTMLDivElement>(null);
@@ -78,11 +104,59 @@ export function AppNavRail({
      mouse move; it only moves on resize and during the slide (see below). */
   const lineRef = useRef({ x: 0, top: 0, bottom: 0 });
   const firstMotion = useRef(true);
+  const [langOpen, setLangOpen] = useState(false);
+  const [langPos, setLangPos] = useState({ top: 0, left: 0 });
+  const langButtonRef = useRef<HTMLButtonElement>(null);
+  const langMenuRef = useRef<HTMLDivElement>(null);
   const activeIndex = NAV_RAIL_ITEMS.findIndex((item) => item.route === activeRoute);
-  const updateLabel = update === null
-    ? ""
-    : `${t("appUpdate.foundNewVersion")}${update.version === undefined ? "" : ` v${update.version}`}${demo && marks ? ` ${t("appUpdate.demoUpdate")}` : ""}`;
+  /* 更新入口常驻：没有可用版本时它是一次现场检查，标题也换成「检查更新」。
+     只在有版本时显示按钮，等于把入口藏起来——用户看不到按钮就无从更新。 */
+  const hasUpdate = update !== null;
+  const updateLabel = hasUpdate
+    ? `${t("appUpdate.foundNewVersion")}${update.version === undefined ? "" : ` v${update.version}`}${demo && marks ? ` ${t("appUpdate.demoUpdate")}` : ""}`
+    : t("shell.checkUpdate");
   const avatarLabel = `${profile.displayName} · ${t("nav.profileMenu")}`;
+
+  /* Language menu: anchored to the rail button, portal to body so the rail clip
+     cannot cut it. Repositions on resize; outside click and Escape close it. */
+  useLayoutEffect(() => {
+    if (!langOpen) return;
+    const place = () => {
+      const rect = langButtonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = langMenuRef.current?.offsetWidth ?? 200;
+      const height = langMenuRef.current?.offsetHeight ?? 280;
+      const left = Math.min(rect.right + 8, window.innerWidth - width - 8);
+      const top = Math.max(8, Math.min(rect.top, window.innerHeight - height - 8));
+      setLangPos({ top, left });
+    };
+    place();
+    const frame = requestAnimationFrame(place);
+    window.addEventListener("resize", place);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", place);
+    };
+  }, [langOpen]);
+
+  useEffect(() => {
+    if (!langOpen) return;
+    const onDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (langButtonRef.current?.contains(target) || langMenuRef.current?.contains(target)) return;
+      setLangOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setLangOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [langOpen]);
 
   const measureLine = useCallback(() => {
     const rail = railRef.current;
@@ -192,19 +266,67 @@ export function AppNavRail({
               );
             })}
           </div>
+          {langOpen
+            ? createPortal(
+                <div
+                  ref={langMenuRef}
+                  className="menu app-menu-popover"
+                  role="menu"
+                  aria-label={t("nav.language")}
+                  style={{ top: langPos.top, left: langPos.left }}
+                >
+                  {LANGUAGE_OPTIONS.map((option) => (
+                    <MenuItem
+                      key={option.id}
+                      {...(resolvedLanguage === option.id ? { icon: "check" as const } : {})}
+                      current={resolvedLanguage === option.id}
+                      onClick={() => {
+                        setLanguage(option.id);
+                        setLangOpen(false);
+                      }}
+                    >
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </div>,
+                document.body,
+              )
+            : null}
           <div className="app-rail-bottom">
-            {update === null ? null : (
-              <button
-                type="button"
-                className="app-rail-btn app-rail-update"
-                data-tip={updateLabel}
-                aria-label={updateLabel}
-                onClick={onOpenUpdate}
-              >
-                <Icon name="update" extra="lg" />
-                <span className="app-rail-notice" aria-hidden="true" />
-              </button>
-            )}
+            <button
+              type="button"
+              className="app-rail-btn app-rail-update"
+              data-tip={updateLabel}
+              aria-label={updateLabel}
+              aria-haspopup={hasUpdate ? "dialog" : undefined}
+              onClick={onOpenUpdate}
+            >
+              <Icon name="update" extra="lg" />
+              {hasUpdate ? <span className="app-rail-notice" aria-hidden="true" /> : null}
+            </button>
+            {/* 工具区随账户停靠：语言与主题是动作不是目的地，不参与 active 指示窗。 */}
+            <button
+              ref={langButtonRef}
+              type="button"
+              className="app-rail-btn app-rail-lang"
+              data-tip={t("nav.language")}
+              aria-label={t("nav.language")}
+              aria-haspopup="menu"
+              aria-expanded={langOpen}
+              onClick={() => setLangOpen((open) => !open)}
+            >
+              <Icon name="globe" extra="lg" />
+            </button>
+            <button
+              type="button"
+              className="app-rail-btn app-rail-theme"
+              data-tip={t("nav.theme")}
+              aria-label={t("nav.theme")}
+              aria-pressed={theme === "dark"}
+              onClick={onToggleTheme}
+            >
+              <Icon name={theme === "dark" ? "moon" : "light"} extra="lg" />
+            </button>
             <button
               type="button"
               className="app-rail-avatar"

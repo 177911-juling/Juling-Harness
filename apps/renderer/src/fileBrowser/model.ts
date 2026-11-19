@@ -6,6 +6,8 @@
  * 的演示文件系统；真实模式使用 fileBrowserSource 的 Host 服务，不伪造目录。
  */
 
+import type { Locale } from "../i18n";
+
 export type FsPlatform = "win32" | "darwin" | "linux";
 
 export interface FsEntry {
@@ -221,7 +223,7 @@ export function formatSize(bytes: number | undefined): string {
 
 const pad = (value: number) => String(value).padStart(2, "0");
 /** 今天 14:02 / 昨天 09:10 / 11-12 / 2025-03-08。 */
-export function formatModified(epoch: number | undefined, now = Date.now(), language: "zh" | "en" = "zh"): string {
+export function formatModified(epoch: number | undefined, now = Date.now(), language: Locale = "zh"): string {
   if (epoch === undefined) return "";
   const date = new Date(epoch), today = new Date(now);
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
@@ -240,7 +242,7 @@ export function usageTone(drive: FsDrive): "ok" | "warn" | "full" | undefined {
 }
 
 /** 新建 / 重命名的名称检查，只给就地提示；真正的检查在执行操作的那一层。 */
-export function nameProblem(name: string, platform: FsPlatform, language: "zh" | "en" = "zh"): string | undefined {
+export function nameProblem(name: string, platform: FsPlatform, language: Locale = "zh"): string | undefined {
   const value = name.trim();
   const zh = language === "zh";
   if (!value) return zh ? "名称不能为空" : "Name is required";

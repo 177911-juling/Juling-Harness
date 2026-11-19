@@ -1,23 +1,28 @@
 import { createContext, useContext, useLayoutEffect, useMemo, type ReactNode } from "react";
 import { zh } from "./locales/zh";
 import { en } from "./locales/en";
+import { ru } from "./locales/ru";
+import { ja } from "./locales/ja";
+import { ko } from "./locales/ko";
+import { hi } from "./locales/hi";
 import type { AppLanguage, I18nContextValue, Locale, TranslationParams } from "./types";
 import { getAppSettings, useAppSettings } from "../settings/appSettings";
 
 const dictionaries: Record<Locale, typeof zh> = {
   zh,
   en,
+  ru,
+  ja,
+  ko,
+  hi,
 };
 
 export function detectSystemLanguage(): Locale {
   try {
     const nav = typeof navigator !== "undefined" ? navigator : undefined;
     const lang = (nav?.language || (nav?.languages && nav.languages[0]) || "").toLowerCase();
-    if (lang.startsWith("zh")) {
-      return "zh";
-    }
-    if (lang.startsWith("en")) {
-      return "en";
+    for (const code of ["zh", "en", "ru", "ja", "ko", "hi"] as const) {
+      if (lang.startsWith(code)) return code;
     }
   } catch {
     /* fallback to English if navigator is not accessible */
@@ -26,7 +31,7 @@ export function detectSystemLanguage(): Locale {
 }
 
 export function resolveLanguage(preference?: AppLanguage): Locale {
-  if (preference === "zh" || preference === "en") {
+  if (preference !== undefined && preference !== "system") {
     return preference;
   }
   return detectSystemLanguage();
@@ -70,8 +75,8 @@ export function translate(locale: Locale, key: string, params?: TranslationParam
   if (direct !== undefined) {
     return formatTranslation(direct, params);
   }
-  // Fallback to zh or en
-  const fallbackDict = locale === "zh" ? dictionaries.en : dictionaries.zh;
+  // Fallback to English, then Chinese.
+  const fallbackDict = locale === "zh" ? dictionaries.en : (locale === "en" ? dictionaries.zh : dictionaries.en);
   const fallback = lookupKey(fallbackDict as unknown as Record<string, unknown>, key);
   if (fallback !== undefined) {
     return formatTranslation(fallback, params);
@@ -82,6 +87,24 @@ export function translate(locale: Locale, key: string, params?: TranslationParam
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
+const HTML_LANG: Record<Locale, string> = {
+  zh: "zh-CN",
+  en: "en",
+  ru: "ru",
+  ja: "ja",
+  ko: "ko",
+  hi: "hi",
+};
+
+const WORKBENCH_TITLE: Record<Locale, string> = {
+  zh: "Juling Harness — 工作台",
+  en: "Juling Harness — Workbench",
+  ru: "Juling Harness — Рабочее место",
+  ja: "Juling Harness — ワークベンチ",
+  ko: "Juling Harness — 워크벤치",
+  hi: "Juling Harness — वर्कबेंच",
+};
+
 export function I18nProvider({ children, forcedLanguage }: { children: ReactNode; forcedLanguage?: AppLanguage }) {
   const { settings, update } = useAppSettings();
   const language = forcedLanguage ?? settings.language;
@@ -89,11 +112,12 @@ export function I18nProvider({ children, forcedLanguage }: { children: ReactNode
 
   useLayoutEffect(() => {
     if (typeof document !== "undefined") {
-      document.documentElement.lang = resolvedLanguage === "zh" ? "zh-CN" : "en";
-      document.title = resolvedLanguage === "zh" ? "Juling Harness — 工作台" : "Juling Harness — Workbench";
+      document.documentElement.lang = HTML_LANG[resolvedLanguage];
+      document.title = WORKBENCH_TITLE[resolvedLanguage];
     }
     if (forcedLanguage === undefined) {
-      void globalThis.julingHarnessChrome?.setLanguage?.(resolvedLanguage);
+      /* Native menus and window chrome only speak zh/en today. */
+      void globalThis.julingHarnessChrome?.setLanguage?.(resolvedLanguage === "zh" ? "zh" : "en");
     }
   }, [resolvedLanguage, forcedLanguage]);
 

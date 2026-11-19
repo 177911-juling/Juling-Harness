@@ -3,6 +3,7 @@ import { hostErrorMessage, waitReceipt } from "../hostError";
 import type { FileOpenIntent } from "../files/fileLinks";
 import { fileKind } from "../files/fileTypes";
 import { COMPUTER, driveDisplayName, samePath, within, type FileBrowserSource, type FsEntry, type FsPlaces, type FsPeek } from "./model";
+import type { Locale } from "../i18n";
 
 export function systemFileReference(entry: FsEntry): FileOpenIntent {
   return entry.workspace ? { workspaceId: entry.workspace.workspaceId, path: entry.workspace.relativePath }
@@ -10,7 +11,7 @@ export function systemFileReference(entry: FsEntry): FileOpenIntent {
 }
 
 export function createHostFileBrowserSource(options: {
-  client(): Promise<HarnessClient>; targetId: string | null; label: string; workspaceId?: string | undefined; language: "zh" | "en";
+  client(): Promise<HarnessClient>; targetId: string | null; label: string; workspaceId?: string | undefined; language: Locale;
 }): FileBrowserSource {
   let trash = false;
   let separator = "/";
