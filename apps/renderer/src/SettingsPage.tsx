@@ -3,6 +3,8 @@ import { FileViewerSettings, OfficeComponentSettings } from "./files/FileViewerS
 import { SessionWorktreesPane } from "./workspaces/SessionWorktreesPane";
 import { BackgroundSettingsPane } from "./settings/BackgroundSettingsPane";
 import { FeatureSettingsPane } from "./settings/FeatureSettingsPane";
+import { FeatureSettingsProvider } from "./settings/useFeatureSettings";
+import { motionReduced } from "./motion";
 import { DictationSettingsPane } from "./settings/DictationSettingsPane";
 import { PredictionSettingsPane } from "./settings/PredictionSettingsPane";
 import "./composer/prediction.css";
@@ -22,6 +24,7 @@ import { useEffect, useRef, useState } from "react";
 import { tabPaneClass, tabPaneRole, useOverlappingTabs } from "./pageTransition";
 import { useI18n } from "./i18n";
 import { usePreviewMode } from "./preview/PreviewContext";
+import { isEmbedMode } from "./embed/websiteEmbed";
 import { PREVIEW_APP_SETTINGS, PREVIEW_APPROVAL_MODE, usePreviewAppSettings, useRuntimeDemo } from "./preview/settingsPreview";
 import { type AppSettings, useAppSettings } from "./settings/appSettings";
 import { ConversationWidthProvider, useConversationWidth } from "./settings/ConversationWidthContext";
@@ -63,6 +66,16 @@ export { SETTINGS_INTENT_KEY, setSettingsIntent, type SettingsGroupId } from "./
 
 type GroupId = ActiveSettingsGroup;
 
+const FEATURE_SETTINGS_GROUPS: ReadonlySet<GroupId> = new Set([
+  "interaction",
+  "voice",
+  "context",
+  "tasks",
+  "models",
+  "permissions",
+  "maintenance",
+]);
+
 /** Optional Runtime settings seam; App decides whether/how to persist writes. */
 export interface RuntimeSettingsApi {
   readonly snapshot?: RuntimeSettingsReadModel;
@@ -71,6 +84,18 @@ export interface RuntimeSettingsApi {
   readonly pendingKey?: HarnessRuntimeSettingKey;
   readonly error?: string;
   readonly onSet?: (key: HarnessRuntimeSettingKey, value: HarnessRuntimeSettingValue, persist?: boolean) => void | Promise<void>;
+}
+
+const EMBED_LIVE_APP_KEYS = ["theme", "density", "light", "fileTypePalette"] as const;
+
+function extractEmbedLivePatch(patch: Partial<AppSettings>): Partial<AppSettings> {
+  const livePatch: Partial<AppSettings> = {};
+  for (const key of EMBED_LIVE_APP_KEYS) {
+    if (patch[key] !== undefined) {
+      (livePatch as Record<string, unknown>)[key] = patch[key];
+    }
+  }
+  return livePatch;
 }
 
 /** Reuse the global provider; standalone settings surfaces keep a local demo boundary. */
@@ -125,6 +150,7 @@ function SettingsPageContent({
   const groupIndex = groups.findIndex(([id]) => id === group);
   const { incoming, outgoing, dir, live, stageRef } = useOverlappingTabs(group, groupIndex >= 0 ? groupIndex : 0);
   const { preview, marks } = usePreviewMode();
+  const embed = isEmbedMode();
 
   const real = useAppSettings();
   const conversationWidth = useConversationWidth();
@@ -207,12 +233,22 @@ function SettingsPageContent({
       preview: true,
       app: {
         ...previewApp.app,
+        ...(embed ? {
+          theme: real.settings.theme,
+          density: real.settings.density,
+          light: real.settings.light,
+          fileTypePalette: real.settings.fileTypePalette,
+        } : {}),
         conversationWidthMode: conversationWidth.mode,
         conversationCustomWidth: conversationWidth.customWidth,
       },
       updateApp: (patch) => {
         previewApp.patch(patch);
         conversationWidth.update(patch);
+        if (embed) {
+          const livePatch = extractEmbedLivePatch(patch);
+          if (Object.keys(livePatch).length > 0) real.update(livePatch);
+        }
         flashDemo();
       },
       resetApp: (keys) => {
@@ -222,6 +258,10 @@ function SettingsPageContent({
         }
         previewApp.patch(patch);
         conversationWidth.update(patch);
+        if (embed) {
+          const livePatch = extractEmbedLivePatch(patch);
+          if (Object.keys(livePatch).length > 0) real.update(livePatch);
+        }
         flashDemo();
       },
       approvalMode: PREVIEW_APPROVAL_MODE,
@@ -273,20 +313,32 @@ function SettingsPageContent({
     const find = () => {
       const panel = document.getElementById(`set-${group}`);
       const label = zh ? entry.targetZh : entry.targetEn;
+      const lower = label.toLocaleLowerCase();
       element = Array.from(panel?.querySelectorAll<HTMLElement>("[data-setting-label], h3, h4, summary") ?? [])
-        .find(candidate => candidate.dataset.settingLabel === label || candidate.textContent?.trim().startsWith(label));
+        .find(candidate => candidate.dataset.settingLabel === label
+          || candidate.dataset.settingLabel?.toLocaleLowerCase() === lower
+          || candidate.textContent?.trim().startsWith(label)
+          || candidate.textContent?.trim().toLocaleLowerCase().startsWith(lower));
+      if (!element && panel && attempts >= 12) {
+        element = panel.querySelector<HTMLElement>("h3") ?? undefined;
+      }
       if (element) {
-        element.scrollIntoView?.({ block: "center", behavior: "smooth" });
+        element.scrollIntoView?.({ block: "center", behavior: motionReduced() ? "instant" : "smooth" });
         element.classList.add("settings-search-highlight");
         const control = element.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex='0']");
         if (control) control.focus({ preventScroll: true });
         else { element.tabIndex = -1; element.focus({ preventScroll: true }); }
-      } else if (++attempts < 240) frame = requestAnimationFrame(find);
+      } else if (++attempts < (panel ? 12 : 60)) {
+        frame = requestAnimationFrame(find);
+      }
     };
     frame = requestAnimationFrame(find);
     const timer = window.setTimeout(() => { element?.classList.remove("settings-search-highlight"); setTarget(undefined); }, 4500);
     return () => { cancelAnimationFrame(frame); window.clearTimeout(timer); element?.classList.remove("settings-search-highlight"); };
   }, [target, group, query, zh, incoming]);
+
+  const featureSettingsActive = FEATURE_SETTINGS_GROUPS.has(group)
+    || Array.from(visited).some(id => FEATURE_SETTINGS_GROUPS.has(id));
 
   const groupContent = (id: GroupId) => {
     const visible = group === id;
@@ -299,7 +351,7 @@ function SettingsPageContent({
         <Runtime1844Rows runtime={runtime} names={GUI_GROUPS.interaction} title={zh ? "消息与回答" : "Messages and responses"} />
         {preview || nativeContext?.capabilities?.capabilities.some(item => item.id === "prediction.status" && item.grade !== "unavailable")
           ? <PredictionSettingsPane client={client} context={nativeContext} visible={visible} />
-          : <><Runtime1844Rows runtime={runtime} names={["spelling.autocomplete"]} title={zh ? "预测输入" : "Input prediction"} />{predictionAvailable ? <PredictionSettings client={client} sessionId={predictionSessionId} available={predictionAvailable} /> : null}</>}
+          : <><Runtime1844Rows runtime={runtime} names={["spelling.autocomplete"]} title={zh ? "预测输入" : "Predictive input"} />{predictionAvailable ? <PredictionSettings client={client} sessionId={predictionSessionId} available={predictionAvailable} /> : null}</>}
         <FeatureSettingsPane group="interaction" client={client} context={nativeContext} visible={visible} />
         <NativePreferencesPane client={client} context={nativeContext} visible={visible} groups={["titles"]} />
       </>;
@@ -315,6 +367,7 @@ function SettingsPageContent({
   };
 
   return (
+    <FeatureSettingsProvider client={client} context={nativeContext} active={featureSettingsActive}>
     <div className="page-wide set-layout">
       <aside className="settings-sidebar">
         <label className="settings-search-label" htmlFor="settings-search">{zh ? "搜索设置" : "Search settings"}</label>
@@ -345,6 +398,7 @@ function SettingsPageContent({
         </div>
       </div>
     </div>
+    </FeatureSettingsProvider>
   );
 }
 import { PredictionSettings } from "./settings/PredictionSettings";

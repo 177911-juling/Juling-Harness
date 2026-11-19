@@ -1,4 +1,5 @@
 import { SessionCompressionPane } from "./diagnostics/SessionCompressionPane";
+import { WorkspaceRecoveryPane } from "./diagnostics/WorkspaceRecoveryPane";
 import { NativeMaintenancePane } from "./diagnostics/NativeMaintenancePane";
 import { WorkspaceTabs, WorkspacePanel } from "./workspaces/Workspace";
 import type { NativePreferencesContext } from "./settings/NativePreferencesPane";
@@ -11,6 +12,7 @@ import type {
   RuntimeChannel,
   RuntimeInstallState,
   HarnessClient,
+  WorkspaceRecord,
 } from "@juling-harness/client-contract";
 import type { SessionBuildIdentity, SessionBuildProvenance } from "@juling-harness/harness-protocol";
 import { Icon, type IconName } from "./icons";
@@ -271,6 +273,9 @@ export function DiagnosticsPage({
   runtime,
   environment,
   buildProvenance,
+  recoveryClient,
+  onOpenRecoveryWorkspace,
+  onChooseRemoteWorkspace,
 }: {
   nativeContext?: NativePreferencesContext;
   client: HarnessClient;
@@ -280,6 +285,9 @@ export function DiagnosticsPage({
   environment?: EnvironmentReadModel;
   /** omp builds that wrote the active session (`snapshot.runtimeIdentity`). */
   buildProvenance?: SessionBuildProvenance;
+  recoveryClient?: HarnessClient;
+  onOpenRecoveryWorkspace?: (workspace: WorkspaceRecord) => void;
+  onChooseRemoteWorkspace?: () => void;
 }) {
   const { preview, marks } = usePreviewMode();
  const [workspaceTab,setWorkspaceTab]=useState<"runtime"|"maintenance">("runtime");
@@ -815,7 +823,8 @@ export function DiagnosticsPage({
         </div>
       </section>
 
-      <ProcessMemoryPanel enabled={!preview} />
+      <ProcessMemoryPanel enabled={!preview && workspaceTab === "runtime"} />
+      <WorkspaceRecoveryPane client={recoveryClient ?? client} {...(onOpenRecoveryWorkspace ? { onOpenWorkspace: onOpenRecoveryWorkspace } : {})} {...(onChooseRemoteWorkspace ? { onChooseRemoteWorkspace } : {})} />
       {busy !== null ? (
         <ActionProgressBar label={busy.label} step={busy.step} steps={busy.steps} />
       ) : null}

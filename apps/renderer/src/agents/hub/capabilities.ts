@@ -11,7 +11,6 @@ export type HubContract = {
   readonly spawn: string;
   readonly cancel: string;
   readonly transcript: string;
-  readonly irc: string;
   readonly previewWrite: string;
   readonly historicalWrite: string;
 };
@@ -24,7 +23,6 @@ const CONTRACT_ZH: HubContract = {
   spawn: "派生（暂未实现）",
   cancel: "取消（暂未实现）",
   transcript: "无 transcript",
-  irc: "IRC（暂未实现）",
   previewWrite: "预览模式",
   historicalWrite: "历史会话只读",
 };
@@ -37,7 +35,6 @@ const CONTRACT_EN: HubContract = {
   spawn: "Spawn (not available)",
   cancel: "Cancel (not available)",
   transcript: "No transcript",
-  irc: "IRC (not available)",
   previewWrite: "Preview mode",
   historicalWrite: "Historical session is read-only",
 };
@@ -55,7 +52,9 @@ export function missingCap(
 }
 
 /** What the gate reads from an agent: Hub rows and the Agents deck both satisfy it. */
-export type CapsSubject = Pick<HubAgent, "kind" | "status" | "readOnly" | "isolated" | "canRevive">;
+export type CapsSubject = Pick<HubAgent, "kind" | "status" | "readOnly" | "isolated" | "canRevive"> & {
+  readonly rawStatus?: HubAgent["rawStatus"] | undefined;
+};
 
 function lockedWhy(agent: CapsSubject, zh: boolean): string {
   return isAdvisor(agent) ? (zh ? "只读" : "Read-only") : "read-only";
@@ -69,6 +68,7 @@ export function capsFor(
   preview: boolean,
   viewingLive: boolean,
   zh = isZh(),
+  marks = true,
 ): Caps {
   if (!agent) {
     return {
@@ -85,7 +85,9 @@ export function capsFor(
     };
   }
   const contract = contractFor(zh);
-  const dead = agent.status === "aborted";
+  const previewWhy = marks ? contract.previewWrite : null;
+  const released = agent.status === "released" || agent.rawStatus === "released";
+  const dead = agent.status === "aborted" || released;
   const cannotRevive =
     agent.status === "parked" &&
     (agent.isolated === true || agent.canRevive === false);
@@ -95,7 +97,8 @@ export function capsFor(
   const killMissing = missingCap(capabilities, "agent.kill");
   const releaseMissing = missingCap(capabilities, "agent.release");
   const hostReady = connOnline && hasClient && viewingLive;
-  const endedWhy = zh ? "已结束" : "Ended";
+  const releasedWhy = zh ? "已释放" : "Already released";
+  const endedWhy = released ? releasedWhy : (zh ? "已结束" : "Ended");
   const isolatedWhy = zh ? "隔离或不可恢复的 agent 仅能查看记录" : "Isolated or non-revivable agents are read-only";
   const noClientWhy = zh ? "无 Harness client" : "No Harness client";
   const offlineWhy = zh ? "未连接" : "Disconnected";
@@ -116,7 +119,7 @@ export function capsFor(
         : dead
           ? endedWhy
           : preview
-            ? contract.previewWrite
+            ? previewWhy
             : !viewingLive
               ? contract.historicalWrite
               : !hasClient
@@ -134,7 +137,7 @@ export function capsFor(
       hostReady &&
       !reviveMissing,
     reviveWhy: preview
-      ? contract.previewWrite
+      ? previewWhy
       : !viewingLive
         ? contract.historicalWrite
         : locked
@@ -152,7 +155,7 @@ export function capsFor(
                     : null,
     kill: !preview && !locked && !dead && hostReady && !killMissing,
     killWhy: preview
-      ? contract.previewWrite
+      ? previewWhy
       : !viewingLive
         ? contract.historicalWrite
         : locked
@@ -166,21 +169,23 @@ export function capsFor(
                 : killMissing
                   ? contract.kill
                   : null,
-    release: !preview && !locked && dead && hostReady && !releaseMissing,
+    release: !preview && !locked && dead && !released && hostReady && !releaseMissing,
     releaseWhy: preview
-      ? contract.previewWrite
+      ? previewWhy
       : !viewingLive
         ? contract.historicalWrite
         : locked
           ? lockedWhy(agent, zh)
-          : !dead
-            ? (zh ? "仅终态" : "Terminal states only")
-            : !hasClient
-              ? noClientWhy
-              : !connOnline
-                ? offlineWhy
-                : releaseMissing
-                  ? contract.release
-                  : null,
+          : released
+            ? releasedWhy
+            : !dead
+              ? (zh ? "仅终态" : "Terminal states only")
+              : !hasClient
+                ? noClientWhy
+                : !connOnline
+                  ? offlineWhy
+                  : releaseMissing
+                    ? contract.release
+                    : null,
   };
 }

@@ -8,9 +8,9 @@ import { useAppSettings, type AgentRosterDensity } from "../../settings/appSetti
 import type { AgentRosterSource } from "../AgentRosterMeter";
 import { AgentInspector, SwarmSummary, type InspectorActions } from "./AgentInspector";
 import { CommsView } from "./CommsView";
-import { useSwarmComms } from "./comms";
+import { rosterKeyOf, useSwarmComms, type SwarmComms } from "./comms";
 import { useDeckCommands, type DeckCommandContext } from "./deckActions";
-import { buildDeck, deckTotals, filterDeck, type DeckAgent, type DeckGroup } from "./deckModel";
+import { buildDeck, deckTotals, filterDeck, toneSettled, type DeckAgent, type DeckGroup } from "./deckModel";
 import { useDeckUi, type DeckStageView, type DeckView } from "./deckState";
 import { FormationView } from "./FormationView";
 import { OrbitView } from "./OrbitView";
@@ -30,7 +30,16 @@ const GROUPS: readonly DeckGroup[] = ["running", "waiting", "failed", "settled"]
 
 export type DeckLinks = Omit<InspectorActions, "caps" | "run" | "busy" | "notice">;
 
-export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, width, height, region, openedIds, links, commandContext }: {
+/**
+ * A deck hosted by a page that has its own inspector (the Agent Hub): the host
+ * owns the selection, and the deck shows the whole swarm and picks members.
+ */
+export type DeckEmbedding = {
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+};
+
+export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, width, height, region, openedIds, links, commandContext, embedded, comms: hostComms }: {
   /** Panel instance + scope: what the user set up in this deck is remembered under it. */
   instanceKey: string;
   /** Recorder scope: target, workspace, parent session, preview. */
@@ -45,6 +54,10 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
   openedIds: readonly string[];
   links: DeckLinks;
   commandContext: DeckCommandContext;
+  /** Set by a host page: selection is controlled and the deck renders no inspector of its own. */
+  embedded?: DeckEmbedding;
+  /** Agent messages a host page already reads (the Hub shares them with its Messages tab). */
+  comms?: SwarmComms;
 }) {
   const { preview, marks } = usePreviewMode();
   const { t, resolvedLanguage } = useI18n();
@@ -59,13 +72,41 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
 
   const liveRows = useMemo(() => buildDeck(agents, preview, zh), [agents, preview, zh]);
   const live = visible && (preview || source === "live");
+  const anyActive = useMemo(() => liveRows.some(row => !toneSettled(row.tone)), [liveRows]);
+  const ticking = live && replay === null && anyActive;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!live) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [live]);
+    if (!live || replay !== null) return;
+    const isVisible = () => !document.hidden && document.visibilityState !== "hidden";
+    if (isVisible()) setNow(Date.now());
+    if (!ticking) return;
+    let timer: number | undefined;
+    const start = () => {
+      if (timer !== undefined || !isVisible()) return;
+      timer = window.setInterval(() => {
+        if (isVisible()) setNow(Date.now());
+      }, 1000);
+    };
+    const stop = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const onVisibility = () => {
+      if (!isVisible()) stop();
+      else {
+        setNow(Date.now());
+        start();
+      }
+    };
+    start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [live, replay, ticking]);
 
   const memory = useSwarmMemory(scope, visible);
   const samples = useMemo<readonly SwarmSample[]>(() => preview
@@ -82,9 +123,14 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
   const groups = useMemo(() => new Set(ui.groups), [ui.groups]);
   const filter = useMemo(() => filterDeck(rows, { query: ui.query, groups }), [rows, ui.query, groups]);
   const collapsed = useMemo(() => new Set(ui.collapsed), [ui.collapsed]);
-  const comms = useSwarmComms(preview, zh, live);
+  const bridge = width >= DECK_BRIDGE_MIN && region !== "left";
+  const commsLive = live && (bridge || ui.view === "orbit" || ui.view === "comms");
+  const rosterKey = useMemo(() => rosterKeyOf(agents), [agents]);
+  const ownComms = useSwarmComms({ preview, zh, live: commsLive, client: commandContext.client,
+    sessionId: commandContext.viewingLive ? commandContext.sessionId : undefined, rosterKey, enabled: hostComms === undefined });
+  const comms = hostComms ?? ownComms;
   // Preview is read here too: a demo deck must never reach the Host, whatever its caller passed.
-  const commands = useDeckCommands({ ...commandContext, preview: commandContext.preview || preview,
+  const commands = useDeckCommands({ ...commandContext, preview: commandContext.preview || preview, marks,
     viewingLive: commandContext.viewingLive && replay === null }, zh);
 
   const rootRef = useRef<HTMLElement>(null);
@@ -93,13 +139,13 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
   useReplayDriver({ playing, replay, range, speed: ui.speed, byEvent: ui.byEvent, events, anchor: rootRef, onReplay, onStop: () => setPlaying(false) });
   useEffect(() => { if (!visible) setPlaying(false); }, [visible]);
 
-  const bridge = width >= DECK_BRIDGE_MIN && region !== "left";
   const short = bridge && height > 0 && height < 380;
   const narrow = width > 0 && width < 340;
   // A low sidebar section (the left column split with Explorer) keeps the ribbon and gives the metrics' row to the views.
   const low = !bridge && height > 0 && height < 420;
-  const selected = rows.find(row => row.id === ui.selected) ?? null;
-  const sheetOpen = visible && selected !== null && ui.sheet && (!bridge || short);
+  const selectedId = embedded ? embedded.selectedId : ui.selected;
+  const selected = rows.find(row => row.id === selectedId) ?? null;
+  const sheetOpen = !embedded && visible && selected !== null && ui.sheet && (!bridge || short);
   const sheetRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const sheet = sheetRef.current;
@@ -112,9 +158,11 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
   }, [sheetOpen]);
 
   const select = useCallback((id: string | null) => update({ selected: id, sheet: id !== null }), [update]);
-  const onSelectCard = (id: string) => {
-    if (bridge && !short && ui.selected === id) { update({ selected: null }); return; }
-    update({ selected: id, sheet: true });
+  /** A bridge with its own inspector toggles on a second click; narrow tiers open the sheet; a host page just hears the pick. */
+  const choose = (id: string, toggle = true) => {
+    if (embedded) { embedded.onSelect(id); return; }
+    if (bridge && !short) update({ selected: toggle && ui.selected === id ? null : id });
+    else update({ selected: id, sheet: true });
   };
   const open = (row: DeckAgent) => row.main ? links.onMain() : links.onOpen(row);
   const actions: InspectorActions = { ...links, caps: commands.caps, run: commands.run, busy: commands.busy, notice: commands.notice };
@@ -135,13 +183,14 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
   const setView = (view: DeckView) => bridge ? update({ stage: view as DeckStageView }) : update({ view });
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== "Escape" || event.defaultPrevented) return;
+    // A host page owns the selection, so Esc is left to it (closing its drawer, say).
+    if (embedded || event.key !== "Escape" || event.defaultPrevented) return;
     if (ui.sheet && (!bridge || short) && ui.selected) { event.preventDefault(); update({ sheet: false }); return; }
     if (bridge && ui.selected) { event.preventDefault(); update({ selected: null }); }
   };
 
   if (liveRows.length === 0) {
-    return <section className="ad ad-is-empty" ref={rootRef} aria-label={d("label")} data-region={region || undefined}>
+    return <section className="ad ad-is-empty" ref={rootRef} aria-label={d("label")} data-region={region || undefined} data-embedded={embedded ? "" : undefined}>
       <div className="ad-empty">
         <div className="ad-empty-art" aria-hidden="true">{[0, 1, 2].map(index => <span key={index} />)}</div>
         <h3>{ready ? d("empty.none") : d("empty.loading")}</h3>
@@ -177,10 +226,10 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
     </span>
   </div>;
 
-  const formation = <FormationView rows={rows} visible={filter.visible} matched={filter.matched} selectedId={ui.selected} openedIds={openedIds}
+  const formation = <FormationView rows={rows} visible={filter.visible} matched={filter.matched} selectedId={selectedId} openedIds={openedIds}
     grouping={ui.grouping} collapsed={collapsed} filtering={ui.query.trim() !== "" || ui.groups.length > 0}
     density={short ? "minimal" : density} compact={short} now={replay ?? now} query={ui.query}
-    onSelect={onSelectCard} onOpen={open} d={d}
+    onSelect={id => choose(id)} onOpen={open} d={d}
     onToggle={id => update(state => ({ collapsed: state.collapsed.includes(id) ? state.collapsed.filter(item => item !== id) : [...state.collapsed, id] }))} />;
 
   const scrubber = (compact: boolean) => <TimeScrubber range={range} replay={replay} playing={playing} speed={ui.speed} byEvent={ui.byEvent} events={events}
@@ -190,19 +239,19 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
     if (view === "formation") return <div className="ad-pane-fill">{formationHead}{formation}</div>;
     if (view === "timeline") return <div className="ad-pane-fill">
       <TimelineView lanes={shownLanes.filter(lane => filter.visible.has(lane.row.id))} range={range} now={now} replay={replay} ui={ui.timeline}
-        onTimeline={patch => update(state => ({ timeline: { ...state.timeline, ...patch } }))} selectedId={ui.selected} matched={filter.matched}
-        onSelect={id => bridge && !short ? update({ selected: ui.selected === id ? null : id }) : update({ selected: id, sheet: true })} onOpen={open}
+        onTimeline={patch => update(state => ({ timeline: { ...state.timeline, ...patch } }))} selectedId={selectedId} matched={filter.matched}
+        onSelect={id => choose(id)} onOpen={open}
         onScrub={at => { setPlaying(false); onReplay(at); }} labelWidth={narrow ? 104 : bridge ? 168 : 132} d={d} />
       {bridge ? null : scrubber(true)}
     </div>;
     if (view === "orbit") return <div className="ad-pane-fill">
-      <OrbitView rows={rows} lanes={shownLanes} replay={replay} comms={comms} selectedId={ui.selected} matched={filter.matched} ui={ui.orbit}
+      <OrbitView rows={rows} lanes={shownLanes} live={live} replay={replay} comms={comms} selectedId={selectedId} matched={filter.matched} ui={ui.orbit}
         onOrbit={patch => update(state => ({ orbit: { ...state.orbit, ...patch } }))}
-        onSelect={id => bridge && !short ? update({ selected: ui.selected === id ? null : id }) : update({ selected: id, sheet: true })} onOpen={open} d={d} />
+        onSelect={id => choose(id)} onOpen={open} d={d} />
       {bridge ? null : scrubber(true)}
     </div>;
-    return <CommsView comms={comms} rows={rows} now={replay ?? now} replay={replay} query={ui.query} selectedId={ui.selected}
-      onSelect={id => bridge && !short ? update({ selected: id }) : update({ selected: id, sheet: true })} d={d} />;
+    return <CommsView comms={comms} rows={rows} now={replay ?? now} replay={replay} query={ui.query} selectedId={selectedId}
+      onSelect={id => choose(id, false)} d={d} />;
   };
 
   const tabs = <div className="ad-tabs" role="tablist" aria-label={d("viewsLabel")}>
@@ -226,14 +275,14 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
         if (event.shiftKey && index <= 0) { event.preventDefault(); (items.at(-1) ?? event.currentTarget).focus(); }
         else if (!event.shiftKey && (index < 0 || index === items.length - 1)) { event.preventDefault(); (items[0] ?? event.currentTarget).focus(); }
       }}>
-      <AgentInspector row={selected} rows={rows} lane={shownLanes.find(lane => lane.row.id === selected.id)} now={replay ?? now} actions={actions}
+      <AgentInspector row={selected} rows={rows} lane={shownLanes.find(lane => lane.row.id === selected.id)} now={replay ?? now} actions={actions} marks={marks}
         onSelect={id => update({ selected: id, sheet: id !== null })} onClose={() => update({ sheet: false })} d={d} />
     </div> : null;
 
   const paneClass = `ad-pane tab-pane-enter-${direction.current}`;
-  return <section ref={rootRef} className="ad" data-tier={bridge ? "bridge" : "side"} data-short={short || undefined} data-narrow={narrow || undefined} data-low={low || undefined}
+  return <section ref={rootRef} className="ad" data-tier={bridge ? "bridge" : "side"} data-embedded={embedded ? "" : undefined} data-short={short || undefined} data-narrow={narrow || undefined} data-low={low || undefined}
     data-region={region || undefined} data-live={live || undefined} data-replay={replay !== null || undefined} aria-label={d("label")} onKeyDown={onKeyDown}>
-    <PulseHeader totals={totals} samples={samples} source={source} preview={preview} marks={marks} now={now} replayAt={replay}
+    <PulseHeader totals={totals} samples={samples} source={source} preview={preview} marks={marks} live={live} now={now} replayAt={replay}
       groups={groups} onGroup={toggleGroup} d={d} compact={narrow || short || low} />
     {bridge
       ? <div className="ad-bridge">
@@ -250,10 +299,10 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
           </div>
           {sheet}
         </div>
-        {short ? null : <aside className="ad-side" aria-label={selected ? selected.name : d("summary.title")}>
+        {short || embedded ? null : <aside className="ad-side" aria-label={selected ? selected.name : d("summary.title")}>
           <div className="ad-side-body" key={selected?.id ?? "summary"}>
             {selected
-              ? <AgentInspector row={selected} rows={rows} lane={shownLanes.find(lane => lane.row.id === selected.id)} now={replay ?? now} actions={actions} onSelect={select} d={d} />
+              ? <AgentInspector row={selected} rows={rows} lane={shownLanes.find(lane => lane.row.id === selected.id)} now={replay ?? now} actions={actions} marks={marks} onSelect={select} d={d} />
               : <SwarmSummary rows={rows} totals={totals} lanes={shownLanes} range={replay === null ? range : { ...range, end: replay }} now={replay ?? now} onSelect={id => update({ selected: id })} d={d} />}
           </div>
         </aside>}

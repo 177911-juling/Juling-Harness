@@ -1,9 +1,8 @@
 import { useI18n } from "../../i18n";
-import type { ReactNode } from "react";
 import { CompletionRing } from "../../conversation/JobWidget";
 import { Icon, type IconName } from "../../icons";
-import { type HubAgent, type HubStatus } from "./types";
-import { activityPill, fmtAge, fmtCost, fmtDur, fmtHM, fmtNum, hubDurationMs, hubWord, sparkLevel } from "./projection";
+import { type HubAgent, type HubStatus, type HubTreeNode } from "./types";
+import { activityPill, flattenTreeNodes, fmtAge, fmtCost, fmtDur, fmtHM, fmtNum, hubDurationMs, sparkLevel } from "./projection";
 
 export function KbdHint() {
   const zh = useI18n().resolvedLanguage === "zh";
@@ -17,9 +16,10 @@ export function KbdHint() {
 }
 
 function StatusDot({ status }: { status: HubStatus }) {
+  const dotClass = status === "released" ? "parked" : status;
   return (
     <span
-      className={`hub-sd ${status}${status === "running" ? " pulse" : ""}`}
+      className={`hub-sd ${dotClass}${status === "running" ? " pulse" : ""}`}
       aria-hidden="true"
     />
   );
@@ -211,9 +211,10 @@ function AgentNode({
 }) {
   const zh = useI18n().resolvedLanguage === "zh";
   const pill = activityPill(agent, zh);
+  const nodeStatus = agent.status === "released" ? "parked" : agent.status;
   return (
     <button
-      className={`hub-node st-${agent.status}${selected ? " sel" : ""}`}
+      className={`hub-node st-${nodeStatus}${selected ? " sel" : ""}`}
       type="button"
       role="option"
       aria-selected={selected}
@@ -258,18 +259,21 @@ function AgentNode({
 export function TreeGroup({
   head,
   kids,
+  nodes,
   selected,
   now,
   onSelect,
 }: {
   head: HubAgent;
   kids: HubAgent[];
+  nodes?: readonly HubTreeNode[] | undefined;
   selected: string | null;
   now: number;
   onSelect: (id: string) => void;
 }) {
   const zh = useI18n().resolvedLanguage === "zh";
   const pill = activityPill(head, zh);
+  const treeNodes = nodes ?? kids.map((agent) => ({ agent, children: [] }));
   const cost = [head, ...kids].reduce(
     (sum, agent) => sum + (agent.metrics?.cost ?? 0),
     0,
@@ -304,35 +308,29 @@ export function TreeGroup({
       <div className="hub-tchildren">
         <span className="hub-trail" aria-hidden="true" />
         <div className="hub-tleaves">
-          {kids.map((kid) => (
-            <AgentNode
-              key={kid.id}
-              agent={kid}
-              selected={selected === kid.id}
-              now={now}
-              onSelect={onSelect}
-            />
-          ))}
+          {treeNodes.map((node) =>
+            node.children.length > 0 ? (
+              <TreeGroup
+                key={node.agent.id}
+                head={node.agent}
+                kids={flattenTreeNodes(node.children)}
+                nodes={node.children}
+                selected={selected}
+                now={now}
+                onSelect={onSelect}
+              />
+            ) : (
+              <AgentNode
+                key={node.agent.id}
+                agent={node.agent}
+                selected={selected === node.agent.id}
+                now={now}
+                onSelect={onSelect}
+              />
+            ),
+          )}
         </div>
       </div>
-    </div>
-  );
-}
-
-export function Kv({
-  label,
-  children,
-  mono,
-}: {
-  label: string;
-  children: ReactNode;
-  mono?: boolean;
-}) {
-  const zh = useI18n().resolvedLanguage === "zh";
-  return (
-    <div className="kv">
-      <div className="k">{hubWord(label, zh)}</div>
-      <div className={`v${mono ? " mono" : ""}`}>{children}</div>
     </div>
   );
 }

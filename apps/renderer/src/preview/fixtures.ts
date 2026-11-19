@@ -10,7 +10,7 @@ import type { TreeGitStatus } from "../git/treeStatus";
 import type { IconName } from "../icons";
 import type { ShellEventLogEntry } from "../shellMemory";
 import type { LedgerCommandRow } from "../panels/types";
-import type { CommandName, EventCursor } from "@juling-harness/client-contract";
+import type { CommandName, EventCursor, WorkspaceListReadModel, WorkspaceId } from "@juling-harness/client-contract";
 
 export const PREVIEW_SSH_TARGETS = [
   { id: "demo-linux", name: "dev-linux", platform: "linux" as const },
@@ -19,6 +19,17 @@ export const PREVIEW_SSH_TARGETS = [
 ];
 
 export const PREVIEW_DESKTOP_RECOVERY = { version: "0.1.4" } as const;
+
+export function getPreviewWorkspaceRecovery(zh: boolean): WorkspaceListReadModel {
+  const project = getPreviewProjects(zh)[0]!;
+  return {
+    activeWorkspaceId: project.id as WorkspaceId,
+    workspaces: [
+      { workspaceId: project.id as WorkspaceId, name: project.name, root: project.path, lastOpenedAt: "2026-11-17T08:00:00Z", active: true },
+      { workspaceId: "previous-project" as WorkspaceId, name: project.name, root: demoPath("previous", project.name), lastOpenedAt: "2026-11-16T08:00:00Z", active: false, unavailable: true },
+    ],
+  };
+}
 
 export type PreviewThreadWait = "approval" | "plan" | "ask";
 
@@ -718,14 +729,17 @@ export type PreviewAppUpdate = {
   downloadUrl: string;
   assetName: string;
   assetSize: number;
+  requiresSystemAuthorization?: boolean;
 };
 
 export function getPreviewAppUpdate(zh = isZh()): PreviewAppUpdate {
+  const version = PLATFORM === "linux" ? "0.2.2" : "0.2.0";
+  const assetName = PLATFORM === "darwin" ? `Juling-Harness-${version}-macos-arm64.dmg` : PLATFORM === "linux" ? `Juling-Harness-${version}-linux-x64.deb` : `Juling-Harness-Setup-${version}-windows-x64.exe`;
   return {
     available: true,
     currentVersion: "0.1.0",
-    version: "0.2.0",
-    name: "Juling Harness 0.2.0",
+    version,
+    name: `Juling Harness ${version}`,
     releaseNotes: zh
       ? `### 新增功能与改进
 
@@ -742,10 +756,11 @@ export function getPreviewAppUpdate(zh = isZh()): PreviewAppUpdate {
 - **Full bilingual UI support**: Complete Chinese and English update guidance across dialogs and badges.
 - **Performance & reliability**: Improved Runtime Bridge handshake and IPC responsiveness.`,
     publishedAt: "2026-08-20T00:00:00Z",
-    htmlUrl: "https://github.com/177911-juling/juling-harness/releases/tag/v0.2.0",
-    downloadUrl: `https://github.com/177911-juling/juling-harness/releases/download/v0.2.0/${PLATFORM === "darwin" ? "Juling-Harness-0.2.0-macos-arm64.dmg" : "Juling-Harness-Setup-0.2.0-windows-x64.exe"}`,
-    assetName: PLATFORM === "darwin" ? "Juling-Harness-0.2.0-macos-arm64.dmg" : "Juling-Harness-Setup-0.2.0-windows-x64.exe",
+    htmlUrl: `https://github.com/177911-juling/juling-harness/releases/tag/v${version}`,
+    downloadUrl: `https://github.com/177911-juling/juling-harness/releases/download/v${version}/${assetName}`,
+    assetName,
     assetSize: 89452000,
+    ...(PLATFORM === "linux" ? { requiresSystemAuthorization: true } : {}),
   };
 }
 

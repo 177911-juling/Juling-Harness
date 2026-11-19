@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouse
 import { createPortal } from "react-dom";
 import { Brand } from "./brands";
 import { Icon } from "./icons";
-import { pickLocale, useI18n } from "./i18n";
+import { useI18n } from "./i18n";
 import { PLATFORM } from "./platform";
 import { usePreviewMode } from "./preview/PreviewContext";
 
@@ -27,6 +27,7 @@ export interface AppUpdateDialogProps {
     readonly reason?: string | undefined;
     readonly blockedReason?: string | undefined;
     readonly manualInstallUrl?: string | undefined;
+    readonly requiresSystemAuthorization?: boolean | undefined;
   };
   readonly preview?: boolean;
   readonly isDownloading?: boolean;
@@ -85,7 +86,8 @@ export function AppUpdateDialog({
   onSkip,
   onCancel,
 }: AppUpdateDialogProps): ReactNode {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const { marks } = usePreviewMode();
   const [operation, setOperation] = useState<"download" | "apply" | null>(null);
   const downloading = isDownloading || operation === "download";
@@ -96,7 +98,7 @@ export function AppUpdateDialog({
   const statusMessage = notice ? t(notice.key) + (notice.demo && marks ? ` ${t("appUpdate.demoUpdate")}` : "") : null;
   const [previewReady, setPreviewReady] = useState(false);
   const ready = preview ? previewReady : readyToApply;
-  const manualInstallUrl = update.manualInstallUrl ?? (preview && PLATFORM === "linux" && update.component !== "runtime" ? update.htmlUrl : undefined);
+  const manualInstallUrl = update.manualInstallUrl;
 
   const progressPct = preview
     ? simulatedProgress
@@ -219,6 +221,7 @@ export function AppUpdateDialog({
           {manualInstallUrl && !ready ? <p>{t("appUpdate.linuxManualInstall")}</p> : null}
           {update.plan === "full" && update.reason !== "restart-update" ? <p>{t("updates.fullInstallerRequired")}{update.reason ? ` · ${update.reason}` : ""}</p> : null}
           {ready && !applying ? <p>{t("updates.readyToApply")}</p> : null}
+          {ready && update.requiresSystemAuthorization ? <p>{t("appUpdate.systemAuthorization")}</p> : null}
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", opacity: 0.8 }}>
             <span>{t("appUpdate.releaseDate")}: {formatDate(update.publishedAt)}</span>
             {update.assetSize ? <span>{t(UPDATE_COPY.packageSize)}: {formatBytes(update.assetSize)}</span> : null}
@@ -242,7 +245,7 @@ export function AppUpdateDialog({
             >
               {update.releaseNotes?.trim() || t("appUpdate.noReleaseNotes")}
             </div>
-            {update.component !== "runtime" && onOpenComponents ? <div className="file-release-note"><p>{pickLocale("文件现在可以在工作台中打开。Word 和 PPT 使用单独安装的 Office 文档预览组件，Excel / CSV 已内置支持。", "Documents now open inside the workbench. Word and PPT use the separately installed Office preview component; Excel and CSV are built in.")}</p><button className="btn small outline" disabled={busy} onClick={onOpenComponents}>{pickLocale("管理可选组件", "Manage optional components")}</button></div> : null}
+            {update.component !== "runtime" && onOpenComponents ? <div className="file-release-note"><p>{zh ? "文件现在可以在工作台中打开。Word 和 PPT 使用单独安装的 Office 文档预览组件，Excel / CSV 已内置支持。" : "Documents now open inside the workbench. Word and PPT use the separately installed Office preview component; Excel and CSV are built in."}</p><button className="btn small outline" disabled={busy} onClick={onOpenComponents}>{zh ? "管理可选组件" : "Manage optional components"}</button></div> : null}
           </div>
 
           {([
@@ -259,7 +262,7 @@ export function AppUpdateDialog({
 
           {update.blockedReason ? <p role="status">{update.blockedReason}</p> : null}
           {applyNotice && applyNotice !== update.blockedReason ? <p className="small muted" role="status">{applyNotice}</p> : null}
-          {applying ? <p role="status">{t("appUpdate.restarting")}</p> : null}
+          {applying ? <p role="status">{t(update.requiresSystemAuthorization ? "appUpdate.waitingAuthorization" : "appUpdate.restarting")}</p> : null}
 
           {statusMessage ? (
             <div className="alert-box success" style={{ color: "var(--green)", fontSize: "0.85rem", display: "flex", gap: 6, alignItems: "center" }}>
@@ -280,7 +283,7 @@ export function AppUpdateDialog({
                     height: "100%",
                     background: "var(--accent)",
                     width: progressPct !== null ? `${progressPct}%` : "100%",
-                    transition: "width 0.3s ease",
+                    transition: "width var(--dur) var(--ease)",
                   }}
                 />
               </div>
@@ -316,7 +319,7 @@ export function AppUpdateDialog({
               autoFocus
               onClick={handleDownload}
             >
-              {applying ? t("appUpdate.restarting") : downloading ? t("updates.downloading") : ready ? t("updates.applyAndRestart") : manualInstallUrl ? t("appUpdate.downloadInstaller") : t("appUpdate.downloadAndInstall")}
+              {applying ? t(update.requiresSystemAuthorization ? "appUpdate.waitingAuthorization" : "appUpdate.restarting") : downloading ? t("updates.downloading") : ready ? t("updates.applyAndRestart") : manualInstallUrl ? t("appUpdate.downloadInstaller") : t("appUpdate.downloadAndInstall")}
             </button>
           </div>
         </div>

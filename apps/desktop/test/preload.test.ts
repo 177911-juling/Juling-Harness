@@ -553,6 +553,9 @@ describe("createOmpHarnessChromeApi: fixed named surface, frozen object", () => 
       "startApp",
       "startRuntime",
       "subscribeUpdateProgress",
+      "systemFileOpen",
+      "systemFileOpenWith",
+      "systemFileReveal",
     ].sort();
 
     assert.deepEqual(Object.keys(chromeApi).sort(), expectedMethods);

@@ -1,6 +1,6 @@
 {
   "name": "@juling-harness/client",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "main": "./dist/src/index.js",
@@ -21,7 +21,7 @@
     "test:built": "node --test dist/test/*.test.js"
   },
   "dependencies": {
-    "@juling-harness/client-contract": "0.2.2",
-    "@juling-harness/harness-protocol": "0.2.2"
+    "@juling-harness/client-contract": "0.2.4",
+    "@juling-harness/harness-protocol": "0.2.4"
   }
 }
