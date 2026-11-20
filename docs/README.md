@@ -1,71 +1,56 @@
-# Docs
+# Documentation
 
-Public documentation for Juling Harness.
+Public documentation for **Juling Harness 1.0.0** (Runtime 18.20.2, patchset `18.20.2-harness.18`).
 
-| Document | Audience |
+Start with the [Chinese overview](../README.md) or [English overview](../README.en.md), then pick the guide that matches what you are doing. All documents below describe the current product; the private development notes and feature-to-file map are not part of this repository.
+
+## Install and operate
+
+| Document | Contents |
 |---|---|
-| [../README.md](../README.md) | 中文总览 |
-| [../README.en.md](../README.en.md) | English overview |
-| [getting-started.md](getting-started.md) | Run from source |
-| [linux.md](linux.md) | Linux AppImage / deb 安装、更新、沙箱、源码开发与原生包验收 |
-| [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
-| [time-travel.md](time-travel.md) | Time Travel 开启、检查点、代码/对话恢复、存储与限制 |
-| [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |
-| [tmux.md](tmux.md) | SSH tmux 会话附加、窗口与分屏、隐藏与分离、恢复及限制 |
-| [../doc/ssh-workspace-test-prompt.md](../doc/ssh-workspace-test-prompt.md) | SSH 与账密功能的独立测试交接提示词 |
-| [model-adaptation.md](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |
-| [workbench-docking.md](workbench-docking.md) | 工具停靠、浮窗、会话布局和预设 |
-| [file-browser.md](file-browser.md) | 全机文件浏览、本机／SSH、文件管理与项目外编辑 |
-| [browser.md](browser.md) | 聊天浏览器、人工接管、元素引用、登录空间和恢复 |
-| [computer-use.md](computer-use.md) | 电脑操作工作区、画面与步骤、安全停止、界面结构和隐私 |
-| [dock-delivery-2026-10-29.md](dock-delivery-2026-10-29.md) | 停靠工作台实现与验收记录、未验证边界 |
-| [dictation.md](dictation.md) | 工作台与 BTW 语音输入、原生模式、麦克风配置和内存恢复 |
-| [btw.md](btw.md) | BTW 原生功能对齐、话题历史、图片、子代理与快捷键 |
-| [fonts.md](fonts.md) | Independent interface, terminal and output font preferences |
-| [releases/v0.2.4.md](releases/v0.2.4.md) | 0.2.4 发布说明、平台下载与升级提示 |
-| [releases/v0.2.3.md](releases/v0.2.3.md) | 0.2.3 发布说明、平台下载与升级提示 |
-| [releases/v0.2.2.md](releases/v0.2.2.md) | 0.2.2 发布说明、平台下载与升级提示 |
-| [releases/v0.2.1.md](releases/v0.2.1.md) | 0.2.1 使用阻断修复、三平台下载与升级说明 |
-| [reviews/v0.2.1-release-review.md](reviews/v0.2.1-release-review.md) | PR #25 / #26 / #28 审查、发布前验证与未覆盖范围 |
-| [releases/v0.1.11.md](releases/v0.1.11.md) | 0.1.11 发布页文案、三平台下载与升级说明 |
-| [releases/v0.1.10.md](releases/v0.1.10.md) | 0.1.10 发布页文案、三平台下载与升级说明 |
-| [migrations/omp-18.13.2.md](migrations/omp-18.13.2.md) | 18.12.6 → 18.13.2 正式版本变化、完整 Runtime / GUI 迁移与无付费验收 |
-| [migrations/omp-18.20.2.md](migrations/omp-18.20.2.md) | 18.19.0 → 18.20.2 分阶段迁移、同源 Runtime 与隔离验证范围 |
-| [migrations/omp-18.20.2-frontend-handoff.md](migrations/omp-18.20.2-frontend-handoff.md) | 前端接续阶段记录、typed API 与修复后的调用约定 |
-| [reviews/omp-18.20.2-frontend-fixes-2026-11-16.md](reviews/omp-18.20.2-frontend-fixes-2026-11-16.md) | 15 项前端复核修复、harness.5 canary、最终门禁与未验证边界 |
-| [migrations/omp-18.19.0.md](migrations/omp-18.19.0.md) | CLI-first GUI：原生表单、任务步骤、同页浏览器、系统模板、账户、Actions、GC 与兼容验收 |
-| [migrations/omp-18.18.0.md](migrations/omp-18.18.0.md) | 从 18.13.2-harness.44 升级至 18.18.0：逐版变化、worker / 队列 / Shell / WebRTC / WebMCP 适配与验证 |
-| [migrations/omp-18.12.6.md](migrations/omp-18.12.6.md) | 18.10.4 → 18.12.6 版本概览、Runtime 适配与新功能 GUI 入口 |
-| [migrations/omp-18.10.4.md](migrations/omp-18.10.4.md) | 18.8.0 → 18.10.4 完整版本概览、GUI 入口与验收 |
-| [migrations/omp-18.8.0.md](migrations/omp-18.8.0.md) | Harness 0.1.9 / OMP 18.8.0 changes, compatibility and acceptance boundaries |
-| [gui-18.4.4.md](gui-18.4.4.md) | OMP 18.4.4 GUI 使用说明 |
-| [migrations/omp-18.4.4.md](migrations/omp-18.4.4.md) | Upstream changes and Runtime migration |
-| [migrations/omp-18.4.4-gui.md](migrations/omp-18.4.4-gui.md) | Complete GUI scope and local delivery evidence |
-| [development.md](development.md) | Inner loop, tests, overlay |
-| [localization.md](localization.md) | 中英文完整性、实时语言切换、缓存与 Runtime / SSH 兼容、审查与验收 |
-| [performance.md](performance.md) | Streaming budgets, local counters, rollback and repeatable benchmarks |
-| [reviews/security-memory-fixes-2026-11-12.md](reviews/security-memory-fixes-2026-11-12.md) | 安全、Git、Bridge 与资源修复；真实 Chromium/Electron 前后采样和验收边界 |
-| [performance-2026-10-29.md](performance-2026-10-29.md) | 启动、整壳性能与包体优化；开源方案对比、实测及覆盖限制 |
-| [performance-audit-2026-10-29.md](performance-audit-2026-10-29.md) | 启动/运行/GPU/低配独立审查、量化基线与 P0/P1/P2 路线 |
-| [performance-review-2026-10-29-round2.md](performance-review-2026-10-29-round2.md) | 第二轮综合审查：同 HEAD 复测、打包形态/GPU 软合成/6× 低配/动画 A/B、优化方案与门禁 |
-| [architecture.md](architecture.md) | Packages, Bridge, data rules |
-| [release-review.md](release-review.md) | 历史 Action 发布失败复盘、七道防坑准则与发布前审查清单 |
-| [releasing.md](releasing.md) | Version, changelog, tag, Windows installer, macOS build |
-| [updates.md](updates.md) | In-app updates on Windows and macOS: storage, trust, recovery |
-| [migrations/omp-18.3.0.md](migrations/omp-18.3.0.md) | OMP v18.3.0 upgrade, Harness features, verification and external acceptance decisions |
-| [migrations/omp-18.2.5.md](migrations/omp-18.2.5.md) | OMP v18.2.5 changes, selected GUI features, verification and rollback |
-| [migrations/omp-18.1.18.md](migrations/omp-18.1.18.md) | OMP v18.1.18 changes, adaptation, verification and rollback |
-| [../CHANGELOG.md](../CHANGELOG.md) | User-facing history |
-| [../CONTRIBUTING.md](../CONTRIBUTING.md) | How to send a change |
-| [../SECURITY.md](../SECURITY.md) | Vulnerability reports |
-| [../doc/feature-index.md](../doc/feature-index.md) | Feature → file map for contributors |
+| [Getting started](getting-started.md) | Install on Windows, macOS or Linux, connect the Runtime, and run the basic workflow |
+| [Linux client](linux.md) | deb / AppImage, distribution baseline, sandbox requirements, in-app updates and uninstall |
+| [Updates and verification](updates.md) | Update checks, Ed25519 manifests, differential downloads, restart install and rollback |
+| [Releasing](releasing.md) | Versioning, changelog, tags, platform packaging and release checks |
+| [Release operations](release-operations.md) | Signing keys, update catalogs, mirrors and artifact verification |
 
-`../doc/` also holds historical design notes (`BACKEND_FOUNDATION.md`,
-`FRONTEND_INTEGRATION.md`, `real-conversation/`). Treat those as archaeology
-when they disagree with `architecture.md` or the TypeScript contracts.
+## Product guides
 
-- [OMP 18.4.4 与 macOS 整合、修复和验收](integration-18.4.4-macos.md)
+| Document | Contents |
+|---|---|
+| [Architecture](architecture.md) | Renderer, Main, Host, Harness Bridge and Runtime layers; overlay and seam maintenance |
+| [Workbench docking](workbench-docking.md) | Dock regions, drag snapping, window controls, tab groups, pinning and layout restore |
+| [File browser](file-browser.md) | Files outside the project, pinned folders, filters and local/SSH differences |
+| [File viewer](file-viewer.md) | Editing, saving, diffs, find, multi-format preview and external-change conflicts |
+| [Built-in browser](browser.md) | Native tabs, agent/human handoff, element selection, Console, Network and downloads |
+| [SSH workspaces](ssh-workspaces.md) | Remote Runtime, directories, files, Git, terminal, reconnect and security boundaries |
+| [tmux](tmux.md) | Attaching remote tmux sessions, windows, panes, layout and detach |
+| [Computer use](computer-use.md) | Screen observation, action steps, stop controls and privacy boundaries |
+| [Time Travel](time-travel.md) | Turn checkpoints, code/conversation restore, backups, storage and limits |
+| [Dictation](dictation.md) | Native voice input, microphone access and session recovery |
+| [BTW](btw.md) | Side-channel questions, topic history, images and subagents |
+| [Settings](settings.md) | Settings groups, search and the scope each value is saved to |
+| [Fonts](fonts.md) | Interface, terminal and output font preferences |
+| [Model adaptation](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |
+| [Evaluation](evaluation.md) | Benchmarks, instruction following, judgments, Ratchet and export |
+| [Conversation width](conversation-width.md) | Reading-width rules for long conversations |
 
-- [评测工作区](evaluation.md)：原生基准、指令遵循、评判与 Ratchet，后台运行、历史复跑与导出。
+## Engineering
 
-- [文件查看器](file-viewer.md)：工作台文件窗口、文本编辑、本地 / SSH 读取与可选 Office 组件。
+| Document | Contents |
+|---|---|
+| [Development](development.md) | Inner loop, build layout, tests and Runtime overlay workflow |
+| [Localization](localization.md) | Six languages, dictionary and inline copy, cross-process sync, fallback and checks |
+| [Performance](performance.md) | Streaming budgets, local counters, rollback and repeatable benchmarks |
+
+## History
+
+| Document | Contents |
+|---|---|
+| [Changelog](../CHANGELOG.md) | User-facing release history |
+| [Contributing](../CONTRIBUTING.md) | How to send a change |
+| [Security](../SECURITY.md) | Vulnerability reports |
+| [Releases](releases/v0.2.2.md) | 0.1.10 – 0.2.2 release notes |
+| [Runtime migrations](migrations/omp-18.20.2.md) | OMP 18.x migration reports and acceptance records |
+| [GUI 18.4.4](gui-18.4.4.md) | Historical GUI scope for OMP 18.4.4 |
+| [macOS integration 18.4.4](integration-18.4.4-macos.md) | Historical macOS integration and acceptance |
