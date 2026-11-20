@@ -221,11 +221,12 @@ const presetGroups = (): ReadonlyArray<ModelPresetGroup> => [
   {
     group: hostText("Gateway / 聚合", "Gateway / Aggregators"),
     items: [
-      { id: "modular", name: "Modular Cloud", desc: hostText("Modular Cloud 模型与原生推理参数", "Modular Cloud models and native reasoning parameters"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.modular.com/v1" },
-      { id: "commandcode", name: "Command Code", desc: hostText("原生 OpenAI / Anthropic 路由、模型发现与价格", "Native OpenAI / Anthropic routing, discovery, and pricing"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
-      { id: "openrouter", name: "OpenRouter", desc: hostText("一个 Key 访问多家模型", "Access multiple providers with one key"), api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
-      { id: "github-copilot", name: "GitHub Copilot", desc: hostText("Copilot 订阅额度", "Copilot subscription quota"), api: "openai-responses", auth: ["oauth"], oauth: true },
-      { id: "litellm", name: "LiteLLM", desc: hostText("自托管统一模型代理", "Self-hosted unified model proxy"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },
+      { id: "juling-main", name: hostText("聚灵-主站", "Juling Main"), desc: hostText("聚灵主站聚合网关", "Juling main aggregation gateway"), api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://www.177911.com/v1" },
+      { id: "juling-us", name: hostText("聚灵-美国", "Juling US"), desc: hostText("美国节点聚合网关", "US aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v1.177911.com/v1" },
+      { id: "juling-hk", name: hostText("聚灵-香港", "Juling Hong Kong"), desc: hostText("香港节点聚合网关", "Hong Kong aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v2.177911.com/v1" },
+      { id: "juling-in", name: hostText("聚灵-印度", "Juling India"), desc: hostText("印度节点聚合网关", "India aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v3.177911.com/v1" },
+      { id: "juling-br", name: hostText("聚灵-巴西", "Juling Brazil"), desc: hostText("巴西节点聚合网关", "Brazil aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v4.177911.com/v1" },
+      { id: "juling-de", name: hostText("聚灵-德国", "Juling Germany"), desc: hostText("德国节点聚合网关", "Germany aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v5.177911.com/v1" },
     ],
   },
   {

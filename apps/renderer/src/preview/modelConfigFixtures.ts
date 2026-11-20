@@ -54,10 +54,12 @@ export function getModelPresets(zh = isZh()): ReadonlyArray<ModelPresetGroup> {
     {
       group: zh ? "Gateway / 聚合" : "Gateway / Aggregators",
       items: [
-        { id: "commandcode", name: "Command Code", desc: zh ? "原生 OpenAI / Anthropic 路由" : "Native OpenAI / Anthropic routing", api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
-        { id: "openrouter", name: "OpenRouter", desc: zh ? "一个 Key 访问多家模型" : "Access multiple providers with one key", api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
-        { id: "github-copilot", name: "GitHub Copilot", desc: zh ? "Copilot 订阅额度" : "Copilot subscription quota", api: "openai-responses", auth: ["oauth"], oauth: true },
-        { id: "litellm", name: "LiteLLM", desc: zh ? "自托管统一模型代理" : "Self-hosted unified model proxy", api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },
+        { id: "juling-main", name: zh ? "聚灵-主站" : "Juling Main", desc: zh ? "聚灵主站聚合网关" : "Juling main aggregation gateway", api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://www.177911.com/v1" },
+        { id: "juling-us", name: zh ? "聚灵-美国" : "Juling US", desc: zh ? "美国节点聚合网关" : "US aggregation gateway", api: "openai-completions", auth: ["api-key"], endpoint: "https://v1.177911.com/v1" },
+        { id: "juling-hk", name: zh ? "聚灵-香港" : "Juling Hong Kong", desc: zh ? "香港节点聚合网关" : "Hong Kong aggregation gateway", api: "openai-completions", auth: ["api-key"], endpoint: "https://v2.177911.com/v1" },
+        { id: "juling-in", name: zh ? "聚灵-印度" : "Juling India", desc: zh ? "印度节点聚合网关" : "India aggregation gateway", api: "openai-completions", auth: ["api-key"], endpoint: "https://v3.177911.com/v1" },
+        { id: "juling-br", name: zh ? "聚灵-巴西" : "Juling Brazil", desc: zh ? "巴西节点聚合网关" : "Brazil aggregation gateway", api: "openai-completions", auth: ["api-key"], endpoint: "https://v4.177911.com/v1" },
+        { id: "juling-de", name: zh ? "聚灵-德国" : "Juling Germany", desc: zh ? "德国节点聚合网关" : "Germany aggregation gateway", api: "openai-completions", auth: ["api-key"], endpoint: "https://v5.177911.com/v1" },
       ],
     },
     {

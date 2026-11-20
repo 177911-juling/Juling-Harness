@@ -1567,6 +1567,18 @@ describe("provider presets", () => {
       const groups = model.presets.map((group) => group.group);
       assert.match(groups[0] ?? "", /Gateway \/ 聚合|Gateway \/ Aggregators/u);
       assert.match(groups[1] ?? "", /官方 \/ 主流|Official \/ Popular/u);
+      const gateways = model.presets[0]?.items ?? [];
+      assert.equal(gateways.length, 6);
+      assert.equal(gateways[0]?.id, "juling-main");
+      assert.equal(gateways[0]?.endpoint, "https://www.177911.com/v1");
+      assert.deepEqual(gateways.map((item) => item.endpoint), [
+        "https://www.177911.com/v1",
+        "https://v1.177911.com/v1",
+        "https://v2.177911.com/v1",
+        "https://v3.177911.com/v1",
+        "https://v4.177911.com/v1",
+        "https://v5.177911.com/v1",
+      ]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

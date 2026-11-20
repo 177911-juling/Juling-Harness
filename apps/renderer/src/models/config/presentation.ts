@@ -43,6 +43,12 @@ const PRESET_GROUP_EN: Record<string, string> = {
 
 const PRESET_NAME_EN: Record<string, string> = {
   zhipu: "Zhipu",
+  "juling-main": "Juling Main",
+  "juling-us": "Juling US",
+  "juling-hk": "Juling Hong Kong",
+  "juling-in": "Juling India",
+  "juling-br": "Juling Brazil",
+  "juling-de": "Juling Germany",
 };
 
 const PRESET_DESC_EN: Record<string, string> = {
@@ -60,6 +66,12 @@ const PRESET_DESC_EN: Record<string, string> = {
   moonshot: "Kimi K series models",
   modular: "Modular Cloud models and native reasoning parameters",
   commandcode: "Native OpenAI / Anthropic routing, discovery, and pricing",
+  "juling-main": "Juling main aggregation gateway",
+  "juling-us": "US aggregation gateway",
+  "juling-hk": "Hong Kong aggregation gateway",
+  "juling-in": "India aggregation gateway",
+  "juling-br": "Brazil aggregation gateway",
+  "juling-de": "Germany aggregation gateway",
   openrouter: "Access multiple providers with one key",
   "github-copilot": "Copilot subscription quota",
   litellm: "Self-hosted unified model proxy",
