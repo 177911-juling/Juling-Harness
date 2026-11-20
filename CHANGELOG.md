@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-20
+
 ### Added
 
 - Release workflow supports artifact-only client builds without publishing a release.
@@ -619,7 +621,9 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 Juling Harness 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/177911-juling/juling-harness/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/177911-juling/juling-harness/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/177911-juling/juling-harness/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/177911-juling/juling-harness/compare/v0.2.4...v1.0.0
 [0.2.4]: https://github.com/177911-juling/juling-harness/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/177911-juling/juling-harness/compare/v0.2.2...v0.2.3
 [0.2.0]: https://github.com/177911-juling/juling-harness/compare/v0.1.17...v0.2.0

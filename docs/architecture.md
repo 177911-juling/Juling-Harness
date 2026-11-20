@@ -1,6 +1,6 @@
 # Architecture
 
-Juling Harness 1.0.0 is the desktop console for **Juling Runtime 18.20.2**, the
+Juling Harness 1.0.1 is the desktop console for **Juling Runtime 18.20.2**, the
 patched `juling` binary built from the pinned `oh-my-pi` tree. The renderer never parses
 TUI text, ANSI sequences or synthetic key presses. Every interaction crosses a typed
 boundary: the React UI calls a client contract, Electron Main owns the process and
