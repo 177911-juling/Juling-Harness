@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-20
+
+### Added
+
+- 新建供应商时「从预设模板创建」默认展开；模板分组把 **Gateway / 聚合** 放在第一位，**官方 / 主流** 紧随其后。
+- 合入 OMP Studio 0.2.4：Agent Hub 指挥台与 Agent 间真实消息、统一像素头像、Agent 档案重做、模型拉取搜索/筛选、工作区失效恢复、Linux AppImage/deb 应用内差分更新、会话切换与流式渲染优化。
+- 六语界面（简体中文 / English / Русский / 日本語 / 한국어 / हिन्दी）、左侧 rail 统一导航与统计面板中文化随版发布。
+
+### Changed
+
+- 内置 Runtime 为 `18.20.2-harness.18`；桌面与全部 workspace 包版本统一为 `1.0.0`。
+
 ## [0.2.4] - 2026-11-18
 
 ### Changed

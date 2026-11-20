@@ -1,6 +1,6 @@
 {
   "name": "@juling-harness/testkit",
-  "version": "0.2.4",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "./dist/src/index.js",
@@ -21,13 +21,13 @@
     "test:built": "node --test dist/test/*.test.js"
   },
   "dependencies": {
-    "@juling-harness/client": "0.2.4",
-    "@juling-harness/client-contract": "0.2.4",
-    "@juling-harness/host-client-api": "0.2.4",
-    "@juling-harness/harness-host": "0.2.4",
-    "@juling-harness/harness-protocol": "0.2.4",
-    "@juling-harness/transport-desktop": "0.2.4",
-    "@juling-harness/transport-web": "0.2.4"
+    "@juling-harness/client": "1.0.0",
+    "@juling-harness/client-contract": "1.0.0",
+    "@juling-harness/host-client-api": "1.0.0",
+    "@juling-harness/harness-host": "1.0.0",
+    "@juling-harness/harness-protocol": "1.0.0",
+    "@juling-harness/transport-desktop": "1.0.0",
+    "@juling-harness/transport-web": "1.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
