@@ -6908,7 +6908,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 
 /* ============================================================
    空态 / 新对话欢迎区（.convo-empty）
-   1:1 移植自 ui_reference/ver1：巨型淡紫边线 π 水印 + 用量热力图
+   1:1 移植自 ui_reference/ver1 的布局：品牌 Logo + 用量热力图
    + 最近对话。紫色只属于品牌插画层与热力图。
    ============================================================ */
 
@@ -6980,7 +6980,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   width: 72px;
   height: 72px;
   box-sizing: border-box;
-  padding: 16px;
+  padding: 0;
+  object-fit: cover;
   display: block;
   overflow: hidden;
   margin-bottom: var(--sp-20);
@@ -6992,16 +6993,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
     0 0 36px color-mix(in srgb, var(--glow) 40%, transparent);
   -webkit-mask-image: none;
   mask-image: none;
-}
-.ce-pi-glyph {
-  fill: none;
-  stroke: url(#piStroke);
-  stroke-width: 12;
-  stroke-linejoin: miter;
-  stroke-miterlimit: 2;
-  stroke-linecap: square;
-  opacity: 1;
-  filter: drop-shadow(0 0 16px color-mix(in srgb, var(--glow) 55%, transparent));
 }
 .ce-greet, .ce-sub { position: relative; }
 
