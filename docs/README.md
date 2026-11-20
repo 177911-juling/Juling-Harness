@@ -2,7 +2,7 @@
 
 Public documentation for **Juling Harness 1.0.0** (Runtime 18.20.2, patchset `18.20.2-harness.18`).
 
-Start with the [Chinese overview](../README.md) or [English overview](../README.en.md), then pick the guide that matches what you are doing. All documents below describe the current product; the private development notes and feature-to-file map are not part of this repository.
+Start with the [English overview](../README.md), [Chinese overview](../README.zh.md) or [Hindi overview](../README.hi.md), then pick the guide that matches what you are doing. All documents below describe the current product; the private development notes and feature-to-file map are not part of this repository.
 
 ## Install and operate
 
