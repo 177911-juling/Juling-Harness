@@ -1,7 +1,7 @@
 /**
  * 工作台使用教程的显示状态（纯 Renderer 本地，不进 Host / client-contract）。
  *
- * - 首次进入 0.2.0 自动打开一次，且必须走完全部步骤才出现关闭按钮；
+ * - 首次进入 1.0.0 自动打开一次，且必须走完全部步骤才出现关闭按钮；
  *   走完后把当前教程版本写进 localStorage。
  * - 「帮助 → 使用教程」随时可以再开，这时随时可关。
  *
@@ -10,7 +10,7 @@
 
 import { useSyncExternalStore } from "react";
 
-export const ONBOARDING_TOUR_ID = "workbench-0.2.0";
+export const ONBOARDING_TOUR_ID = "workbench-1.0.0";
 export const ONBOARDING_STORAGE_KEY = "omp.onboarding.completed";
 
 export type OnboardingMode = "first-run" | "replay";

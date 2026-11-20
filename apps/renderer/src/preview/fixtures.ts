@@ -733,11 +733,11 @@ export type PreviewAppUpdate = {
 };
 
 export function getPreviewAppUpdate(zh = isZh()): PreviewAppUpdate {
-  const version = PLATFORM === "linux" ? "0.2.2" : "0.2.0";
+  const version = "1.0.1";
   const assetName = PLATFORM === "darwin" ? `Juling-Harness-${version}-macos-arm64.dmg` : PLATFORM === "linux" ? `Juling-Harness-${version}-linux-x64.deb` : `Juling-Harness-Setup-${version}-windows-x64.exe`;
   return {
     available: true,
-    currentVersion: "0.1.0",
+    currentVersion: "1.0.0",
     version,
     name: `Juling Harness ${version}`,
     releaseNotes: zh

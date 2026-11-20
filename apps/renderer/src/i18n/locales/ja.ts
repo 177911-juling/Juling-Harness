@@ -87,7 +87,7 @@ export const ja: LocaleDictionary = {
     time: { justNow: "たった今", secondsAgo: "{count} 秒前", minutesAgo: "{count} 分前", hoursAgo: "{count} 時間前" },
   },
   onboarding: {
-    kicker: "0.2.0 の新機能 · ワークベンチ",
+    kicker: "1.0.0 の新機能 · ワークベンチ",
     stepOf: "ステップ {current} / {total}",
     next: "次へ",
     back: "戻る",
@@ -101,7 +101,7 @@ export const ja: LocaleDictionary = {
     steps: {
       overview: {
         title: "新しいワークベンチの紹介",
-        body: "0.2.0 では会話、ツール、ウィンドウが 1 つのワークベンチにまとまりました。画面は 5 つの領域に分かれており、それぞれ表示、非表示、並べ替えができます。",
+        body: "1.0.0 では会話、ツール、ウィンドウが 1 つのワークベンチにまとまりました。画面は 5 つの領域に分かれており、それぞれ表示、非表示、並べ替えができます。",
         tips: { t1: "ナビゲーション：ワークベンチ、ホーム、履歴、設定を切り替えます。右端のハンドルで折りたためます", t2: "プロジェクトとセッション：会話をプロジェクトごとに表示", t3: "会話：履歴と入力欄", t4: "会話ツール：会話の横に並ぶカード", t5: "右パネルと下部パネル：Git、ターミナルなどのタブ" },
       },
       windows: {

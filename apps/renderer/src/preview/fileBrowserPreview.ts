@@ -39,7 +39,7 @@ function homeTree(platform: "win32" | "darwin"): Node[] {
     dir("Desktop", [file("会议纪要 1112.docx", 86 * KB, 2 * DAY), file("截图 2026-11-12 143002.png", 412 * KB, 2 * DAY + 3 * HOUR), file("待办.txt", 2 * KB, 40 * MIN)]),
     dir("Documents", [dir("Notes", [file("读书笔记.md", 14 * KB, 9 * DAY), file("周报模板.md", 3 * KB, 21 * DAY)]), file("年度预算.xlsx", 58 * KB, 15 * DAY), file("简历-2026.pdf", 210 * KB, 120 * DAY)]),
     dir("Downloads", [
-      file(win ? "Juling-Harness-Setup-0.2.0.exe" : "Juling-Harness-0.2.0-arm64.dmg", 148 * MB, 1 * DAY + 2 * HOUR),
+      file(win ? "Juling-Harness-Setup-1.0.0.exe" : "Juling-Harness-1.0.0-arm64.dmg", 148 * MB, 1 * DAY + 2 * HOUR),
       file("spec-v3.pdf", 2.4 * MB, 3 * HOUR), file("usage.csv", 18 * KB, 5 * HOUR), file("report.xlsx", 64 * KB, 26 * HOUR),
       file("design-review.pptx", 6.8 * MB, 4 * DAY), file("sample-voice.wav", 1.1 * MB, 6 * DAY), file("node-v24.11.0-x64.msi", 31 * MB, 11 * DAY),
     ]),
