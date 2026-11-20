@@ -1579,6 +1579,14 @@ describe("provider presets", () => {
         "https://v4.177911.com/v1",
         "https://v5.177911.com/v1",
       ]);
+      assert.deepEqual(gateways.map((item) => item.website), [
+        "https://www.177911.com",
+        "https://v1.177911.com",
+        "https://v2.177911.com",
+        "https://v3.177911.com",
+        "https://v4.177911.com",
+        "https://v5.177911.com",
+      ]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

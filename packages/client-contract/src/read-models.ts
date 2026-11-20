@@ -582,6 +582,7 @@ export interface ModelPresetItem {
   readonly api: ModelApiKind | string;
   readonly auth: ReadonlyArray<ModelPresetAuth>;
   readonly endpoint?: string;
+  readonly website?: string;
   readonly local?: boolean;
   readonly discovery?: string;
   readonly popular?: boolean;

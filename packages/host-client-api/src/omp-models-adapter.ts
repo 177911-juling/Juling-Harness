@@ -221,12 +221,12 @@ const presetGroups = (): ReadonlyArray<ModelPresetGroup> => [
   {
     group: hostText("Gateway / 聚合", "Gateway / Aggregators"),
     items: [
-      { id: "juling-main", name: hostText("聚灵-主站", "Juling Main"), desc: hostText("聚灵主站聚合网关", "Juling main aggregation gateway"), api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://www.177911.com/v1" },
-      { id: "juling-us", name: hostText("聚灵-美国", "Juling US"), desc: hostText("美国节点聚合网关", "US aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v1.177911.com/v1" },
-      { id: "juling-hk", name: hostText("聚灵-香港", "Juling Hong Kong"), desc: hostText("香港节点聚合网关", "Hong Kong aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v2.177911.com/v1" },
-      { id: "juling-in", name: hostText("聚灵-印度", "Juling India"), desc: hostText("印度节点聚合网关", "India aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v3.177911.com/v1" },
-      { id: "juling-br", name: hostText("聚灵-巴西", "Juling Brazil"), desc: hostText("巴西节点聚合网关", "Brazil aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v4.177911.com/v1" },
-      { id: "juling-de", name: hostText("聚灵-德国", "Juling Germany"), desc: hostText("德国节点聚合网关", "Germany aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v5.177911.com/v1" },
+      { id: "juling-main", name: hostText("聚灵-主站", "Juling Main"), desc: hostText("聚灵主站聚合网关", "Juling main aggregation gateway"), api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://www.177911.com/v1", website: "https://www.177911.com" },
+      { id: "juling-us", name: hostText("聚灵-美国", "Juling US"), desc: hostText("美国节点聚合网关", "US aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v1.177911.com/v1", website: "https://v1.177911.com" },
+      { id: "juling-hk", name: hostText("聚灵-香港", "Juling Hong Kong"), desc: hostText("香港节点聚合网关", "Hong Kong aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v2.177911.com/v1", website: "https://v2.177911.com" },
+      { id: "juling-in", name: hostText("聚灵-印度", "Juling India"), desc: hostText("印度节点聚合网关", "India aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v3.177911.com/v1", website: "https://v3.177911.com" },
+      { id: "juling-br", name: hostText("聚灵-巴西", "Juling Brazil"), desc: hostText("巴西节点聚合网关", "Brazil aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v4.177911.com/v1", website: "https://v4.177911.com" },
+      { id: "juling-de", name: hostText("聚灵-德国", "Juling Germany"), desc: hostText("德国节点聚合网关", "Germany aggregation gateway"), api: "openai-completions", auth: ["api-key"], endpoint: "https://v5.177911.com/v1", website: "https://v5.177911.com" },
     ],
   },
   {

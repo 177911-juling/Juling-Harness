@@ -260,6 +260,7 @@ export function draftFromPreset(preset: ModelPresetItem): Draft {
     ...blankDraft(),
     id: preset.id,
     name: preset.name,
+    website: preset.website ?? "",
     api: preset.api,
     endpointUrl: preset.endpoint ?? "",
     local: Boolean(preset.local),
