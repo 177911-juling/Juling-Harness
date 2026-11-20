@@ -159,14 +159,19 @@ Installers and update artifacts are published on [Releases](https://github.com/1
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md)
-- [Architecture](docs/architecture.md)
-- [Workbench docking](docs/workbench-docking.md)
-- [File browser](docs/file-browser.md) · [File viewer](docs/file-viewer.md)
-- [Built-in browser](docs/browser.md) · [SSH workspaces](docs/ssh-workspaces.md)
-- [Time Travel](docs/time-travel.md)
-- [Updates and verification](docs/updates.md) · [Linux client](docs/linux.md)
-- [Localization](docs/localization.md)
+| Document | Contents |
+|---|---|
+| [Getting started](docs/getting-started.md) | Install, first launch, Runtime connection and core workflow |
+| [Architecture](docs/architecture.md) | Layers, Harness Bridge, Runtime overlay and seam patches |
+| [Workbench docking](docs/workbench-docking.md) | Dock regions, drag snapping, tab groups and layout restore |
+| [File browser](docs/file-browser.md) | Files outside the project, pinned folders and SSH browsing |
+| [File viewer](docs/file-viewer.md) | Editing, diffs, find and multi-format preview |
+| [Built-in browser](docs/browser.md) | Native pages, agent handoff, Console and Network |
+| [SSH workspaces](docs/ssh-workspaces.md) | Remote Runtime, files, Git and terminal |
+| [Time Travel](docs/time-travel.md) | Turn checkpoints and code/conversation restore |
+| [Updates and verification](docs/updates.md) | Differential download, signatures, restart and rollback |
+| [Linux client](docs/linux.md) | deb / AppImage install and in-app updates |
+| [Localization](docs/localization.md) | Six languages, cross-process sync and fallback |
 
 ---
 
