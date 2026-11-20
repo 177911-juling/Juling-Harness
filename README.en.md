@@ -1,186 +1,187 @@
-<p align="center">
-  <img src="icon.png" width="96" height="96" alt="Juling Harness">
-</p>
-
-<h1 align="center">Juling Harness</h1>
-
-<p align="center">
-  <strong>Desktop console for Juling Runtime</strong><br>
-  Typed Harness Bridge · Electron workbench · Windows / macOS
-</p>
+<div align="center">
+  <img src="icon.png" width="92" alt="Juling Harness" />
+  <h1>Juling Harness</h1>
+  <p><b>A native desktop workbench for long-running, multi-agent coding sessions.</b></p>
+  <p>One window for every conversation, subagent, model, tool and file.<br />Everything runs through a typed Harness Bridge — no terminal scraping, no keystroke simulation.</p>
+</div>
 
 <p align="center">
-  <a href="README.md">中文</a>
-  ·
-  <a href="docs/README.md">Docs</a>
-  ·
-  <a href="CHANGELOG.md">Changelog</a>
-  ·
-  <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>
+  <img src="docs/readme/app-workbench.png" width="100%" alt="Juling Harness workbench: conversation, tool cards, subagents and context panels side by side" />
+  <br />
+  <sub>The workbench: conversations, tool calls, subagents and context on one dockable canvas</sub>
 </p>
+
+| Version | Bundled runtime | Platforms | License |
+|:--:|:--:|:--:|:--:|
+| **1.0.0** | OMP **18.20.2** · `harness.18` | Windows · macOS · Linux | MIT |
+
+---
+
+## Why Juling Harness
+
+Command-line agents are powerful, but long sessions expose three gaps: **context scatters across terminals**, **parallel work is hard to follow**, and **model/tool configuration lacks a single home**.
+
+Juling Harness brings all three into one desktop application:
+
+- **A conversation is a workspace, not a log** — every session owns its window, draft, scroll position and tool state. Arrange them side by side, snap them, or pin them to another display.
+- **Agents are visible collaborators** — main agent, subagents, task chains, messages and usage are presented together, with explicit controls to stop, resume or follow up.
+- **Configuration is part of the product** — providers, models, roles, subagents, search and permissions live in one interface and write back to validated native configuration.
+
+---
+
+## 01 · A workbench you can rearrange
+
+Conversations and tools share one window system. Drag a session out of the sidebar to float it, or to an edge to preview a snap; move Git, Terminal, Changes, Agents or Browser between the left rail, right sidebar, bottom dock, conversation area and floating windows.
+
+- Multi-display windows, always-on-top, minimized capsules and layout restore
+- Light and dark themes built on one restrained visual system
+- Six interface languages: 简体中文, English, Русский, 日本語, 한국어, हिन्दी
+- Session switching keeps drafts, scroll and expansion state; streaming stays responsive
+
+---
+
+## 02 · Agent Hub: parallel work made legible
 
 <p align="center">
-  <a href="https://github.com/177911-juling/juling-harness/actions/workflows/ci.yml"><img src="https://github.com/177911-juling/juling-harness/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.6-informational.svg" alt="0.1.6"></a>
-  <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0078D4.svg" alt="Windows | macOS"></a>
-  <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-339933.svg" alt="Node 22+"></a>
-  <a href="https://linux.do/"><img src="https://img.shields.io/badge/LINUX%20DO-Community-FFB003.svg" alt="LINUX DO"></a>
+  <img src="docs/readme/app-agent-hub.png" width="100%" alt="Agent Hub command deck: formation, live usage, agent dossier and task stages" />
+  <br />
+  <sub>The command deck: formation, timeline, orbit and comms, with the dossier and task stages alongside</sub>
 </p>
 
-Juling Harness is a desktop shell for [oh-my-pi](https://github.com/can1357/oh-my-pi) (OMP). Sessions, approvals, Agent Hub, and the workspace are driven through a typed Harness Bridge — not by scraping TUI text, ANSI, or key macros.
+Agent Hub opens on the command deck. The left side holds formation, timeline, orbit and comms; the right side is the selected agent's dossier. Selection is shared, and stop, resume, messaging and BTW reuse the same confirmations and permissions.
 
-<p align="center">
-  <img src="docs/images/workbench.png" alt="Juling Harness workbench: new conversation welcome, activity heatmap, and composer" width="920">
-</p>
+- **Real agent-to-agent messages** — delivered mentions, replies and progress markers, with broadcasts collapsed into one entry; parked and historical agents remain readable
+- **One pixel identity** — the same avatar across the deck, Agent Hub, selective commit and conversations; the main agent wears a crown and running agents keep their eyes open
+- **A dossier that acts** — parent link, status, runtime, model, context and usage in one panel
+- **Traceable task stages** — each sub-task group, its owner and completion state expand in place
 
-Version 0.1.10 targets OMP 18.10.4, adding session transfer, worktrees, storage compression and model controls. See the [release notes](docs/releases/v0.1.10.md) and [migration report](docs/migrations/omp-18.10.4.md). Windows x64 / ARM64 and macOS Apple Silicon downloads are available from [GitHub Releases](https://github.com/177911-juling/juling-harness/releases). The Mac application is ad hoc signed and not notarized.
+---
 
-## Why this workbench
+## 03 · Model configuration: from provider to role
 
-Skills, usage, providers, capabilities, and Git live in one window — no hopping between a TUI and a pile of web pages.
+<table>
+<tr>
+<td width="50%">
+<img src="docs/readme/app-model-config.png" width="100%" alt="Model configuration: provider status, native catalog, credentials and enable switches" />
+<br /><sub>Providers: status, credentials, model counts and switches</sub>
+</td>
+<td width="50%">
+<img src="docs/readme/app-provider-presets.png" width="100%" alt="New provider: preset templates open by default, with Gateway / Aggregators first" />
+<br /><sub>Presets: expanded by default, gateways first</sub>
+</td>
+</tr>
+</table>
 
-### 1. Fast-select Skills sidebar
+- **Preset templates open by default** — choosing a template pre-fills API, endpoint, website and authentication
+- **Juling gateways first** — the Gateway / Aggregators group ships main, US, Hong Kong, India, Brazil and Germany nodes
+- **From provider to role** — assign models and thinking levels to `@default`, `@plan`, `@task` and the rest
+- **Auditable native config** — every write is validated; the UI and the YAML stay in agreement
 
-Open the Skills & Plugins drawer from the left rail. Skills are grouped by project / global / built-in. Click **Add** to drop a skill into the current draft; `/skill:` capsules in the transcript show what you already used.
+---
 
-<p align="center">
-  <img src="docs/images/skills.png" alt="Skills sidebar grouped by project, global, and built-in" width="920">
-</p>
+## 04 · Capabilities, files, terminal and browser
 
-### 2. Usage and stats that are actually readable
+<table>
+<tr>
+<td width="50%">
+<img src="docs/readme/app-capabilities.png" width="100%" alt="Capabilities center: unified status for MCP, tools, skills and runtime capabilities" />
+<br /><sub>Capabilities: MCP, tools, skills and runtime features</sub>
+</td>
+<td width="50%">
+<img src="docs/readme/app-settings.png" width="100%" alt="Settings: interface, appearance, input and session behavior in one place" />
+<br /><sub>Settings: interface, appearance, input and session behavior</sub>
+</td>
+</tr>
+</table>
 
-The home page has Token charts you can switch by year / month / week / day, plus a heatmap. The conversation header opens turn cost, cache hits, TPS, and sub-agent spend; Agent Hub repeats the same numbers per child.
+- **Built-in browser** — native tabs, persistent login space, Console / Network / downloads, and an “Agent | Me” handoff
+- **File viewer** — editing, diffs, Markdown, PDF, images, audio/video and spreadsheets over one local/SSH read-write path
+- **SSH workspaces** — remote runtime, terminal and tmux attachment with reconnect
+- **Capabilities center** — status, source and permissions for MCP servers, skills, tools and runtime features
+- **Statistics and diagnostics** — token usage, session timeline, runtime health, logs and update checks
 
-<p align="center">
-  <img src="docs/images/home.png" alt="Home page Token chart and heatmap" width="432">
-  &nbsp;
-  <img src="docs/images/telemetry.png" alt="Conversation Token usage popover" width="432">
-</p>
+---
 
-### 3. Unified provider management
+## 05 · Built for the long run
 
-The model-config page keeps Anthropic, OpenAI, OpenRouter, local LM Studio, and friends in one list — toggles, endpoints, and `modelProviderOrder` on the same screen. The Roles tab assigns models and thinking to `@default` / `@plan` / `@task`.
+- **Time Travel** — per-turn workspace checkpoints; restore code, restore the conversation branch, or both
+- **Session recovery** — resume history with its model; continue in another workspace when the original directory is gone
+- **Workspace recovery** — detect stale projects at startup, fall back safely, and re-pick or forget records from diagnostics
+- **In-app updates** — signed, differential downloads with restart install and rollback on Windows, macOS and Linux
+- **Runtime isolation** — the desktop only starts a signed, version-matched runtime; it never depends on a global CLI or replaces your `omp`
 
-<p align="center">
-  <img src="docs/images/models.png" alt="Model config: unified provider list" width="432">
-  &nbsp;
-  <img src="docs/images/roles.png" alt="Role config: models per task" width="432">
-</p>
-
-### 4. Capabilities center
-
-Skills, Plugins, MCP, and Slash Commands share one page for toggles, probes, and folders. Agent Hub watches the main session and every sub-agent’s status, cost, and context window.
-
-<p align="center">
-  <img src="docs/images/capabilities.png" alt="Capabilities center: Skills, Plugins, MCP, Slash" width="432">
-  &nbsp;
-  <img src="docs/images/hub.png" alt="Agent Hub: sub-agent list and usage" width="432">
-</p>
-
-### 5. Git, in the same window
-
-The right-hand Git panel stages, diffs, and commits next to the conversation. Fetch / Pull / Push and the commit graph stay beside the thread.
-
-<p align="center">
-  <img src="docs/images/git.png" alt="Workbench Git panel: diff, commit, and graph" width="920">
-</p>
-
-> [!TIP]
-> **Installation & Getting Started:** Windows users can download the latest installer (`Juling-Harness-Setup-0.1.6-windows-x64.exe`) directly from [GitHub Releases](https://github.com/177911-juling/juling-harness/releases), or run from source following the instructions below. Please file any bugs or suggestions as [Issues](https://github.com/177911-juling/juling-harness/issues).
->
-> **macOS (Apple Silicon, macOS 13+):** when a release ships `Juling-Harness-<version>-macos-arm64.dmg`, open it and drag Juling Harness into Applications. It is an ad hoc signed, not yet notarized preview: macOS blocks the first launch, so choose "Open Anyway" in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine "/Applications/Juling Harness.app"`. You can also run from source or build it with `npm run pack:mac`, see [docs/getting-started.md](docs/getting-started.md).
-
-## What it does
-
-- **Conversation workbench** — composer (chips, `@` mentions, slash commands, images), tool cards, session changes, subagents, Plan / Vibe / approvals.
-- **Sessions and projects** — local workspace registry, history, archive. The renderer sees opaque ids, never native absolute paths.
-- **Agent Hub / Skills / models** — inventory and config go through the Host. Surfaces without a read model stay disabled instead of filling with fake data.
-- **Desktop capabilities** — Git, file tree, terminal PTY, notifications, open-in-browser. The control plane stays semantic commands, not glued-together shell.
-- **Managed Runtime** — pinned oh-my-pi submodule + overlay + four seam patches; `juling --mode harness-host`. Artifacts are Ed25519-verified.
-
-## Quick start
-
-Node.js 22+ is required. Full steps: [docs/getting-started.md](docs/getting-started.md).
-
-```powershell
-git clone --recurse-submodules https://github.com/177911-juling/juling-harness.git
-cd juling-harness
-npm install
-npm run omp:overlay:apply
-npm run preview
-```
-
-On Windows you can also double-click `preview.cmd` at the repo root. macOS needs the Xcode Command Line Tools; the steps are otherwise the same.
-
-Attach a real Runtime (slow the first time):
-
-```powershell
-npm run omp:install-deps
-npm run omp:overlay:apply
-npm run omp:keys
-npm run omp:build:host
-npm run preview
-```
-
-Models and login use the Juling Runtime’s `models.yml` / `juling login`. This repository does not ship provider secrets.
-
-## Layout
-
-```
-apps/desktop          Electron main process
-apps/renderer         Vite + React workbench
-packages/             protocol, Host, client, transports, platform
-omp-patch/overlay     Harness-owned Runtime sources
-omp-patch/patches     seam patches on upstream files (do not hand-edit)
-omp-patch/vendor      oh-my-pi submodule (commit the gitlink only)
-packaging/            Windows NSIS installer skeleton; macOS signing setup (packaging/mac)
-ui_reference/ver1     visual reference, not product code
-docs/                 user and contributor docs
-```
-
-When changing a product surface, jump from [doc/feature-index.md](doc/feature-index.md) instead of searching the whole tree.
+---
 
 ## Architecture
 
-```
-Renderer → HarnessClient → Desktop IPC → Host facade
-                                    ├─ local: session catalog / Git / workspace
-                                    └─ Bridge → juling --mode harness-host
+```text
+┌──────────────────────────────┐
+│ Electron Main                │  windows, terminal, files, updates, remote
+├──────────────────────────────┤
+│ React Renderer               │  workbench, Agent Hub, models, settings
+├──────────────────────────────┤
+│ Harness Host                 │  sessions, archive, Time Travel, ledger
+├──────────── Harness Bridge ──┤  typed frames · request / receipt / event / snapshot
+│ Juling Runtime (OMP 18.20.2) │  models, tools, agents, compaction, prediction
+└──────────────────────────────┘
 ```
 
-Invariants (see [docs/architecture.md](docs/architecture.md)):
+The runtime side is maintained in two layers:
 
-- When prose and types disagree, `harness-protocol` and `client-contract` win.
-- The renderer must never receive bridge tokens, process handles, or OMP session paths.
-- Unknown mutations fail closed; `accepted` is not success.
-- Runtime loss fences the old epoch and maps unresolved accepted work to `outcome_unknown`.
+- **Overlay** — Harness-owned files under `packages/coding-agent/src/harness/**`; ordinary source with ordinary diffs
+- **Seam** — patches that touch only upstream-owned files, grouped by subsystem and regenerated deterministically
+
+The pinned upstream commit, patchset version and artifact signatures are cross-checked by the build, which fails before packaging if any side drifts.
+
+---
+
+## Quick start
+
+| Requirement | Version |
+|---|---|
+| Node.js | 22 or newer |
+| npm | bundled with Node.js |
+| Bun | 1.4.4 (when building the runtime) |
+| Rust | only when rebuilding native runtime pieces |
+
+```bash
+npm install
+npm run build          # compile workspaces, renderer and desktop
+npm run preview        # development preview against the real Host
+npm run check          # architecture, selector/motion rules, types and core tests
+```
+
+On Windows, `启动预览版.cmd` opens the demo preview and `启动生产版.cmd` reproduces the installed layout.
+
+Installers and update artifacts are published on [Releases](https://github.com/177911-juling/Juling-Harness/releases). Linux ships `.deb` and `AppImage`, with in-app differential updates since 1.0.0.
+
+---
 
 ## Documentation
 
-| | |
-|---|---|
-| [docs/getting-started.md](docs/getting-started.md) | Run from source |
-| [docs/development.md](docs/development.md) | Inner loop, preview mode, patch regen |
-| [docs/architecture.md](docs/architecture.md) | Packages and invariants |
-| [docs/releasing.md](docs/releasing.md) | Version, tag, Windows installer, macOS build |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | How to open a PR |
-| [SECURITY.md](SECURITY.md) | Vulnerability disclosure |
-| [CHANGELOG.md](CHANGELOG.md) | User-facing history |
-| [omp-patch/README.md](omp-patch/README.md) | Overlay / seam patches |
+- [Getting started](docs/getting-started.md)
+- [Architecture](docs/architecture.md)
+- [Workbench docking](docs/workbench-docking.md)
+- [File browser](docs/file-browser.md) · [File viewer](docs/file-viewer.md)
+- [Built-in browser](docs/browser.md) · [SSH workspaces](docs/ssh-workspaces.md)
+- [Time Travel](docs/time-travel.md)
+- [Updates and verification](docs/updates.md) · [Linux client](docs/linux.md)
+- [Localization](docs/localization.md)
 
-## Contributing
+---
 
-Issues and PRs are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+## Platforms
 
-Do not file security issues publicly. Follow [SECURITY.md](SECURITY.md).
+| Platform | Architecture | Package |
+|---|---|---|
+| Windows | x64 / arm64 | NSIS installer |
+| macOS | Apple Silicon | DMG / update ZIP |
+| Linux | x64 | deb / AppImage |
 
-Chinese-language discussion and feedback happen on the [LINUX DO](https://linux.do/) community — thanks to everyone there for their support.
-
-Defects in upstream OMP belong in [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi). This repository only maintains the overlay and four seam patches.
+---
 
 ## License
 
-[MIT](LICENSE). Third-party notices: [NOTICE](NOTICE).
+Juling Harness is released under [MIT](LICENSE).
 
-The pinned Runtime is [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT; Pi by Mario Zechner, omp by Can Bölük). Harness’s overlay and seam patches are independent work in this repository, also MIT.
+The runtime is built on [oh-my-pi](https://github.com/can1357/oh-my-pi). Electron, React, Bun and other third-party components keep their own licenses; see [NOTICE](NOTICE) for the notices shipped with the app.
