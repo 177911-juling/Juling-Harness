@@ -87,7 +87,7 @@ const zhRaw = {
     time: { justNow: "刚刚", secondsAgo: "{count} 秒前", minutesAgo: "{count} 分钟前", hoursAgo: "{count} 小时前" },
   },
   onboarding: {
-    kicker: "0.2.0 新工作台",
+    kicker: "1.0.0 新工作台",
     stepOf: "第 {current} 步，共 {total} 步",
     next: "下一步",
     back: "上一步",
@@ -101,7 +101,7 @@ const zhRaw = {
     steps: {
       overview: {
         title: "认识新工作台",
-        body: "0.2.0 把对话、工具和窗口放进同一套工作台。界面分成五个区域，每块都能显示、隐藏或重新排布。",
+        body: "1.0.0 把对话、工具和窗口放进同一套工作台。界面分成五个区域，每块都能显示、隐藏或重新排布。",
         tips: { t1: "主导航：切换工作台、首页、历史与设置；靠近右边线出现握把可收起", t2: "项目与会话：按项目分组的对话列表", t3: "对话：正文与输入框", t4: "对话工具区：贴在对话旁的卡片", t5: "右栏与底栏：Git、终端等工具标签" },
       },
       windows: {

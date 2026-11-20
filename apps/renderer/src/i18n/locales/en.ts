@@ -87,7 +87,7 @@ export const en: LocaleDictionary = {
     time: { justNow: "just now", secondsAgo: "{count}s ago", minutesAgo: "{count}m ago", hoursAgo: "{count}h ago" },
   },
   onboarding: {
-    kicker: "New in 0.2.0 · Workbench",
+    kicker: "New in 1.0.0 · Workbench",
     stepOf: "Step {current} of {total}",
     next: "Next",
     back: "Back",
@@ -101,7 +101,7 @@ export const en: LocaleDictionary = {
     steps: {
       overview: {
         title: "Meet the new workbench",
-        body: "0.2.0 brings conversations, tools and windows into one workbench. The screen has five areas, and each one can be shown, hidden or rearranged.",
+        body: "1.0.0 brings conversations, tools and windows into one workbench. The screen has five areas, and each one can be shown, hidden or rearranged.",
         tips: { t1: "Navigation: switch between workbench, home, history and settings; a handle on its right edge collapses it", t2: "Projects & sessions: conversations grouped by project", t3: "Conversation: transcript and composer", t4: "Conversation tools: cards beside the conversation", t5: "Right & bottom panels: tabs for Git, Terminal and more" },
       },
       windows: {

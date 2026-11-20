@@ -28,7 +28,7 @@
    有余量时撑满视口；分栏的行高由余量决定，不由详情内容决定。 */
 .page-body:has(.hub-page.is-deck) { display: flex; flex-direction: column; }
 .hub-page.is-deck {
-  max-width: min(1600px, 100%);
+  max-width: none;
   width: 100%;
   flex: 1 0 auto;
 }
