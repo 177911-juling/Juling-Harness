@@ -1,0 +1,2705 @@
+diff --git a/packages/coding-agent/src/async/job-manager.ts b/packages/coding-agent/src/async/job-manager.ts
+index be3e70a727..8454a83414 100644
+--- a/packages/coding-agent/src/async/job-manager.ts
++++ b/packages/coding-agent/src/async/job-manager.ts
+@@ -339,6 +339,8 @@ export interface AsyncJobManagerApi {
+ 	readonly atCapacity: boolean;
+ 	/** Calls `listener` whenever a job settles; returns the unsubscribe. */
+ 	onJobSettled(listener: () => void): () => void;
++	/** Live job additions and progress, used by Harness projections. */
++	onChange(listener: () => void): () => void;
+ 	/** Start tracking `run` as a job; returns its id. */
+ 	register(type: AsyncJobType, label: string, run: AsyncJobRun, options?: AsyncJobRegisterOptions): string;
+ 	/** Deliver an already-completed result without consuming a running-job slot. */
+@@ -426,6 +428,7 @@ export class AsyncJobManager implements AsyncJobManagerApi {
+ 	readonly #releasedForegroundJobs = new Set<string>();
+ 	#nextAutoId = 1;
+ 	readonly #deliverySinks = new Map<string, AsyncJobDeliverySink>();
++	readonly #changeListeners = new Set<() => void>();
+ 	readonly #onJobComplete: AsyncJobManagerOptions["onJobComplete"];
+ 	readonly #maxRunningJobsOption: AsyncJobManagerOptions["maxRunningJobs"];
+ 	readonly #retentionMs: number;
+@@ -489,6 +492,11 @@ export class AsyncJobManager implements AsyncJobManagerApi {
+ 		return Math.max(1, Math.floor(value ?? DEFAULT_MAX_RUNNING_JOBS));
+ 	}
+ 
++	onChange(listener: () => void): () => void {
++		this.#changeListeners.add(listener);
++		return () => this.#changeListeners.delete(listener);
++	}
++
+ 	/** True when the running-job count has reached the configured cap. */
+ 	get atCapacity(): boolean {
+ 		if (this.#disposed) return true;
+@@ -543,6 +551,7 @@ export class AsyncJobManager implements AsyncJobManagerApi {
+ 		const reportProgress = async (text: string, details?: AsyncJobDetails): Promise<void> => {
+ 			job.progressText = text;
+ 			if (details) job.latestDetails = details;
++			this.#emitChange();
+ 			if (!options?.onProgress) return;
+ 			try {
+ 				await options.onProgress(text, details);
+@@ -561,6 +570,7 @@ export class AsyncJobManager implements AsyncJobManagerApi {
+ 					reportProgress,
+ 					markRunning: () => {
+ 						job.queued = false;
++						this.#emitChange();
+ 					},
+ 				});
+ 				job.endTime = Date.now();
+@@ -589,6 +599,7 @@ export class AsyncJobManager implements AsyncJobManagerApi {
+ 					this.#enqueueDelivery(id, errorText);
+ 				}
+ 			}
++			this.#emitChange();
+ 			if (this.#releasedForegroundJobs.has(id)) this.#discardForegroundJob(id);
+ 			else this.#scheduleEviction(id);
+ 			for (const listener of this.#settleListeners) {
+@@ -604,6 +615,7 @@ export class AsyncJobManager implements AsyncJobManagerApi {
+ 		})();
+ 
+ 		this.#jobs.set(id, job);
++		this.#emitChange();
+ 		return id;
+ 	}
+ 
+@@ -663,6 +675,7 @@ export class AsyncJobManager implements AsyncJobManagerApi {
+ 		if (job.status !== "running") return false;
+ 		job.status = "cancelled";
+ 		job.abortController.abort();
++		this.#emitChange();
+ 		return true;
+ 	}
+ 
+@@ -698,6 +711,7 @@ export class AsyncJobManager implements AsyncJobManagerApi {
+ 		if (!job) return false;
+ 		if (!job.foreground) return true;
+ 		job.foreground = undefined;
++		this.#emitChange();
+ 		this.#suppressedDeliveries.delete(jobId);
+ 		if (job.status === "completed" || job.status === "failed") {
+ 			this.#enqueueDelivery(jobId, job.status === "completed" ? (job.resultText ?? "") : (job.errorText ?? ""));
+@@ -835,6 +849,7 @@ export class AsyncJobManager implements AsyncJobManagerApi {
+ 			if (job.status !== "running") continue;
+ 			job.status = "cancelled";
+ 			job.abortController.abort(reason);
++			this.#emitChange();
+ 		}
+ 	}
+ 
+@@ -1199,7 +1214,17 @@ export class AsyncJobManager implements AsyncJobManagerApi {
+ 		const job = this.#jobs.get(jobId);
+ 		if (job) this.#runRetainedArtifactsCleanup(job);
+ 		this.widgets?.forget(jobId);
+-		return this.#jobs.delete(jobId);
++		const deleted = this.#jobs.delete(jobId);
++		if (deleted) this.#emitChange();
++		return deleted;
++	}
++
++	#emitChange(): void {
++		for (const listener of this.#changeListeners) {
++			try {
++				listener();
++			} catch {}
++		}
+ 	}
+ 
+ 	/**
+diff --git a/packages/coding-agent/src/commit/selective/apply.ts b/packages/coding-agent/src/commit/selective/apply.ts
+index 7fe5555bc2..21a4b80aba 100644
+--- a/packages/coding-agent/src/commit/selective/apply.ts
++++ b/packages/coding-agent/src/commit/selective/apply.ts
+@@ -1,120 +1,231 @@
+ /**
+- * Commit a {@link Draft}'s selection in a workspace other agents keep editing.
+- *
+- * The commit is built in a private index file: HEAD's tree plus one patch per selected path
+- * rendering the exact content the draft chose. `commitCreate` commits that index with an
+- * expected-HEAD guard (hooks see it as `GIT_INDEX_FILE`, like `git commit --only`), so a
+- * concurrent commit by someone else can never be overwritten. Afterwards the same patches are
+- * applied to the shared index so the committed paths do not show up as staged reversals; every
+- * other index entry and the worktree stay untouched.
++ * Selective commits use a private index and expected HEAD. CLI callers retain automatic rebasing;
++ * confirmed callers commit an immutable prepared patch/tree, never a fresh worktree diff.
+  */
+ import * as fs from "node:fs/promises";
+ import * as path from "node:path";
+ import type { VcsGitRepo } from "@oh-my-pi/pi-natives";
+ import * as vcs from "@oh-my-pi/pi-natives/vcs";
++import { logger } from "@oh-my-pi/pi-utils";
+ import type { Draft, SelectedChange } from "./draft";
+ import type { ChangeJournal, JournalAgent } from "./journal";
+ import { formatTextPatch } from "./patch";
+ 
+-/** Attempts when HEAD moves between building the private index and committing it. */
+ const HEAD_RACE_ATTEMPTS = 3;
++/** A confirmation is an exact, bounded patch, not a truncated approximation. */
++export const MAX_PREPARED_BYTES = 16 * 1024 * 1024;
+ 
+-/** Message and mode of a selective commit. */
+ export interface CommitRequest {
+ 	/** One-line subject. */
+ 	subject: string;
+-	/** Body paragraphs or lines; joined with newlines after a blank line. */
+ 	body?: string | readonly string[];
+-	/** Issue references appended as `Fixes #N` lines (`123`, `"#123"`, `"owner/repo#123"`). */
+ 	fixes?: number | string | ReadonlyArray<number | string>;
+-	/** Replace HEAD instead of adding a commit; only allowed when this session's selective commit made HEAD. */
++	/** Only a HEAD made by this session's selective commit flow may be amended. */
+ 	amend?: boolean;
+-	/** Skip the `pre-commit` and `commit-msg` hooks, like `git commit --no-verify`. */
+ 	noVerify?: boolean;
+ }
+ 
+-/** Result of {@link commitSelection}. */
+ export interface CommitOutcome {
+ 	sha: string;
+ 	subject: string;
+-	/** Repo-relative paths the commit changed. */
+ 	paths: string[];
+-	/** HEAD the commit was placed on (differs from the draft's HEAD when someone committed meanwhile); `null` for a root commit. */
+ 	parent: string | null;
+-	/** Committed paths whose shared-index entry kept someone else's staged content instead of the commit's. */
+ 	indexNotes: string[];
+ }
+ 
+-/**
+- * Commit message with a single-line subject, a blank line, the body, and `Fixes` trailers.
+- * @throws when the subject is empty or spans lines.
+- */
++interface PathPatch {
++	readonly path: string;
++	readonly patch: string;
++}
++
++/** Created only by prepareCommitSelection. Its patch, HEAD, tree and revision never change. */
++export interface PreparedSelection {
++	readonly id: string;
++	readonly draftId: string;
++	readonly revision: number;
++	readonly head: string | null;
++	readonly tree: string;
++	readonly patches: readonly PathPatch[];
++	readonly patch: string;
++	readonly bytes: number;
++}
++
++export interface CommitContext {
++	journal: ChangeJournal | null;
++	agent: JournalAgent;
++	signal?: AbortSignal;
++	/** Present only for an operator-confirmed preview; omitting it preserves native CLI rebasing. */
++	prepared?: PreparedSelection;
++	/** Runtime/session lifetime check immediately before native side effects. */
++	assertCurrent?: () => void;
++}
++
+ export function composeMessage(request: CommitRequest): string {
+ 	const subject = request.subject.trim();
+ 	if (!subject) throw new Error("Commit subject is empty.");
+-	if (subject.includes("\n")) throw new Error("Commit subject must be one line; put details in `body`.");
++	if (/[\r\n\0]/u.test(subject)) throw new Error("Commit subject must be one line; put details in `body`.");
+ 	const body = (typeof request.body === "string" ? request.body : (request.body ?? []).join("\n")).trim();
+ 	const references = request.fixes === undefined ? [] : Array.isArray(request.fixes) ? request.fixes : [request.fixes];
+ 	const fixes = references.map(reference => `Fixes ${/^\d+$/.test(String(reference)) ? `#${reference}` : reference}`);
+ 	return `${[subject, body, fixes.join("\n")].filter(Boolean).join("\n\n")}\n`;
+ }
+ 
+-/** Abbreviated commit id, or a stand-in for the unborn HEAD. */
+ function shortSha(sha: string | null): string {
+ 	return sha?.slice(0, 10) ?? "(no commits yet)";
+ }
+ 
+-async function patchFor(repo: VcsGitRepo, head: string | null, change: SelectedChange): Promise<string> {
++async function patchFor(
++	repo: VcsGitRepo,
++	head: string | null,
++	change: SelectedChange,
++	signal?: AbortSignal,
++	maxBytes?: number,
++): Promise<string> {
+ 	if (change.kind === "text") return formatTextPatch(change.path, change.before, change.after);
+ 	return change.added || head === null
+-		? repo.diffNoIndex("/dev/null", change.path, true)
+-		: repo.diffText({ base: head, files: [change.path], binary: true });
++		? repo.diffNoIndex("/dev/null", change.path, true, signal)
++		: repo.diffText({ base: head, files: [change.path], binary: true, maxBytes }, signal);
+ }
+ 
+-/**
+- * Commit the draft's selection on top of the current HEAD.
+- * @throws when nothing is selected; on `amend` when HEAD is not a selective commit of this
+- * session; when HEAD moved onto changes that conflict with the selection; or when a hook fails.
+- */
+-export async function commitSelection(
++async function buildPatches(
+ 	draft: Draft,
+-	request: CommitRequest,
+-	context: { journal: ChangeJournal | null; agent: JournalAgent; signal?: AbortSignal },
+-): Promise<CommitOutcome> {
+-	const message = composeMessage(request);
++	repo: VcsGitRepo,
++	signal?: AbortSignal,
++	maxBytes?: number,
++): Promise<PathPatch[]> {
+ 	const changes = draft.selection();
+ 	if (changes.length === 0) throw new Error("Nothing selected; use take() first.");
+-	const repo = vcs.requireGit(draft.root);
+-	const patches: Array<{ path: string; patch: string }> = [];
++	const patches: PathPatch[] = [];
++	let bytes = 0;
+ 	for (const change of changes) {
+-		const patch = await patchFor(repo, draft.head, change);
++		signal?.throwIfAborted();
++		const patch = await patchFor(
++			repo,
++			draft.head,
++			change,
++			signal,
++			maxBytes === undefined ? undefined : maxBytes - bytes,
++		);
++		bytes += Buffer.byteLength(patch);
++		if (maxBytes !== undefined && bytes > maxBytes)
++			throw new Error("Selection is too large to preview; select fewer paths.");
+ 		if (patch) patches.push({ path: change.path, patch });
+ 	}
+ 	if (patches.length === 0) throw new Error("The selection matches HEAD; nothing to commit.");
+-	const ownCommits = request.amend
+-		? new Set(
+-				(context.journal ? await context.journal.read() : []).flatMap(record =>
+-					record.type === "commit" ? [record.sha] : [],
+-				),
+-			)
+-		: undefined;
+-	const joined = vcs.joinPatches(patches.map(entry => entry.patch));
+-	const indexPath = path.join(
+-		repo.info().gitDir,
+-		`omp-commit-${draft.id}-${Math.floor(Math.random() * 46656).toString(36)}.index`,
+-	);
+-	let sha: string | undefined;
+-	let parent = draft.head;
++	return patches;
++}
++
++function privateIndexPath(repo: VcsGitRepo, draft: Draft): string {
++	return path.join(repo.info().gitDir, `omp-commit-${draft.id}-${crypto.randomUUID()}.index`);
++}
++
++async function seedPrivateIndex(
++	repo: VcsGitRepo,
++	head: string | null,
++	indexPath: string,
++	signal?: AbortSignal,
++): Promise<void> {
++	if (head === null) await fs.rm(indexPath, { force: true });
++	else await repo.readTree(head, indexPath, signal);
++}
++
++async function removePrivateIndex(indexPath: string): Promise<void> {
++	await fs.rm(indexPath, { force: true }).catch(error => {
++		logger.warn("Selective commit private index cleanup failed", { indexPath, error: String(error) });
++	});
++}
++
++async function assertPreviewHead(repo: VcsGitRepo, head: string | null, signal?: AbortSignal): Promise<void> {
++	const current = (await repo.headSha(signal)) ?? null;
++	if (current !== head) {
++		throw new Error(`HEAD moved from ${shortSha(head)} to ${shortSha(current)}; prepare and preview again.`);
++	}
++}
++
++/** Freeze every selected path, including binary/symlink/mode changes, while HEAD and content still match the draft. */
++export async function prepareCommitSelection(draft: Draft, signal?: AbortSignal): Promise<PreparedSelection> {
++	const unlock = draft.acquire();
++	let indexPath: string | undefined;
+ 	try {
++		const repo = vcs.requireGit(draft.root);
++		indexPath = privateIndexPath(repo, draft);
++		const paths = draft.selection().map(change => change.path);
++		if (draft.view().paths.some(file => paths.includes(file.path) && file.workBytes > MAX_PREPARED_BYTES)) {
++			throw new Error("A selected file is too large to preview; select fewer paths.");
++		}
++		await assertPreviewHead(repo, draft.head, signal);
++		await draft.assertWorktreeUnchanged(paths, signal);
++		const patches = await buildPatches(draft, repo, signal, MAX_PREPARED_BYTES);
++		const patch = vcs.joinPatches(patches.map(entry => entry.patch));
++		await seedPrivateIndex(repo, draft.head, indexPath, signal);
++		await repo.applyPatch(patch, { cached: true, indexPath }, signal);
++		const tree = await repo.writeTree(indexPath, signal);
++		// Diff rendering and private-index preparation may take time. Never confirm a moving snapshot.
++		await draft.assertWorktreeUnchanged(paths, signal);
++		await assertPreviewHead(repo, draft.head, signal);
++		return Object.freeze({
++			id: `p${crypto.randomUUID()}`,
++			draftId: draft.id,
++			revision: draft.revision,
++			head: draft.head,
++			tree,
++			patches: Object.freeze(patches.map(entry => Object.freeze(entry))),
++			patch,
++			bytes: Buffer.byteLength(patch),
++		});
++	} finally {
++		if (indexPath) await removePrivateIndex(indexPath);
++		unlock();
++	}
++}
++
++/**
++ * The only commit owner. A successful draft is consumed before housekeeping; failures before
++ * commit creation leave it editable. The command arbiter, not this module, replays receipts.
++ */
++export async function commitSelection(
++	draft: Draft,
++	request: CommitRequest,
++	context: CommitContext,
++): Promise<CommitOutcome> {
++	const message = composeMessage(request);
++	const unlock = draft.acquire();
++	let indexPath: string | undefined;
++	try {
++		const repo = vcs.requireGit(draft.root);
++		const prepared = context.prepared;
++		if (prepared) {
++			draft.assertRevision(prepared.revision);
++			if (prepared.draftId !== draft.id || prepared.head !== draft.head)
++				throw new Error("Preview belongs to another draft.");
++			await assertPreviewHead(repo, prepared.head, context.signal);
++			await draft.assertWorktreeUnchanged(
++				prepared.patches.map(entry => entry.path),
++				context.signal,
++			);
++		}
++		const patches = prepared?.patches ?? (await buildPatches(draft, repo, context.signal));
++		const joined = prepared?.patch ?? vcs.joinPatches(patches.map(entry => entry.patch));
++		const ownCommits = request.amend
++			? new Set(
++					(context.journal ? await context.journal.read() : []).flatMap(record =>
++						record.type === "commit" ? [record.sha] : [],
++					),
++				)
++			: undefined;
++		indexPath = privateIndexPath(repo, draft);
++		let sha: string | undefined;
++		let parent = draft.head;
+ 		for (let attempt = 1; sha === undefined; attempt++) {
+ 			context.signal?.throwIfAborted();
++			context.assertCurrent?.();
+ 			const head = (await repo.headSha(context.signal)) ?? null;
++			if (prepared && head !== prepared.head)
++				throw new Error("HEAD changed after preview; prepare and preview again.");
+ 			if (ownCommits && (head === null || !ownCommits.has(head))) {
+ 				throw new Error(`HEAD ${shortSha(head)} was not made by this session's commit flow; refusing to amend it.`);
+ 			}
+-			// An unborn HEAD starts from an empty index: patches create the missing index file.
+-			if (head === null) await fs.rm(indexPath, { force: true });
+-			else await repo.readTree(head, indexPath, context.signal);
++			await seedPrivateIndex(repo, head, indexPath, context.signal);
+ 			try {
+ 				await repo.applyPatch(joined, { cached: true, indexPath }, context.signal);
+ 			} catch (error) {
+@@ -127,43 +238,57 @@ export async function commitSelection(
+ 					`HEAD moved from ${shortSha(draft.head)} to ${shortSha(head)}, which changed ${blocked.join(", ") || "selected paths"}; build a new draft.`,
+ 				);
+ 			}
++			if (prepared)
++				await draft.assertWorktreeUnchanged(
++					patches.map(entry => entry.path),
++					context.signal,
++				);
++			context.signal?.throwIfAborted();
++			context.assertCurrent?.();
+ 			try {
+ 				sha = await repo.commitCreate(
+ 					message,
+ 					{
+ 						indexPath,
+-						expectedHead: head ?? undefined,
++						expectedHead: prepared ? (head ?? "") : (head ?? undefined),
++						...(prepared ? { expectedTree: prepared.tree } : {}),
+ 						amend: request.amend ?? false,
+ 						noVerify: request.noVerify ?? false,
+ 					},
+ 					context.signal,
+ 				);
+ 				parent = head;
++				draft.consume();
+ 			} catch (error) {
+-				if (!(vcs.isVcsError(error) && error.code === "HeadMoved") || attempt >= HEAD_RACE_ATTEMPTS) throw error;
++				if (prepared || !(vcs.isVcsError(error) && error.code === "HeadMoved") || attempt >= HEAD_RACE_ATTEMPTS)
++					throw error;
+ 			}
+ 		}
+-	} finally {
+-		await fs.rm(indexPath, { force: true });
+-	}
+ 
+-	const indexNotes: string[] = [];
+-	// A new repository may have no index file yet. Git reads that as an empty index, but patch
+-	// application reads HEAD in its place, so seed it with the root commit's tree instead.
+-	const seedIndex = parent === null && !(await Bun.file(path.join(repo.info().gitDir, "index")).exists());
+-	if (seedIndex) await repo.readTree(sha, undefined, context.signal);
+-	for (const entry of seedIndex ? [] : patches) {
++		const indexNotes: string[] = [];
++		// Once HEAD has moved, cancellation/housekeeping may not turn success into a retryable failure.
+ 		try {
+-			await repo.applyPatch(entry.patch, { cached: true }, context.signal);
+-		} catch {
+-			if (await repo.canApplyPatch(entry.patch, { cached: true, reverse: true }).catch(() => false)) continue;
+-			indexNotes.push(
+-				`${entry.path}: its shared-index entry holds someone else's staged changes and was left as is; ` +
+-					"`git diff --cached` there shows this commit reverted until they restage.",
+-			);
++			const seedIndex = parent === null && !(await Bun.file(path.join(repo.info().gitDir, "index")).exists());
++			if (seedIndex) await repo.readTree(sha);
++			for (const entry of seedIndex ? [] : patches) {
++				try {
++					await repo.applyPatch(entry.patch, { cached: true });
++				} catch {
++					if (await repo.canApplyPatch(entry.patch, { cached: true, reverse: true }).catch(() => false)) continue;
++					indexNotes.push(
++						`${entry.path}: its shared-index entry holds someone else's staged changes and was left as is; ` +
++							"`git diff --cached` there shows this commit reverted until they restage.",
++					);
++				}
++			}
++		} catch (error) {
++			indexNotes.push(`Commit succeeded; shared-index reconciliation failed: ${String(error)}`);
+ 		}
++		const paths = patches.map(entry => entry.path);
++		await context.journal?.recordCommit({ agent: context.agent.agent, parent: context.agent.parent, sha, paths });
++		return { sha, subject: message.split("\n", 1)[0], paths, parent, indexNotes };
++	} finally {
++		if (indexPath) await removePrivateIndex(indexPath);
++		unlock();
+ 	}
+-	const paths = patches.map(entry => entry.path);
+-	await context.journal?.recordCommit({ agent: context.agent.agent, parent: context.agent.parent, sha, paths });
+-	return { sha, subject: message.split("\n", 1)[0], paths, parent, indexNotes };
+ }
+diff --git a/packages/coding-agent/src/commit/selective/draft.ts b/packages/coding-agent/src/commit/selective/draft.ts
+index 23caf33002..66e198624a 100644
+--- a/packages/coding-agent/src/commit/selective/draft.ts
++++ b/packages/coding-agent/src/commit/selective/draft.ts
+@@ -81,7 +81,57 @@ export type SelectedChange =
+  * Why a file has no line attribution and is committed whole: binary, non-UTF-8, or oversized
+  * content; a symlink on either side; or a mode change with identical content.
+  */
+-type WholeReason = "content" | "symlink" | "mode";
++export type WholeReason = "binary" | "non-utf8" | "large" | "symlink" | "mode";
++export type DraftPathKind = "text" | WholeReason;
++export type DraftOwnership = "own" | "other" | "review";
++export type DraftSelectionState = "none" | "partial" | "all";
++export type DraftReason = ReviewReason | { kind: "whole"; reason: WholeReason; editors: string[]; hint?: CallRecord };
++
++/** Metadata only. Line bodies are read separately, never parsed from summary()/show(). */
++export interface DraftUnitView {
++	id: string;
++	actor: string | null;
++	opIds: number[];
++	ownership: DraftOwnership[];
++	selected: DraftSelectionState;
++	added: number;
++	removed: number;
++	likely: boolean;
++	reasons: DraftReason[];
++}
++export interface DraftHunkView {
++	id: string;
++	headStart: number;
++	headCount: number;
++	workStart: number;
++	workCount: number;
++	units: DraftUnitView[];
++}
++export interface DraftPathView {
++	path: string;
++	kind: DraftPathKind;
++	change: "added" | "modified" | "deleted";
++	beforeMode: string | null;
++	afterMode: string | null;
++	workBytes: number;
++	staged: boolean;
++	selected: DraftSelectionState;
++	ownership: DraftOwnership[];
++	hunks: DraftHunkView[];
++}
++export interface DraftView {
++	id: string;
++	revision: number;
++	head: string | null;
++	branch?: string;
++	caller: string;
++	scope: string[];
++	agents: Array<{ id: string; parent?: string; inScope: boolean; running: boolean }>;
++	state: "open" | "busy" | "consumed";
++	paths: DraftPathView[];
++	staged: string[];
++	skipped: string[];
++}
+ 
+ /** What to select or deselect: a path (exact, glob, or unique suffix), hunk/unit ids, and/or a regex over change lines. */
+ export interface SelectionTarget {
+@@ -99,6 +149,9 @@ interface FileChange {
+ 	headMode: string | null;
+ 	/** Git mode in the worktree; `null` when the file is deleted. */
+ 	mode: string | null;
++	/** Hash of the exact worktree bytes and mode used to attribute this file. */
++	workFingerprint: string;
++	workBytes: number;
+ 	/** Set exactly when `attribution` is absent: the file selects whole. */
+ 	whole?: WholeReason;
+ 	/** Line attribution of the content change. */
+@@ -112,18 +165,83 @@ interface FileChange {
+ 	hint?: CallRecord;
+ }
+ 
+-/** Content of `bytes` as text, or `undefined` when it must be handled as an opaque whole file. */
+-function decodeText(bytes: Uint8Array): string | undefined {
+-	if (bytes.byteLength > MAX_TEXT_BYTES || isProbablyBinaryHeader(bytes.subarray(0, BINARY_SNIFF_BYTES))) {
+-		return undefined;
+-	}
++/** Preserve the native whole-file decision as metadata instead of guessing from its CLI label. */
++function decodeText(bytes: Uint8Array): { text: string } | { whole: WholeReason } {
++	if (bytes.byteLength > MAX_TEXT_BYTES) return { whole: "large" };
++	if (isProbablyBinaryHeader(bytes.subarray(0, BINARY_SNIFF_BYTES))) return { whole: "binary" };
+ 	try {
+-		return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
++		return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes) };
+ 	} catch {
+-		return undefined;
++		return { whole: "non-utf8" };
+ 	}
+ }
+ 
++interface WorktreeFile {
++	bytes: Uint8Array | null;
++	mode: string | null;
++	mtimeMs?: number;
++	fingerprint: string;
++}
++
++/** Only repository paths are read. Symlink leaves are data; parent links may not escape the repo. */
++async function worktreePath(root: string, file: string): Promise<string> {
++	if (
++		!file ||
++		/[\0\r\n\t\\]/u.test(file) ||
++		path.posix.isAbsolute(file) ||
++		path.win32.isAbsolute(file) ||
++		file.split("/").some(part => part === ".." || part === "." || !part)
++	)
++		throw new Error(`Unsupported repository path: ${JSON.stringify(file)}`);
++	const absolute = path.join(root, file);
++	const realRoot = await fs.realpath(root);
++	let parent = path.dirname(absolute);
++	for (;;) {
++		try {
++			const relative = path.relative(realRoot, await fs.realpath(parent));
++			if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
++				throw new Error(`Repository path escapes the worktree: ${file}`);
++			}
++			return absolute;
++		} catch (error) {
++			if (!isEnoent(error)) throw error;
++			const next = path.dirname(parent);
++			if (next === parent) throw error;
++			parent = next;
++		}
++	}
++}
++
++async function readWorktreeFile(root: string, file: string): Promise<WorktreeFile | "skip"> {
++	const absolute = await worktreePath(root, file);
++	let bytes: Uint8Array | null = null;
++	let mode: string | null = null;
++	let mtimeMs: number | undefined;
++	try {
++		const stat = await fs.lstat(absolute);
++		mtimeMs = stat.mtimeMs;
++		if (stat.isSymbolicLink()) {
++			mode = SYMLINK_MODE;
++			bytes = Buffer.from(await fs.readlink(absolute));
++		} else if (!stat.isFile()) return "skip";
++		else {
++			mode = stat.mode & 0o111 ? "100755" : "100644";
++			bytes = await fs.readFile(absolute);
++		}
++	} catch (error) {
++		if (!isEnoent(error)) throw error;
++		mode = null;
++		bytes = null;
++	}
++	const hash = new Bun.CryptoHasher("sha256").update(mode ?? "absent");
++	if (bytes) hash.update(bytes);
++	return { bytes, mode, mtimeMs, fingerprint: hash.digest("hex") };
++}
++
++function selectionState(selected: number, total: number): DraftSelectionState {
++	return selected === 0 ? "none" : selected === total ? "all" : "partial";
++}
++
+ function actorName(actor: string): string {
+ 	switch (actor) {
+ 		case PRE:
+@@ -360,27 +478,16 @@ async function loadFile(
+ 	journal: ChangeJournal | null,
+ 	windowCall: (ms: number | undefined) => CallRecord | undefined,
+ ): Promise<FileChange | "skip" | undefined> {
+-	const absolute = path.join(root, file);
+-	let workBytes: Uint8Array | null = null;
+-	let mtimeMs: number | undefined;
+-	let mode: string | null = null;
+-	try {
+-		const stat = await fs.lstat(absolute);
+-		mtimeMs = stat.mtimeMs;
+-		if (stat.isSymbolicLink()) mode = SYMLINK_MODE;
+-		else if (!stat.isFile()) return "skip";
+-		else {
+-			mode = stat.mode & 0o111 ? "100755" : "100644";
+-			workBytes = await fs.readFile(absolute);
+-		}
+-	} catch (error) {
+-		if (!isEnoent(error)) throw error;
+-	}
++	const worktree = await readWorktreeFile(root, file);
++	if (worktree === "skip") return "skip";
++	const { bytes: workBytes, mode, mtimeMs } = worktree;
+ 	if (head.mode === null && mode === null) return undefined;
+ 	const base = {
+ 		path: file,
+ 		headMode: head.mode,
+ 		mode,
++		workFingerprint: worktree.fingerprint,
++		workBytes: workBytes?.byteLength ?? 0,
+ 		selected: new Set<number>(),
+ 		wholeSelected: false,
+ 		editors: [...new Set(records.map(record => record.agent))],
+@@ -395,9 +502,12 @@ async function loadFile(
+ 	// Symlinks commit as their link target, whole; this also covers a file replaced by a link and back.
+ 	if (head.mode === SYMLINK_MODE || mode === SYMLINK_MODE) return whole("symlink");
+ 	const headBytes = head.sha && head.mode ? (await repo.showBlob(`${head.sha}:${file}`)).data : null;
+-	const headText = headBytes === null ? null : decodeText(headBytes);
+-	const workText = workBytes === null ? null : decodeText(workBytes);
+-	if (headText === undefined || workText === undefined) return whole("content");
++	const decodedHead = headBytes === null ? null : decodeText(headBytes);
++	const decodedWork = workBytes === null ? null : decodeText(workBytes);
++	if (decodedHead && "whole" in decodedHead) return whole(decodedHead.whole);
++	if (decodedWork && "whole" in decodedWork) return whole(decodedWork.whole);
++	const headText = decodedHead?.text ?? null;
++	const workText = decodedWork?.text ?? null;
+ 	if (headText === workText) return head.mode === mode ? undefined : whole("mode");
+ 	const headLines = toLines(headText);
+ 	const workLines = toLines(workText);
+@@ -473,7 +583,7 @@ function formatCounts(counts: Counts): string {
+ 
+ /** One agent tree's proposed commit; see the module docs. */
+ export class Draft {
+-	readonly id = `d${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
++	readonly id = `d${crypto.randomUUID()}`;
+ 	readonly root: string;
+ 	/** HEAD commit the draft was computed against; `null` before the first commit. */
+ 	readonly head: string | null;
+@@ -486,6 +596,9 @@ export class Draft {
+ 	/** Paths the draft cannot handle (submodules, nested repositories). */
+ 	readonly skipped: readonly string[];
+ 	#files: FileChange[];
++	#revision = 1;
++	#busy = false;
++	#consumed = false;
+ 
+ 	constructor(init: DraftInit) {
+ 		this.root = init.root;
+@@ -504,6 +617,171 @@ export class Draft {
+ 		return this.#files.map(file => file.path);
+ 	}
+ 
++	get revision(): number {
++		return this.#revision;
++	}
++
++	get consumed(): boolean {
++		return this.#consumed;
++	}
++
++	get busy(): boolean {
++		return this.#busy;
++	}
++
++	/** Conservative budget for retained text, line attribution and path metadata. */
++	get retainedBytes(): number {
++		return this.#files.reduce(
++			(sum, file) =>
++				sum +
++				3 * (Buffer.byteLength(file.head ?? "") + Buffer.byteLength(file.work ?? "")) +
++				256 * (file.attribution?.ops.length ?? 1) +
++				Buffer.byteLength(file.path),
++			0,
++		);
++	}
++
++	assertRevision(revision: number): void {
++		if (revision !== this.#revision) throw new Error("Draft revision changed; read the draft and preview again.");
++		if (this.#consumed) throw new Error("Draft was already committed; prepare a new draft.");
++	}
++
++	#assertEditable(): void {
++		if (this.#consumed) throw new Error("Draft was already committed; prepare a new draft.");
++		if (this.#busy) throw new Error("Draft is busy preparing or committing.");
++	}
++
++	/** Serialize preparation/commit with every native take/drop/only caller. Not a receipt ledger. */
++	acquire(): () => void {
++		this.#assertEditable();
++		this.#busy = true;
++		return () => {
++			this.#busy = false;
++		};
++	}
++
++	/** Called immediately when Git creates the commit, before best-effort index housekeeping. */
++	consume(): void {
++		this.#consumed = true;
++	}
++
++	async assertWorktreeUnchanged(paths: readonly string[], signal?: AbortSignal): Promise<void> {
++		for (const name of paths) {
++			signal?.throwIfAborted();
++			const file = this.#files.find(candidate => candidate.path === name);
++			const current = await readWorktreeFile(this.root, name);
++			if (!file || current === "skip" || current.fingerprint !== file.workFingerprint) {
++				throw new Error(`${name} changed since the draft; prepare and preview again.`);
++			}
++		}
++	}
++
++	/** Full HEAD-to-worktree text patch for one path, generated from the attributed snapshot. */
++	fileDiff(name: string): string | null {
++		const file = this.#files.find(candidate => candidate.path === name);
++		if (!file) throw new Error(`No changed path matches "${name}".`);
++		if (!file.attribution) return null;
++		return formatTextPatch(
++			name,
++			file.head === null || file.headMode === null ? null : { text: file.head, mode: file.headMode },
++			file.work === null || file.mode === null ? null : { text: file.work, mode: file.mode },
++		);
++	}
++
++	#wholeOwnership(file: FileChange): DraftOwnership {
++		return file.hint || file.editors.some(agent => this.scope.has(agent)) ? "review" : "other";
++	}
++
++	/** Native attribution and native unit IDs, without line bodies or terminal formatting. */
++	view(): DraftView {
++		const staged = new Set(this.staged);
++		const paths = this.#files.map((file): DraftPathView => {
++			const hunks: DraftHunkView[] = file.attribution
++				? file.attribution.hunks.map((hunk, hunkIndex) => ({
++						id: String(hunkIndex + 1),
++						headStart: hunk.headStart,
++						headCount: hunk.headCount,
++						workStart: hunk.workStart,
++						workCount: hunk.workCount,
++						units: [...hunkUnits(hunk)].map(([actor, ops], unitIndex): DraftUnitView => ({
++							id: `${hunkIndex + 1}${unitLetter(unitIndex)}`,
++							actor,
++							opIds: ops.map(op => op.id),
++							ownership: [...new Set(ops.map(op => file.classification!.status[op.id]))],
++							selected: selectionState(ops.filter(op => file.selected.has(op.id)).length, ops.length),
++							...countOps(file, ops),
++							likely: ops.some(op => file.classification?.likely.has(op.id)),
++							reasons: [
++								...new Map(
++									ops.flatMap(op => {
++										const reason = file.classification?.reasons.get(op.id);
++										return reason ? [[JSON.stringify(reason), reason] as const] : [];
++									}),
++								).values(),
++							],
++						})),
++					}))
++				: [
++						{
++							id: "1",
++							headStart: 0,
++							headCount: 0,
++							workStart: 0,
++							workCount: 0,
++							units: [
++								{
++									id: "1a",
++									actor: null,
++									opIds: [],
++									ownership: [this.#wholeOwnership(file)],
++									selected: file.wholeSelected ? "all" : "none",
++									added: 0,
++									removed: 0,
++									likely: false,
++									reasons: [
++										{
++											kind: "whole",
++											reason: file.whole!,
++											editors: [...file.editors],
++											...(file.hint ? { hint: { ...file.hint } } : {}),
++										},
++									],
++								},
++							],
++						},
++					];
++			return {
++				path: file.path,
++				kind: file.whole ?? "text",
++				change: file.headMode === null ? "added" : file.mode === null ? "deleted" : "modified",
++				beforeMode: file.headMode,
++				afterMode: file.mode,
++				workBytes: file.workBytes,
++				staged: staged.has(file.path),
++				selected: file.attribution
++					? selectionState(file.selected.size, file.attribution.ops.length)
++					: file.wholeSelected
++						? "all"
++						: "none",
++				ownership: [...new Set(hunks.flatMap(hunk => hunk.units.flatMap(unit => unit.ownership)))],
++				hunks,
++			};
++		});
++		return {
++			id: this.id,
++			revision: this.revision,
++			head: this.head,
++			branch: this.branch,
++			caller: this.caller,
++			scope: [...this.scope],
++			agents: this.agents.map(agent => ({ ...agent })),
++			state: this.#consumed ? "consumed" : this.#busy ? "busy" : "open",
++			paths,
++			staged: [...this.staged],
++			skipped: [...this.skipped],
++		};
++	}
++
+ 	/** Exact content to commit per path with anything selected. */
+ 	selection(): SelectedChange[] {
+ 		const changes: SelectedChange[] = [];
+@@ -536,6 +814,7 @@ export class Draft {
+ 
+ 	/** Deselect every path matching none of `globs` (exact paths, globs, or unique suffixes). */
+ 	only(globs: readonly string[]): string {
++		this.#assertEditable();
+ 		if (globs.length === 0) throw new Error("Name at least one path or glob to keep.");
+ 		const keep = new Set(globs.flatMap(glob => this.#match(glob)));
+ 		let dropped = 0;
+@@ -545,19 +824,22 @@ export class Draft {
+ 			file.wholeSelected = false;
+ 			dropped++;
+ 		}
++		if (dropped > 0) this.#revision++;
+ 		return `Deselected ${dropped} path(s) outside ${globs.join(", ")}.`;
+ 	}
+ 
+ 	#select(target: SelectionTarget, take: boolean): string {
++		this.#assertEditable();
+ 		if (target.path === undefined && target.grep === undefined) {
+ 			throw new Error("Name a path, units, or grep pattern.");
+ 		}
+ 		if (target.units?.length && target.path === undefined) throw new Error("Units need a path.");
+ 		const files = target.path === undefined ? this.#files : this.#match(target.path);
+ 		const pattern = target.grep === undefined ? undefined : new RegExp(target.grep);
++		// Resolve every target before changing anything: a bad unit in a later path must not partially select.
++		const targets = files.map(file => ({ file, ops: this.#targetOps(file, target.units, pattern) }));
+ 		let touched = 0;
+-		for (const file of files) {
+-			const ops = this.#targetOps(file, target.units, pattern);
++		for (const { file, ops } of targets) {
+ 			if (ops === "whole") {
+ 				if (file.wholeSelected !== take) touched++;
+ 				file.wholeSelected = take;
+@@ -573,6 +855,7 @@ export class Draft {
+ 		if (pattern && touched === 0 && !files.some(file => this.#targetOps(file, target.units, pattern) !== "whole")) {
+ 			throw new Error(`No change line matches /${target.grep}/.`);
+ 		}
++		if (touched > 0) this.#revision++;
+ 		return `${take ? "Selected" : "Deselected"} ${touched} change line(s).`;
+ 	}
+ 
+@@ -604,7 +887,8 @@ export class Draft {
+ 			for (const unit of wanted) {
+ 				const match = /^(\d+)([a-z]*)$/.exec(unit);
+ 				const hunk = match ? hunks[Number(match[1]) - 1] : undefined;
+-				if (!hunk || (match?.[2] && !hunkUnits(hunk).size)) {
++				const letters = hunk ? [...hunkUnits(hunk)].map((_, index) => unitLetter(index)) : [];
++				if (!hunk || (match?.[2] && !letters.includes(match[2]))) {
+ 					throw new Error(`${file.path} has no unit "${unit}" (hunks 1-${hunks.length}).`);
+ 				}
+ 			}
+diff --git a/packages/coding-agent/src/commit/selective/prelude-definition.ts b/packages/coding-agent/src/commit/selective/prelude-definition.ts
+index a24f14ee73..7dc87c0b4e 100644
+--- a/packages/coding-agent/src/commit/selective/prelude-definition.ts
++++ b/packages/coding-agent/src/commit/selective/prelude-definition.ts
+@@ -7,15 +7,24 @@ import { AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
+ import type { ToolSession } from "../../tools";
+ import { resolveToCwd } from "../../tools/path-utils";
+ import { cfgCommitEnabled } from "../../tools/settings";
+-import { commitSelection } from "./apply";
+-import { createDraft, type Draft, type ScopeSpec } from "./draft";
++import {
++	type CommitContext,
++	type CommitOutcome,
++	type CommitRequest,
++	commitSelection,
++	type PreparedSelection,
++	prepareCommitSelection,
++} from "./apply";
++import { createDraft, type Draft, type ScopeSpec, type SelectionTarget } from "./draft";
+ import { ChangeJournal } from "./journal";
+ // @ts-expect-error Bun imports this JavaScript source as text instead of evaluating its module shape.
+ import commitJavascript from "./prelude.js" with { type: "text" };
+ import commitPython from "./prelude.py" with { type: "text" };
+ 
+-/** Drafts kept per session; older ones expire. */
++/** One native store shared by CLI, eval and typed clients in this Runtime process. */
+ const MAX_DRAFTS = 8;
++const MAX_DRAFT_BYTES = 64 * 1024 * 1024;
++export const COMMIT_DRAFT_LEASE_MS = 5 * 60 * 1000;
+ 
+ const paramsSchema = type({ action: "'draft'", "agents?": "string | string[]", "repo?": "string > 0", "+": "reject" })
+ 	.or({ action: "'show'", draft: "string > 0", "path?": "string > 0", "+": "reject" })
+@@ -42,20 +51,184 @@ const paramsSchema = type({ action: "'draft'", "agents?": "string | string[]", "
+ 
+ type CommitParams = typeof paramsSchema.infer;
+ 
+-/** Inputs shared by the eval prelude and `/commit` to draft for one session's agent. */
++/** Inputs shared by CLI, eval and typed clients. Nothing is keyed by workspace alone. */
+ export interface DraftContext {
+ 	cwd: string;
+-	/** Session artifacts directory holding the change journal; `null` when the session keeps none. */
+ 	artifactsDir: string | null;
+-	/** Agent drafting (root of the default scope). */
+ 	agent: string;
++	/** Stable native session identity; omitted only for standalone, unstored draftFor callers. */
++	sessionId?: string;
+ 	signal?: AbortSignal;
+ }
+ 
+-/** Draft the repository's changes for `context.agent` (see {@link createDraft}). */
+-export function draftFor(context: DraftContext, scope?: ScopeSpec): Promise<Draft> {
++export type DraftSelectionAction =
++	| { action: "take" | "drop"; target: SelectionTarget }
++	| { action: "only"; globs: readonly string[] };
++
++export interface StoredCommitDraft {
++	readonly draft: Draft;
++	readonly scope: ScopeSpec;
++	readonly expiresAt: number;
++	readonly lifetime: AbortController;
++	prepared?: PreparedSelection;
++}
++
++/** The native lease/action owner. No Harness-specific attribution and no execution receipt cache. */
++export class CommitDraftStore {
++	#entries = new Map<string, StoredCommitDraft>();
++	#timer: Timer | undefined;
++	constructor(
++		readonly now: () => number = Date.now,
++		readonly onEmpty?: () => void,
++	) {}
++
++	#prune(): void {
++		for (const [id, entry] of this.#entries) {
++			if (entry.expiresAt <= this.now() || entry.draft.consumed) this.release(id);
++		}
++	}
++
++	#schedule(): void {
++		if (this.#timer) clearTimeout(this.#timer);
++		this.#timer = undefined;
++		if (this.#entries.size === 0) {
++			queueMicrotask(() => {
++				if (this.#entries.size === 0) this.onEmpty?.();
++			});
++			return;
++		}
++		const next = Math.min(...[...this.#entries.values()].map(entry => entry.expiresAt));
++		this.#timer = setTimeout(
++			() => {
++				this.#timer = undefined;
++				this.#prune();
++				this.#schedule();
++			},
++			Math.max(1, next - this.now()),
++		);
++		this.#timer.unref();
++	}
++
++	#bytes(entry: StoredCommitDraft): number {
++		return entry.draft.retainedBytes + 2 * (entry.prepared?.bytes ?? 0);
++	}
++
++	#fit(keep: string, bytes: number): void {
++		if (bytes > MAX_DRAFT_BYTES) throw new Error("Draft is too large to retain; narrow the repository changes.");
++		let total = bytes;
++		for (const [id, entry] of this.#entries) if (id !== keep) total += this.#bytes(entry);
++		for (const [id, entry] of this.#entries) {
++			if (this.#entries.size + (this.#entries.has(keep) ? 0 : 1) <= MAX_DRAFTS && total <= MAX_DRAFT_BYTES) break;
++			if (id === keep || entry.draft.busy) continue;
++			total -= this.#bytes(entry);
++			this.release(id);
++		}
++		if (total > MAX_DRAFT_BYTES || (!this.#entries.has(keep) && this.#entries.size >= MAX_DRAFTS)) {
++			throw new Error("All commit draft slots are busy; finish or release a draft.");
++		}
++	}
++
++	remember(draft: Draft, scope: ScopeSpec): StoredCommitDraft {
++		this.#prune();
++		this.#fit(draft.id, draft.retainedBytes);
++		const entry: StoredCommitDraft = {
++			draft,
++			scope,
++			expiresAt: this.now() + COMMIT_DRAFT_LEASE_MS,
++			lifetime: new AbortController(),
++		};
++		this.#entries.set(draft.id, entry);
++		this.#schedule();
++		return entry;
++	}
++
++	get(id: string, revision?: number): StoredCommitDraft {
++		this.#prune();
++		const entry = this.#entries.get(id);
++		if (!entry) throw new Error(`Draft ${id} expired or was committed; prepare a new draft.`);
++		if (revision !== undefined) entry.draft.assertRevision(revision);
++		return entry;
++	}
++
++	select(id: string, action: DraftSelectionAction, revision?: number): { entry: StoredCommitDraft; report: string } {
++		const entry = this.get(id, revision);
++		const before = entry.draft.revision;
++		const report =
++			action.action === "only" ? entry.draft.only(action.globs) : entry.draft[action.action](action.target);
++		if (entry.draft.revision !== before) entry.prepared = undefined;
++		return { entry, report };
++	}
++
++	async preview(id: string, revision: number, signal?: AbortSignal): Promise<PreparedSelection> {
++		const entry = this.get(id, revision);
++		const combined = signal ? AbortSignal.any([signal, entry.lifetime.signal]) : entry.lifetime.signal;
++		const prepared = await prepareCommitSelection(entry.draft, combined);
++		combined.throwIfAborted();
++		if (this.get(id, revision) !== entry) throw new Error("Draft expired while preparing the preview.");
++		this.#fit(id, entry.draft.retainedBytes + 2 * prepared.bytes);
++		entry.prepared = prepared;
++		return prepared;
++	}
++
++	prepared(id: string, revision: number, previewId: string): PreparedSelection {
++		const entry = this.get(id, revision);
++		if (!entry.prepared || entry.prepared.id !== previewId || entry.prepared.revision !== revision) {
++			throw new Error("Preview expired or selection changed; preview again.");
++		}
++		return entry.prepared;
++	}
++
++	async commit(
++		id: string,
++		request: CommitRequest,
++		context: CommitContext,
++		confirmation?: { revision: number; previewId: string },
++	): Promise<CommitOutcome> {
++		const entry = this.get(id, confirmation?.revision);
++		const prepared = confirmation ? this.prepared(id, confirmation.revision, confirmation.previewId) : undefined;
++		const signal = context.signal ? AbortSignal.any([context.signal, entry.lifetime.signal]) : entry.lifetime.signal;
++		try {
++			return await commitSelection(entry.draft, request, { ...context, signal, prepared });
++		} finally {
++			if (entry.draft.consumed) this.release(id);
++		}
++	}
++
++	release(id: string): boolean {
++		const entry = this.#entries.get(id);
++		if (!entry) return false;
++		this.#entries.delete(id);
++		entry.lifetime.abort(new Error("Commit draft released or expired."));
++		this.#schedule();
++		return true;
++	}
++
++	clear(): void {
++		for (const id of this.#entries.keys()) this.release(id);
++		this.#schedule();
++	}
++}
++
++const draftStores = new Map<string, CommitDraftStore>();
++
++/** Process lifetime supplies Runtime isolation; native session/agent/artifact identity supplies session isolation. */
++export function commitDraftStoreFor(context: DraftContext): CommitDraftStore {
++	if (!context.sessionId) throw new Error("A shared commit draft requires a native session identity.");
++	const key = JSON.stringify([context.sessionId, context.agent, context.artifactsDir]);
++	let store = draftStores.get(key);
++	if (!store) {
++		store = new CommitDraftStore(Date.now, () => {
++			if (draftStores.get(key) === store) draftStores.delete(key);
++		});
++		draftStores.set(key, store);
++	}
++	return store;
++}
++
++/** Draft the repository's changes once, then make that same draft available to every native surface. */
++export async function draftFor(context: DraftContext, scope?: ScopeSpec): Promise<Draft> {
+ 	const registry = AgentRegistry.global();
+-	return createDraft({
++	const draft = await createDraft({
+ 		cwd: context.cwd,
+ 		journal: context.artifactsDir ? ChangeJournal.at(context.artifactsDir) : null,
+ 		caller: context.agent,
+@@ -66,6 +239,8 @@ export function draftFor(context: DraftContext, scope?: ScopeSpec): Promise<Draf
+ 		},
+ 		signal: context.signal,
+ 	});
++	if (context.sessionId) commitDraftStoreFor(context).remember(draft, scope);
++	return draft;
+ }
+ 
+ /** Status-tree line for a completed call: `commit.draft()`, `commit.take(CHANGELOG.md)`. */
+@@ -92,53 +267,76 @@ function describeCall(parameters: unknown): string | undefined {
+  * journal, adjust the selection, and commit it without touching other agents' work.
+  */
+ export function createCommitPrelude(session: ToolSession): EvalPreludeDefinition {
+-	const drafts = new Map<string, { draft: Draft; scope: ScopeSpec }>();
+-	const remember = (draft: Draft, scope: ScopeSpec) => {
+-		drafts.set(draft.id, { draft, scope });
+-		for (const id of drafts.keys()) {
+-			if (drafts.size <= MAX_DRAFTS) break;
+-			drafts.delete(id);
+-		}
++	const fallbackSessionId = `eval-${crypto.randomUUID()}`;
++	let activeStore: CommitDraftStore | undefined;
++	const clear = () => {
++		activeStore?.clear();
++		activeStore = undefined;
+ 	};
+-	/** Draft context in `cwd`: the session cwd unless a call targets another repository. */
++	session.registerDisposeCallback?.(clear);
++	session.registerSessionChangeCallback?.(clear);
++	/** Alternate-repository drafting keeps the same native session/agent owner. */
+ 	const context = (signal?: AbortSignal, cwd = session.cwd): DraftContext => ({
+ 		cwd,
+ 		artifactsDir: session.getArtifactsDir?.() ?? null,
+ 		agent: session.getAgentId?.() ?? MAIN_AGENT_ID,
++		sessionId: session.getSessionId?.() ?? fallbackSessionId,
+ 		signal,
+ 	});
+-	const lookup = (id: string) => {
+-		const entry = drafts.get(id);
+-		if (!entry) throw new ToolError(`Draft ${id} expired or was committed; call commit.draft() again.`);
+-		return entry;
+-	};
+ 
+-	const describe = (draft: Draft) => ({ id: draft.id, head: draft.head, scope: [...draft.scope] });
++	const describe = (draft: Draft) => ({
++		id: draft.id,
++		revision: draft.revision,
++		head: draft.head,
++		scope: [...draft.scope],
++	});
+ 	const invoke = async (params: CommitParams, signal?: AbortSignal) => {
++		const owner = context(signal);
++		const drafts = commitDraftStoreFor(owner);
++		if (activeStore && activeStore !== drafts) activeStore.clear();
++		activeStore = drafts;
++		const assertCurrent = () => {
++			const current = context();
++			if (
++				session.isDisposed?.() ||
++				current.sessionId !== owner.sessionId ||
++				current.agent !== owner.agent ||
++				current.artifactsDir !== owner.artifactsDir
++			) {
++				throw new Error("Commit draft belongs to an earlier session.");
++			}
++		};
+ 		if (params.action === "draft") {
+ 			const cwd = params.repo === undefined ? session.cwd : resolveToCwd(params.repo, session.cwd);
+-			const draft = await draftFor(context(signal, cwd), params.agents);
+-			remember(draft, params.agents);
++			const draft = await draftFor({ ...owner, cwd }, params.agents);
++			try {
++				assertCurrent();
++			} catch (error) {
++				drafts.release(draft.id);
++				throw error;
++			}
+ 			return { text: draft.summary(), details: describe(draft) };
+ 		}
+-		const { draft, scope } = lookup(params.draft);
++		const { draft, scope } = drafts.get(params.draft);
+ 		switch (params.action) {
+ 			case "show":
+ 				return { text: draft.show(params.path), details: undefined };
+ 			case "diff":
+ 				return { text: draft.diff(), details: undefined };
+-			case "only":
+-				return { text: `${draft.only(params.globs)}\n${draft.summary()}`, details: undefined };
++			case "only": {
++				const { report } = drafts.select(draft.id, { action: "only", globs: params.globs });
++				return { text: `${report}\n${draft.summary()}`, details: undefined };
++			}
+ 			case "take":
+ 			case "drop": {
+ 				const target = { path: params.path, units: params.units, grep: params.grep };
+-				const message = params.action === "take" ? draft.take(target) : draft.drop(target);
+-				return { text: `${message}\n${draft.summary()}`, details: undefined };
++				const { report } = drafts.select(draft.id, { action: params.action, target });
++				return { text: `${report}\n${draft.summary()}`, details: undefined };
+ 			}
+ 			case "commit": {
+-				const { agent, artifactsDir } = context(signal);
+-				const outcome = await commitSelection(
+-					draft,
++				const { agent, artifactsDir } = owner;
++				const outcome = await drafts.commit(
++					draft.id,
+ 					{
+ 						subject: params.subject,
+ 						body: params.body,
+@@ -150,11 +348,11 @@ export function createCommitPrelude(session: ToolSession): EvalPreludeDefinition
+ 						journal: artifactsDir ? ChangeJournal.at(artifactsDir) : null,
+ 						agent: { agent, parent: AgentRegistry.global().get(agent)?.parentId },
+ 						signal,
++						assertCurrent,
+ 					},
+ 				);
+-				drafts.delete(draft.id);
+ 				const remaining = await draftFor(context(signal, draft.root), scope);
+-				remember(remaining, scope);
++				activeStore = commitDraftStoreFor(context());
+ 				const lines = [
+ 					`[${draft.branch ?? "HEAD"} ${outcome.sha.slice(0, 10)}] ${outcome.subject}`,
+ 					`${outcome.paths.length} path(s): ${outcome.paths.join(", ")}`,
+diff --git a/packages/coding-agent/src/job-widgets/registry.ts b/packages/coding-agent/src/job-widgets/registry.ts
+index ca35a902d4..2a9e6144cd 100644
+--- a/packages/coding-agent/src/job-widgets/registry.ts
++++ b/packages/coding-agent/src/job-widgets/registry.ts
+@@ -125,6 +125,11 @@ export class JobWidgets implements JobWidgetRegistry {
+ 		return entry.view;
+ 	}
+ 
++	peek(job: AsyncJob): JobWidgetView | undefined {
++		const entry = this.#entries.get(job.id);
++		return !this.#disposed && this.#enabled() && entry?.job === job ? entry.view : undefined;
++	}
++
+ 	requestCaption(job: AsyncJob): void {
+ 		if (this.#disposed || !job.widgetInputs || job.status !== "running" || !this.#enabled()) return;
+ 		let brief: JobWidgetBrief;
+diff --git a/packages/coding-agent/src/job-widgets/types.ts b/packages/coding-agent/src/job-widgets/types.ts
+index e3d46b7861..0108b1c1bc 100644
+--- a/packages/coding-agent/src/job-widgets/types.ts
++++ b/packages/coding-agent/src/job-widgets/types.ts
+@@ -76,6 +76,8 @@ export interface JobWidgetRegistry {
+ 	 * model start writing its spec.
+ 	 */
+ 	view(job: AsyncJob): JobWidgetView | undefined;
++	/** Last already-observed view, without reading sources or marking the widget shown. */
++	peek?(job: AsyncJob): JobWidgetView | undefined;
+ 	/**
+ 	 * One line on what a command's job does and when it ends, written by the
+ 	 * cheap model once the job has run a while; `undefined` until then, for a
+diff --git a/packages/coding-agent/src/modes/controllers/command-controller.ts b/packages/coding-agent/src/modes/controllers/command-controller.ts
+index eb0b61022c..f9f2abeba7 100644
+--- a/packages/coding-agent/src/modes/controllers/command-controller.ts
++++ b/packages/coding-agent/src/modes/controllers/command-controller.ts
+@@ -1,3 +1,5 @@
++import { waitForCompactionYield } from "../../harness/services/compaction-yield";
++import { queuedCompactionForSession } from "../../harness/services/queued-compaction-service";
+ import * as fs from "node:fs/promises";
+ import * as os from "node:os";
+ import * as path from "node:path";
+@@ -203,6 +205,10 @@ export class CommandController {
+ 		private readonly ctx: InteractiveModeContext,
+ 		forkTerminalDependencies: Partial<ForkTerminalDependencies> = {},
+ 	) {
++		queuedCompactionForSession(ctx.sessionManager.getSessionId())?.setSubmissionPort({
++			wait: () => ctx.waitForSubmissionDispatches(),
++			pending: () => ctx.hasPendingSubmission(),
++		});
+ 		this.#forkTerminalDependencies = {
+ 			classifyTerminalMultiplexer,
+ 			environment: () => process.env,
+@@ -2125,6 +2131,29 @@ export class CommandController {
+ 	 * Follow-ups queued behind the request wait in `compactionQueuedMessages` and flush once it ends.
+ 	 */
+ 	runYieldCompaction(): Promise<void> {
++		const shared = queuedCompactionForSession(this.ctx.sessionManager.getSessionId());
++		const pending = this.ctx.yieldCompaction;
++		if (shared && pending) {
++			if (this.#yieldCompactionWatcher) return this.#yieldCompactionWatcher;
++			if (shared.running) {
++				this.ctx.restoreCompactionQueueToEditor("A compaction is already queued");
++				return shared.wait();
++			}
++			shared.enqueue(pending.instructions, pending.mode ? { mode: pending.mode } : undefined);
++			this.#yieldCompactionWatcher = shared
++				.wait()
++				.then(async () => {
++					if (this.ctx.yieldCompaction !== pending) return;
++					this.ctx.yieldCompaction = undefined;
++					this.ctx.updatePendingMessagesDisplay();
++					if (shared.error) this.ctx.showError(shared.error);
++					await this.ctx.flushCompactionQueue({ willRetry: false });
++				})
++				.finally(() => {
++					this.#yieldCompactionWatcher = undefined;
++				});
++			return this.#yieldCompactionWatcher;
++		}
+ 		this.#yieldCompactionWatcher ??= this.#watchYieldCompaction().finally(() => {
+ 			this.#yieldCompactionWatcher = undefined;
+ 		});
+@@ -2136,34 +2165,14 @@ export class CommandController {
+ 		if (!request) return;
+ 		const session = this.ctx.session;
+ 		while (true) {
+-			await session.waitForIdle();
+-			// Input sent before the request reaches the session first, also while it is still dispatching.
+-			await this.ctx.waitForSubmissionDispatches();
+-			await session.waitForAdmittedSubmissions();
+-			// Let a session switch commit or roll back before judging which conversation is live.
+-			if (session.isSessionTransitioning) await session.waitForSessionTransition();
+-			if (session.hasPendingAsyncWork()) await session.settleAsyncWork();
+-			if (this.ctx.session !== session) return;
+-			if (this.ctx.yieldCompaction !== request) {
+-				// Dequeued (and maybe queued again): serve whatever request is pending now.
+-				if (!this.ctx.yieldCompaction) return;
+-				request = this.ctx.yieldCompaction;
+-				continue;
+-			}
+-			// The run yielded only once nothing can continue it: no turn, retry, queued input, pending
+-			// submission, background job, or transition. Otherwise something is mid-flight; look again.
+-			if (
+-				!session.isStreaming &&
+-				!session.isRetrying &&
+-				!session.isSessionTransitioning &&
+-				!session.hasAdmittedSubmission &&
+-				!session.hasPendingAsyncWork() &&
+-				session.queuedMessageCount === 0 &&
+-				!this.ctx.hasPendingSubmission()
+-			) {
+-				break;
+-			}
+-			await Bun.sleep(10);
++			const ready = await waitForCompactionYield(
++				session,
++				() => this.ctx.session === session && this.ctx.yieldCompaction === request,
++				{ wait: () => this.ctx.waitForSubmissionDispatches(), pending: () => this.ctx.hasPendingSubmission() },
++			);
++			if (ready) break;
++			if (this.ctx.session !== session || !this.ctx.yieldCompaction) return;
++			request = this.ctx.yieldCompaction;
+ 		}
+ 		if (!continuesConversation(this.ctx.sessionManager, request)) {
+ 			// Switched sessions or navigated the tree (both may reuse this `AgentSession`): nothing queued
+diff --git a/packages/coding-agent/src/modes/controllers/composer-prediction-controller.ts b/packages/coding-agent/src/modes/controllers/composer-prediction-controller.ts
+index f51214b4c4..2f539c9219 100644
+--- a/packages/coding-agent/src/modes/controllers/composer-prediction-controller.ts
++++ b/packages/coding-agent/src/modes/controllers/composer-prediction-controller.ts
+@@ -42,7 +42,7 @@ const NON_WORD = /[^\p{L}\p{N}]+/gu;
+  * The message a prediction is keyed on: the last one that is not an advisor card. Silent advisor
+  * notes land after the turn without changing what the user would reply to.
+  */
+-function predictionAnchor(session: AgentViewSession): AgentMessage | undefined {
++export function predictionAnchor(session: AgentViewSession): AgentMessage | undefined {
+ 	const messages = session.messages;
+ 	for (let i = messages.length - 1; i >= 0; i--) {
+ 		if (!isAdvisorCard(messages[i])) return messages[i];
+@@ -73,7 +73,13 @@ interface Prediction {
+ 	rank: number | undefined;
+ }
+ 
+-type PredictionContext = Pick<InteractiveModeContext, "settings" | "viewSession" | "focusedAgentId" | "editor" | "ui">;
++export interface PredictionContext {
++	settings: InteractiveModeContext["settings"];
++	viewSession: AgentViewSession;
++	focusedAgentId?: string | undefined;
++	editor: Pick<InteractiveModeContext["editor"], "getText">;
++	ui: Pick<InteractiveModeContext["ui"], "requestRender">;
++}
+ 
+ /**
+  * Normalize a prediction reply to the single line the composer shows, or
+@@ -145,6 +151,9 @@ export class ComposerPredictionController {
+ 		this.#meterProvider = options.meterProvider;
+ 	}
+ 
++	get running(): boolean {
++		return this.#abort !== undefined;
++	}
+ 	/** The prediction's alternatives for the conversation as it stands now, most likely first, if one is ready. */
+ 	get choices(): readonly string[] | undefined {
+ 		const prediction = this.#prediction;
+diff --git a/packages/coding-agent/src/modes/interactive-mode.ts b/packages/coding-agent/src/modes/interactive-mode.ts
+index 033feae113..0c31ec39c1 100644
+--- a/packages/coding-agent/src/modes/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive-mode.ts
+@@ -1,3 +1,4 @@
++import { harnessPauseService } from "../harness/services/pause-service";
+ /**
+  * Interactive mode for the coding agent.
+  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
+@@ -182,6 +183,8 @@ import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
+ import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
+ import { type DictationTarget, MicCursor, type SttCallbacks, STTController, type SttState } from "../stt";
+ import type { SpaceHoldHandler } from "@oh-my-pi/pi-tui/space-hold";
++import type { HarnessLoopService, HarnessLoopState } from "../harness/services/loop-service";
++import type { HarnessModeControlService, HarnessModeState } from "../harness/services/mode-control-service";
+ import { resolveCliEntryCmd } from "../subprocess/worker-client";
+ import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
+ import { labelEchoesHandle } from "../task/label";
+@@ -198,6 +201,7 @@ import { isMCPToolName } from "../tools/builtin-names";
+ import type { LspStartupServerInfo } from "../tools";
+ import { resolvePlanFilePath } from "../plan-mode/plan-files";
+ import { resolveToCwd } from "../tools/path-utils";
++import type { ToolUiFactory } from "../tools/context";
+ import { StreamPublisher } from "../stream/publisher";
+ import { newRecordingPath, SessionRecorder } from "../stream/recording";
+ import { StreamRedactor } from "../stream/redactor";
+@@ -1382,6 +1386,7 @@ const CTRL_L_APPEARANCE_RESPONSE_DEADLINE_MS = 2000;
+ const JOBS_SHEET_REFRESH_MS = 250;
+ 
+ export class InteractiveMode implements InteractiveModeContext {
++	readonly pauseControl = harnessPauseService;
+ 	#ownsStartedUi: boolean;
+ 	session: AgentSession;
+ 	sessionManager: SessionManager;
+@@ -1468,6 +1473,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	#loopConditionAbort: AbortController | undefined;
+ 	#loopAutoSubmitTimer: NodeJS.Timeout | undefined;
+ 	#pendingLoopIterations = 0;
++	readonly #harnessLoopService: HarnessLoopService | undefined;
++	#harnessLoopUnsubscribe: (() => void) | undefined;
++	readonly #harnessModeService: HarnessModeControlService | undefined;
++	#harnessModeUnsubscribe: (() => void) | undefined;
+ 	#todoAutoClearTimer: NodeJS.Timeout | undefined;
+ 	#todoAutoClearGeneration = 0;
+ 	#modelCycleClearTimer: NodeJS.Timeout | undefined;
+@@ -1873,7 +1882,7 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	#planReviewAnnotationStateBySubmission = new WeakMap<SubmittedUserInput, string>();
+ 	readonly lspServers: LspStartupServerInfo[] | undefined = undefined;
+ 	mcpManager?: MCPManager;
+-	readonly #toolUiContextSetter: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
++	readonly #toolUiContextSetter: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
+ 
+ 	readonly #codexResetFireworksController: CodexResetFireworksController;
+ 	readonly #btwController: BtwController;
+@@ -2111,12 +2120,14 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	constructor(
+ 		session: AgentSession,
+ 		version: string,
+-		setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void = () => {},
++		setToolUIContext: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void = () => {},
+ 		lspServers: LspStartupServerInfo[] | undefined = undefined,
+ 		mcpManager?: MCPManager,
+ 		eventBus?: EventBus,
+ 		composer?: Composer,
+ 		subagentEventBus?: EventBus,
++		harnessLoopService?: HarnessLoopService,
++		harnessModeService?: HarnessModeControlService,
+ 	) {
+ 		this.session = session;
+ 		this.sessionManager = session.sessionManager;
+@@ -2163,6 +2174,8 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		);
+ 		this.#eventBus = eventBus;
+ 		this.#subagentEventBus = subagentEventBus;
++		this.#harnessLoopService = harnessLoopService;
++		this.#harnessModeService = harnessModeService;
+ 		if (eventBus) {
+ 			this.#eventBusUnsubscribers.push(
+ 				eventBus.on(LSP_STARTUP_EVENT_CHANNEL, data => {
+@@ -2364,6 +2377,26 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		this.collabController = new CollabController(this);
+ 		this.session.setPromptDropped?.(prompt => this.restoreDroppedPrompt(prompt));
+ 		this.#observerRegistry = new SessionObserverRegistry();
++		if (this.#harnessLoopService !== undefined) {
++			this.#harnessLoopUnsubscribe = this.#harnessLoopService.onChange(state => this.#syncSharedLoopState(state));
++			this.#syncSharedLoopState(this.#harnessLoopService.state());
++		}
++		if (this.#harnessModeService !== undefined) {
++			this.#harnessModeUnsubscribe = this.#harnessModeService.onChange(state => this.#syncSharedModeState(state));
++			this.#syncSharedModeState(this.#harnessModeService.state());
++		}
++	}
++
++	#syncSharedModeState(state: HarnessModeState): void {
++		this.planModeEnabled = state.plan?.status === "active";
++		this.planModePaused = state.plan?.status === "paused";
++		this.planModePlanFilePath = state.plan?.planFilePath;
++		this.goalModeEnabled = state.goal?.status === "active";
++		this.goalModePaused = state.goal?.status === "paused";
++		this.vibeModeEnabled = state.vibe?.enabled === true;
++		this.#updatePlanModeStatus();
++		this.#updateGoalModeStatus();
++		this.#updateVibeModeStatus();
+ 	}
+ 
+ 	#handleJudgmentBatchProgress(progress: JudgmentBatchProgress): void {
+@@ -3347,6 +3380,7 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	#scheduleLoopAutoSubmit(): void {
++		if (this.#harnessLoopService !== undefined) return;
+ 		this.#cancelLoopAutoSubmit();
+ 		if (!this.loopModeEnabled || !this.loopPrompt || this.#isShuttingDown) return;
+ 		const prompt = this.loopPrompt;
+@@ -3592,7 +3626,21 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		this.#notifyModeChanged();
+ 	}
+ 
++	#syncSharedLoopState(state: HarnessLoopState | undefined): void {
++		this.loopModeEnabled = state !== undefined;
++		this.loopModePaused = state?.status === "paused";
++		this.loopPrompt = state?.prompt;
++		this.loopLimit = this.#harnessLoopService?.limitState();
++		this.loopCondition = state?.condition;
++		this.#syncLoopModeStatus();
++	}
++
+ 	disableLoopMode(message = "Loop mode disabled."): void {
++		if (this.#harnessLoopService !== undefined) {
++			const wasEnabled = this.#harnessLoopService.disable().disabled;
++			if (wasEnabled) this.showStatus(message);
++			return;
++		}
+ 		const wasEnabled = this.loopModeEnabled;
+ 		this.loopModeEnabled = false;
+ 		this.loopModePaused = false;
+@@ -3608,6 +3656,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	setLoopPrompt(prompt: string): void {
++		if (this.#harnessLoopService !== undefined) {
++			if (this.#harnessLoopService.state() !== undefined) this.#harnessLoopService.capturePrompt(prompt);
++			return;
++		}
+ 		if (!this.loopModeEnabled) return;
+ 		// Any manual submit supersedes whatever gate is currently pending, even
+ 		// one resubmitting identical text: the gate was checking the *previous*
+@@ -3636,6 +3688,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	 * user submits becomes the new loop prompt and resumes iteration.
+ 	 */
+ 	pauseLoop(): void {
++		if (this.#harnessLoopService !== undefined) {
++			if (this.#harnessLoopService.state() !== undefined) this.#harnessLoopService.pause();
++			return;
++		}
+ 		this.loopPrompt = undefined;
+ 		this.loopModePaused = true;
+ 		this.#cancelLoopAutoSubmit();
+@@ -3644,6 +3700,27 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	async handleLoopCommand(args = ""): Promise<string | undefined> {
++		if (this.#harnessLoopService !== undefined) {
++			if (this.#harnessLoopService.state() !== undefined) {
++				this.disableLoopMode();
++				return undefined;
++			}
++			const parsed = parseLoopArgs(args);
++			if (typeof parsed === "string") {
++				this.showError(parsed);
++				return undefined;
++			}
++			this.#harnessLoopService.enableFromConfig(undefined, parsed.limit, parsed.condition);
++			const limitSuffix = parsed.limit ? ` Limited to ${describeLoopLimit(parsed.limit)}.` : "";
++			const remaining = this.#harnessLoopService.limitState();
++			const remainingSuffix = remaining ? ` ${describeLoopLimitRuntime(remaining)}.` : "";
++			const conditionSuffix = parsed.condition ? ` Continuing ${describeLoopCondition(parsed.condition)}.` : "";
++			const tail = parsed.prompt ? "Repeating it after each turn." : "Your next prompt will repeat after each turn.";
++			this.showStatus(
++				`Loop mode enabled.${limitSuffix}${remainingSuffix}${conditionSuffix} ${tail} Esc cancels the current iteration; /loop again to disable.`,
++			);
++			return parsed.prompt;
++		}
+ 		if (this.loopModeEnabled) {
+ 			this.disableLoopMode();
+ 			return undefined;
+@@ -7062,6 +7139,33 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		initialPrompt?: string,
+ 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+ 	): Promise<boolean> {
++		if (this.#harnessModeService !== undefined) {
++			try {
++				if (this.planModeEnabled || this.planModePaused) {
++					if (this.planModeEnabled) {
++						const confirmed = await this.showHookConfirm(
++							"Exit plan mode?",
++							"This exits plan mode without approving a plan.",
++						);
++						if (!confirmed) return false;
++					}
++					await this.#harnessModeService.exitPlan(true);
++					this.showStatus("Plan mode disabled.");
++					return false;
++				}
++				await this.#harnessModeService.enterPlan();
++				this.showStatus(`Plan mode enabled. Plan file: ${this.planModePlanFilePath ?? "local://PLAN.md"}`);
++				if (initialPrompt && this.onInputCallback) {
++					this.onInputCallback(
++						this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }),
++					);
++					return true;
++				}
++			} catch (error) {
++				this.showError(error instanceof Error ? error.message : String(error));
++			}
++			return false;
++		}
+ 		if (this.goalModeEnabled || this.goalModePaused) {
+ 			this.showWarning("Exit goal mode first.");
+ 			return false;
+@@ -7136,6 +7240,32 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		initialPrompt?: string,
+ 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+ 	): Promise<boolean> {
++		if (this.#harnessModeService !== undefined) {
++			try {
++				if (this.vibeModeEnabled) {
++					const result = await this.#harnessModeService.exitVibe();
++					this.showStatus(
++						result.killed > 0
++							? `Vibe mode disabled. Killed ${result.killed} worker session${result.killed === 1 ? "" : "s"}.`
++							: "Vibe mode disabled.",
++					);
++					return false;
++				}
++				await this.#harnessModeService.enterVibe();
++				this.showStatus(
++					"Vibe mode enabled. You direct fast/good worker sessions; toolset is read + optional parent Todo + vibe tools.",
++				);
++				if (initialPrompt && this.onInputCallback) {
++					this.onInputCallback(
++						this.startPendingSubmission({ text: initialPrompt, ...input }, { preserveDraft: true }),
++					);
++					return true;
++				}
++			} catch (error) {
++				this.showError(error instanceof Error ? error.message : String(error));
++			}
++			return false;
++		}
+ 		if (this.vibeModeEnabled) {
+ 			await this.#exitVibeMode();
+ 			return false;
+@@ -7361,7 +7491,11 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			}
+ 			nextBudget = parsed;
+ 		}
+-		await this.session.goalRuntime.onBudgetMutated(nextBudget);
++		if (this.#harnessModeService !== undefined) {
++			await this.#harnessModeService.setGoalBudget(nextBudget);
++		} else {
++			await this.session.goalRuntime.onBudgetMutated(nextBudget);
++		}
+ 		this.#resetGoalContinuationSuppression();
+ 		this.#scheduleGoalContinuation();
+ 		this.showStatus(nextBudget === undefined ? "Goal budget cleared." : `Goal budget set to ${nextBudget}.`);
+@@ -7416,6 +7550,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+ 	): Promise<boolean> {
+ 		try {
++			if (this.#harnessModeService !== undefined) {
++				await this.#harnessModeService.startGuidedGoal(rest);
++				return true;
++			}
+ 			if (this.planModeEnabled || this.planModePaused) {
+ 				this.#warnPlanModeBlocks();
+ 				return false;
+@@ -7579,8 +7717,13 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			this.showWarning("No active goal to pause.");
+ 			return;
+ 		}
+-		await this.session.goalRuntime.pauseGoal();
+-		await this.#exitGoalMode({ paused: true, reason: "paused" });
++		if (this.#harnessModeService !== undefined) {
++			await this.#harnessModeService.pauseGoal();
++			this.showStatus("Goal mode paused.");
++		} else {
++			await this.session.goalRuntime.pauseGoal();
++			await this.#exitGoalMode({ paused: true, reason: "paused" });
++		}
+ 	}
+ 
+ 	async #resumeGoalAction(): Promise<void> {
+@@ -7588,7 +7731,11 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			this.showWarning("No paused goal to resume.");
+ 			return;
+ 		}
+-		await this.#enterGoalMode({ resume: true, silent: true });
++		if (this.#harnessModeService !== undefined) {
++			await this.#harnessModeService.resumeGoal();
++		} else {
++			await this.#enterGoalMode({ resume: true, silent: true });
++		}
+ 		this.showStatus("Goal mode resumed.");
+ 		this.#scheduleGoalContinuation();
+ 	}
+@@ -7603,8 +7750,13 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			"This removes the goal record. Accumulated usage stays in the session log.",
+ 		);
+ 		if (!confirmed) return;
+-		await this.session.goalRuntime.dropGoal();
+-		await this.#exitGoalMode({ reason: "dropped" });
++		if (this.#harnessModeService !== undefined) {
++			await this.#harnessModeService.dropGoal();
++			this.showStatus("Goal dropped.");
++		} else {
++			await this.session.goalRuntime.dropGoal();
++			await this.#exitGoalMode({ reason: "dropped" });
++		}
+ 	}
+ 
+ 	/** Enter through the same goal activation path as `/goal set`, then start its first turn. */
+@@ -7624,7 +7776,11 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		objective: string,
+ 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+ 	): Promise<boolean> {
+-		await this.#enterGoalMode({ objective, silent: true });
++		if (this.#harnessModeService !== undefined) {
++			await this.#harnessModeService.createGoal(objective);
++		} else {
++			await this.#enterGoalMode({ objective, silent: true });
++		}
+ 		this.#resetGoalContinuationSuppression();
+ 		if (this.session.isStreaming) {
+ 			const images = input?.images?.length ? input.images : undefined;
+@@ -7650,10 +7806,14 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		objective: string,
+ 		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
+ 	): Promise<boolean> {
+-		const state = await this.session.goalRuntime.replaceGoal({ objective });
+-		this.session.setGoalModeState(state);
+-		this.goalModeEnabled = true;
+-		this.goalModePaused = false;
++		if (this.#harnessModeService !== undefined) {
++			await this.#harnessModeService.replaceGoal(objective);
++		} else {
++			const state = await this.session.goalRuntime.replaceGoal({ objective });
++			this.session.setGoalModeState(state);
++			this.goalModeEnabled = true;
++			this.goalModePaused = false;
++		}
+ 		this.#resetGoalContinuationSuppression();
+ 		this.#updateGoalModeStatus();
+ 		if (this.session.isStreaming) {
+@@ -8200,6 +8360,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		this.#cancelGoalContinuation();
+ 		clearInterval(this.#jobsSheetTimer);
+ 		this.#jobsSheetTimer = undefined;
++		this.#harnessLoopUnsubscribe?.();
++		this.#harnessLoopUnsubscribe = undefined;
++		this.#harnessModeUnsubscribe?.();
++		this.#harnessModeUnsubscribe = undefined;
+ 		if (this.#sttController) {
+ 			this.#sttController.dispose();
+ 			this.#sttController = undefined;
+@@ -8544,7 +8708,7 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	// Extension UI integration
+-	setToolUIContext(uiContext: ExtensionUIContext, hasUI: boolean): void {
++	setToolUIContext(uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean): void {
+ 		this.#toolUiContextSetter(uiContext, hasUI);
+ 	}
+ 
+diff --git a/packages/coding-agent/src/modes/rpc/rpc-mode.ts b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+index 4408b13370..99cf9a14a7 100644
+--- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
++++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+@@ -62,6 +62,7 @@ import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins
+ import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
+ import { listLogoutAccounts, logoutCredential } from "../../slash-commands/helpers/logout";
+ import { cfgSttEnabled } from "../../stt/settings";
++import type { ToolUiFactory } from "../../tools/context";
+ import { defaultLoadModeForToolName } from "../../tools/essential-tools";
+ import type { EventBus } from "../../utils/event-bus";
+ import { selectRpcEntries } from "./rpc-compat";
+@@ -1372,9 +1373,9 @@ export function registerRpcPersistenceSurface(
+ 
+ /** Startup options for {@link runRpcMode}. */
+ export interface RpcModeOptions {
+-	/** `--mode rpc-ui`: route tool UI (e.g. ask) over the protocol, independently of headless extensions. */
+-	setToolUIContext?: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
+-	/** `--no-ui`: extensions run with `hasUI=false` and no UI frames; tool UI and host-issued login are unaffected. */
++	/** `--mode rpc-ui`: route tool UI (ask, tool cards) over the protocol as well. */
++	setToolUIContext?: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
++	/** `--no-ui`: extensions run with `hasUI=false`; no dialog or presentation `extension_ui_request` frames are emitted. */
+ 	headless?: boolean;
+ 	subagentEventBus?: EventBus;
+ 	input?: ReadableStream<Uint8Array>;
+diff --git a/packages/coding-agent/src/modes/types.ts b/packages/coding-agent/src/modes/types.ts
+index e517908264..ad9b321b59 100644
+--- a/packages/coding-agent/src/modes/types.ts
++++ b/packages/coding-agent/src/modes/types.ts
+@@ -46,6 +46,7 @@ import type { SessionContinuation, SessionInfo } from "../session/session-listin
+ import type { SpaceHoldHandler } from "@oh-my-pi/pi-tui/space-hold";
+ import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+ import type { LspStartupServerInfo } from "../tools";
++import type { ToolUiFactory } from "../tools/context";
+ import type { EventBus } from "../utils/event-bus";
+ import type { TokenRateMeter } from "../utils/token-rate";
+ import type { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
+@@ -423,7 +424,7 @@ export interface InteractiveModeContext {
+ 	checkShutdownRequested(): Promise<void>;
+ 
+ 	// Extension UI integration
+-	setToolUIContext(uiContext: ExtensionUIContext, hasUI: boolean): void;
++	setToolUIContext(uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean): void;
+ 	initializeHookRunner(uiContext: ExtensionUIContext, hasUI: boolean): void;
+ 	/** Stack extension autocomplete behavior on top of the built-in editor provider. */
+ 	addAutocompleteProvider(factory: AutocompleteProviderFactory): void;
+diff --git a/packages/coding-agent/src/slash-commands/builtin-commit.ts b/packages/coding-agent/src/slash-commands/builtin-commit.ts
+index bac42c196c..8cf18d53c1 100644
+--- a/packages/coding-agent/src/slash-commands/builtin-commit.ts
++++ b/packages/coding-agent/src/slash-commands/builtin-commit.ts
+@@ -9,6 +9,11 @@ import type { SlashCommandSpec } from "./types";
+ /** Recent commit subjects shown to the agent for style. */
+ const RECENT_SUBJECTS = 5;
+ 
++/** Native /commit accepts opaque instructions, not command-line flags or a commit subject. */
++export function parseCommitArgs(args: string): { instructions: string } {
++	return { instructions: args.trim() };
++}
++
+ /** `/commit`: hand the agent a draft of its own changes and ask it to commit them with the eval `commit` namespace. */
+ export const BUILTIN_COMMIT_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
+ 	{
+@@ -25,6 +30,7 @@ export const BUILTIN_COMMIT_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
+ 				const draft = await draftFor({
+ 					cwd: runtime.cwd,
+ 					artifactsDir: runtime.sessionManager.getArtifactsDir(),
++					sessionId: runtime.session.sessionId,
+ 					agent: runtime.session.getAgentId() ?? MAIN_AGENT_ID,
+ 					signal: runtime.signal,
+ 				});
+@@ -32,7 +38,7 @@ export const BUILTIN_COMMIT_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
+ 					.requireGit(draft.root)
+ 					.logSubjects(RECENT_SUBJECTS, runtime.signal)
+ 					.catch(() => []);
+-				const instructions = command.args.trim();
++				const { instructions } = parseCommitArgs(command.args);
+ 				return { prompt: prompt.render(commitRequestTemplate, { summary: draft.summary(), recent, instructions }) };
+ 			} catch (error) {
+ 				return usage(errorMessage(error), runtime);
+diff --git a/packages/coding-agent/src/slash-commands/builtin-control.ts b/packages/coding-agent/src/slash-commands/builtin-control.ts
+index 58203b82f3..2325f1c696 100644
+--- a/packages/coding-agent/src/slash-commands/builtin-control.ts
++++ b/packages/coding-agent/src/slash-commands/builtin-control.ts
+@@ -21,7 +21,7 @@ function advisorUnsettledCount(session: AgentSessionHandle): number {
+  * against that same live set, so a pre-live or stale `running` ref still
+  * counts through its job. Advisors of the root and every live subagent count.
+  */
+-function pauseWorkStatus(root: AgentSession): PauseWorkStatus {
++export function pauseWorkStatus(root: AgentSession): PauseWorkStatus {
+ 	const registry = AgentRegistry.global();
+ 	const liveSubagents = registry.list().filter(ref => ref.kind === "sub" && registry.isRunning(ref));
+ 	const liveSubagentIds = new Set(liveSubagents.map(ref => ref.id));
+diff --git a/packages/coding-agent/src/slash-commands/builtin-modes.ts b/packages/coding-agent/src/slash-commands/builtin-modes.ts
+index f9dd630d7f..071e8163f4 100644
+--- a/packages/coding-agent/src/slash-commands/builtin-modes.ts
++++ b/packages/coding-agent/src/slash-commands/builtin-modes.ts
+@@ -415,6 +415,10 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
+ 		icon: "model",
+ 		description: "Switch model for this session",
+ 		acpDescription: "Show current model selection",
++		inlineHint: "[provider/model]",
++		// `handle` implements the argument form, so headless callers (Harness
++		// operator manifest) must be allowed to pass a selector.
++		allowArgs: true,
+ 		getTuiAutocompleteDescription: runtime => {
+ 			const model = runtime.ctx.viewSession.model;
+ 			return model ? `Model: ${model.provider}/${model.id}` : "Model: none selected";
+diff --git a/packages/coding-agent/src/thread/services/async-jobs-protocol.ts b/packages/coding-agent/src/thread/services/async-jobs-protocol.ts
+index c80015ea4e..48abb383fa 100644
+--- a/packages/coding-agent/src/thread/services/async-jobs-protocol.ts
++++ b/packages/coding-agent/src/thread/services/async-jobs-protocol.ts
+@@ -119,6 +119,7 @@ export type AsyncJobManagerProtocol = {
+ 	hasWidgets: RpcMethod<[], boolean>;
+ 	atCapacity: RpcMethod<[], boolean>;
+ 	onJobSettled: RpcMethod<[listener: WireCallback<[]>], WireUnsubscribe>;
++	onChange: RpcMethod<[listener: WireCallback<[]>], WireUnsubscribe>;
+ 	register: RpcMethod<
+ 		[type: AsyncJobType, label: string, run: WireJobRun, options: WireRegisterOptions | undefined],
+ 		string
+diff --git a/packages/coding-agent/src/thread/services/async-jobs-remote.ts b/packages/coding-agent/src/thread/services/async-jobs-remote.ts
+index 50b519bf75..d060171488 100644
+--- a/packages/coding-agent/src/thread/services/async-jobs-remote.ts
++++ b/packages/coding-agent/src/thread/services/async-jobs-remote.ts
+@@ -231,6 +231,10 @@ export class RemoteAsyncJobManager implements AsyncJobManagerApi {
+ 		return this.#remote.callSync("atCapacity");
+ 	}
+ 
++	onChange(listener: () => void): () => void {
++		return localUnsubscribe(this.#remote.callSync("onChange", listener));
++	}
++
+ 	onJobSettled(listener: () => void): () => void {
+ 		return localUnsubscribe(this.#remote.callSync("onJobSettled", listener));
+ 	}
+diff --git a/packages/coding-agent/src/thread/services/async-jobs.ts b/packages/coding-agent/src/thread/services/async-jobs.ts
+index 596c04ad42..ee905cf489 100644
+--- a/packages/coding-agent/src/thread/services/async-jobs.ts
++++ b/packages/coding-agent/src/thread/services/async-jobs.ts
+@@ -197,6 +197,11 @@ function serveManager(threadId: ThreadId): RpcServe<AsyncJobManager, AsyncJobMan
+ 	return {
+ 		hasWidgets: manager => manager.widgets !== undefined,
+ 		atCapacity: manager => manager.atCapacity,
++		onChange: (manager, listener) =>
++			cleanups.track(
++				threadId,
++				manager.onChange(() => ignoreSettle(listener())),
++			),
+ 		onJobSettled: (manager, listener) =>
+ 			cleanups.track(
+ 				threadId,
+diff --git a/packages/coding-agent/test/interactive-mode-loop.test.ts b/packages/coding-agent/test/interactive-mode-loop.test.ts
+index d484e3d4a6..9def06dd47 100644
+--- a/packages/coding-agent/test/interactive-mode-loop.test.ts
++++ b/packages/coding-agent/test/interactive-mode-loop.test.ts
+@@ -12,6 +12,7 @@ import type { SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
+ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
++import { HarnessLoopService } from "@oh-my-pi/pi-coding-agent/harness/services/loop-service";
+ import { TempDir } from "@oh-my-pi/pi-utils";
+ 
+ import { cfgLoopMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
+@@ -29,6 +30,49 @@ describe("InteractiveMode loop auto-submit", () => {
+ 	let tempDir: TempDir;
+ 	let pendingInput: Promise<SubmittedUserInput> | undefined;
+ 
++	it("delegates Harness Host TUI loop configuration and pause to the shared Runtime service", async () => {
++		const service = new HarnessLoopService({
++			action: () => "prompt",
++			isBlocked: () => false,
++			isVibeActive: () => false,
++			submitPrompt: () => {},
++			compact: () => {},
++			reset: () => {},
++			nowMs: Date.now,
++			setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
++			clearTimer: timer => clearTimeout(timer as NodeJS.Timeout),
++			evaluateCondition: async () => ({ kind: "continue" }),
++		});
++		const sharedMode = new InteractiveMode(
++			session,
++			"test",
++			undefined,
++			undefined,
++			undefined,
++			undefined,
++			undefined,
++			undefined,
++			service,
++		);
++		sharedMode.ui.requestRender = vi.fn();
++		const setLoopModeStatus = vi.spyOn(sharedMode.statusLine, "setLoopModeStatus");
++		await sharedMode.handleLoopCommand("3 --until 'test -f done'");
++		expect(sharedMode.loopLimit).toEqual({ kind: "iterations", initial: 3, remaining: 3 });
++		expect(service.state()).toMatchObject({ status: "waiting", condition: { command: "test -f done", until: true } });
++		sharedMode.setLoopPrompt("shared prompt");
++		expect(service.state()).toMatchObject({ status: "running", prompt: "shared prompt" });
++		sharedMode.pauseLoop();
++		expect(service.state()?.status).toBe("paused");
++		service.capturePrompt("bridge prompt");
++		expect(sharedMode.loopPrompt).toBe("bridge prompt");
++		sharedMode.disableLoopMode();
++		expect(service.state()).toBeUndefined();
++		expect(sharedMode.loopModeEnabled).toBe(false);
++		expect(setLoopModeStatus).toHaveBeenLastCalledWith(undefined);
++		sharedMode.stop();
++		service.dispose();
++	});
++
+ 	beforeAll(async () => {
+ 		initTheme();
+ 		resetSettingsForTest();
+diff --git a/packages/coding-agent/test/modes/components/pause-screen.test.ts b/packages/coding-agent/test/modes/components/pause-screen.test.ts
+index 7bede989d1..138bbfb624 100644
+--- a/packages/coding-agent/test/modes/components/pause-screen.test.ts
++++ b/packages/coding-agent/test/modes/components/pause-screen.test.ts
+@@ -568,12 +568,16 @@ describe("pause screen", () => {
+ 			expect(agentPauseGate.paused).toBe(false);
+ 		});
+ 
+-		it("is a no-op when the gate is already engaged elsewhere", async () => {
++		it("attaches to an existing Bridge pause epoch and lets the TUI resume it", async () => {
+ 			agentPauseGate.pause();
+ 			const { host, shown } = makeHost();
+-			await runPauseScreen(host); // must resolve immediately, not park
+-			expect(shown.length).toBe(0);
+-			expect(agentPauseGate.paused).toBe(true); // foreign pause not stolen
++			const run = runPauseScreen(host);
++			await Bun.sleep(1);
++			expect(shown.length).toBe(1);
++			const component = shown[0];
++			if (component instanceof PauseScreenComponent) component.handleInput("\x1b");
++			await run;
++			expect(agentPauseGate.paused).toBe(false);
+ 		});
+ 	});
+ });
+diff --git a/packages/tui/src/charts/chart-plan.ts b/packages/tui/src/charts/chart-plan.ts
+index 403ecc3141..0b1feb70d6 100644
+--- a/packages/tui/src/charts/chart-plan.ts
++++ b/packages/tui/src/charts/chart-plan.ts
+@@ -118,13 +118,13 @@ export interface ChartPlan {
+ 	/** Column naming each category (or holding the x values of a line); rows are numbered without one. */
+ 	readonly label: number | undefined;
+ 	/** Columns joined to the label to tell rows apart (`Sonnet 5.5 · bash`); none by default. */
+-	readonly qualifiers?: readonly number[];
++	readonly qualifiers?: readonly number[] | undefined;
+ 	/**
+ 	 * Naming column whose values nest the rows: rows regroup by its values in
+ 	 * order of first appearance (table order within each), and a label column
+ 	 * writes each value once beside its block. Lines keep their x order and ignore it.
+ 	 */
+-	readonly group?: number;
++	readonly group?: number | undefined;
+ 	/**
+ 	 * Plotted columns, in order; a `change` measures the rest against the first (or its `a → b` cells),
+ 	 * a `slope` runs through them as stages, and a `butterfly` draws the first leftward (the losing side).
+@@ -135,7 +135,7 @@ export interface ChartPlan {
+ 	 * In | Iter1 Tokens In`): the baseline column of each series, in order, so
+ 	 * each series is measured against its own before column instead of the first.
+ 	 */
+-	readonly baselines?: readonly number[];
++	readonly baselines?: readonly number[] | undefined;
+ 	/** Each data row is its own series (a metric with its own unit) and the plotted columns are the categories. */
+ 	readonly transpose: boolean;
+ 	/**
+@@ -144,25 +144,25 @@ export interface ChartPlan {
+ 	 * at most {@link MAX_PANELS} series draws as a grid of bars instead, each
+ 	 * column on its own axis: its columns are different quantities.
+ 	 */
+-	readonly shading?: Shading;
++	readonly shading?: Shading | undefined;
+ 	/**
+ 	 * Rows whose `column` cell reads `value` are the reference the others are
+ 	 * read against (`Harness` = `baseline`), one per group; none by default.
+ 	 */
+-	readonly reference?: RowReference;
++	readonly reference?: RowReference | undefined;
+ 	/**
+ 	 * Rows ranked by a plotted column instead of table order (rankings,
+ 	 * leaderboards); within each group when grouped. Lines and scatters keep
+ 	 * their x order, `change` charts table order. Table order by default: most
+ 	 * tables are deliberately ordered.
+ 	 */
+-	readonly order?: RowOrder;
++	readonly order?: RowOrder | undefined;
+ 	/**
+ 	 * `stacked`: the column the plotted parts make up (`Total`), labelling each
+ 	 * bar with its written figure and drawing any rest it holds beyond the parts
+ 	 * as an unlabelled track. Without it a bar ends at the parts' sum.
+ 	 */
+-	readonly whole?: number;
++	readonly whole?: number | undefined;
+ 	/**
+ 	 * `stacked`: each bar spans 100% of its category's total (its whole, else
+ 	 * its parts' sum), so rows of very different sizes compare by their mix.
+@@ -173,28 +173,28 @@ export interface ChartPlan {
+ 	 * of different sizes compare by shape. Absent: normalized when two or more
+ 	 * count columns' totals lie {@link MIX_SPREAD}× apart or more.
+ 	 */
+-	readonly normalize?: boolean;
++	readonly normalize?: boolean | undefined;
+ 	/**
+ 	 * `timeline`: the column holding each segment's start (`Offset`, `Start`),
+ 	 * in the plotted column's dimension; without it segments follow one another
+ 	 * in table order from zero.
+ 	 */
+-	readonly offsets?: number;
++	readonly offsets?: number | undefined;
+ 	/**
+ 	 * `waterfall`: the row (by index) of a cap the steps build toward (`Hard
+ 	 * cap`, `Budget`), drawn as a rule across the steps instead of a step.
+ 	 */
+-	readonly limit?: number;
++	readonly limit?: number | undefined;
+ 	/**
+ 	 * `bullet`: the column holding each row's target (`Target` `≤ 200 µs`, `§6
+ 	 * budget`, `Limit`), which the one plotted series is measured against
+ 	 * ({@link findTarget}).
+ 	 */
+-	readonly target?: number;
++	readonly target?: number | undefined;
+ 	/** Which way each column improves, by column index; neutral columns absent. */
+-	readonly polarity?: Readonly<Record<number, Polarity>>;
++	readonly polarity?: Readonly<Record<number, Polarity>> | undefined;
+ 	/** Which way each row's metric improves, by row index, where rows are metrics ({@link rowsAreMetrics}). */
+-	readonly rowPolarity?: Readonly<Record<number, Polarity>>;
++	readonly rowPolarity?: Readonly<Record<number, Polarity>> | undefined;
+ 	/**
+ 	 * What competes, so each contest's best value (by {@link polarity}) is
+ 	 * marked: `rows` are alternatives scored by every measure (models,
+@@ -202,13 +202,13 @@ export interface ChartPlan {
+ 	 * on every row (`Record | Map | string[]` per scenario: the best per row).
+ 	 * Absent for parts of a whole, steps, or items described side by side.
+ 	 */
+-	readonly rivals?: Rivals;
++	readonly rivals?: Rivals | undefined;
+ 	/** Rows the table is about (the recommended option, `current`, `ours`, the bolded row), by row index. */
+-	readonly focus?: readonly number[];
++	readonly focus?: readonly number[] | undefined;
+ 	/** Column whose status cells (`ok`, `FAIL`, `pending`, ✅) badge each row's name. */
+-	readonly status?: number;
++	readonly status?: number | undefined;
+ 	/** The chart's title: one fact stated over it, the text of one of {@link tableTakeaways}; none by default. */
+-	readonly title?: string;
++	readonly title?: string | undefined;
+ }
+ 
+ /** A naming cell marking reference rows: column index and cell text. */
+@@ -241,9 +241,9 @@ export interface ChartPoint {
+ 	/** The table bolded the cell. */
+ 	readonly emphasis: boolean;
+ 	/** Upper end of a range cell (`24–72 h`). */
+-	readonly upper?: number;
++	readonly upper?: number | undefined;
+ 	/** The spread a `± e` cell states around the value (`3.67s ± 0.69`), drawn as a whisker either side of it. */
+-	readonly error?: number;
++	readonly error?: number | undefined;
+ }
+ 
+ /**
+@@ -259,7 +259,7 @@ export type Bound = "max" | "min";
+  * header nor the measure's polarity says which side.
+  */
+ export interface ChartTarget extends ChartPoint {
+-	readonly bound?: Bound;
++	readonly bound?: Bound | undefined;
+ }
+ 
+ export interface ChartSeries {
+@@ -272,9 +272,9 @@ export interface ChartSeries {
+ 	/** Status words standing in for a value (`TIMEOUT`, `OOM`), one per category. */
+ 	readonly notes: readonly (string | undefined)[];
+ 	/** Which way the series improves; absent when neutral. */
+-	readonly polarity?: Polarity;
++	readonly polarity?: Polarity | undefined;
+ 	/** Category of the series' best value, marked when its rows are rivals; absent when tied or neutral. */
+-	readonly best?: number;
++	readonly best?: number | undefined;
+ }
+ 
+ /** Consecutive categories sharing a leading name, which a label column writes once beside its members. */
+@@ -300,44 +300,46 @@ export interface ChartSpec {
+ 	 * a group, under a leading part their names share (`glm new`, `glm prior` →
+ 	 * `glm` → `new`, `prior`). Absent when neither applies, or when each series is a row.
+ 	 */
+-	readonly groups?: readonly ChartGroup[];
++	readonly groups?: readonly ChartGroup[] | undefined;
+ 	readonly series: readonly ChartSeries[];
+ 	/**
+ 	 * Numeric x positions of a line, the x measure of a scatter, or each
+ 	 * `timeline` segment's start ({@link ChartPlan.offsets}), one per category.
+ 	 */
+-	readonly x?: {
+-		readonly name: string;
+-		readonly dim: Dimension;
+-		readonly unit: string;
+-		readonly values: readonly number[];
+-	};
++	readonly x?:
++		| {
++				readonly name: string;
++				readonly dim: Dimension;
++				readonly unit: string;
++				readonly values: readonly number[];
++		  }
++		| undefined;
+ 	/** Total/summary rows, printed under the chart instead of skewing its scale. */
+-	readonly caption?: string;
++	readonly caption?: string | undefined;
+ 	/** Name of the category axis: the headers of the columns naming the rows. */
+ 	readonly axis: string;
+ 	/** What a `change` measures against (its baseline column); its points are factors of it. */
+-	readonly baseline?: string;
++	readonly baseline?: string | undefined;
+ 	/**
+ 	 * The `change` is measured against a rival column — the one leading most rows — rather than a before
+ 	 * state: its bars are gaps to that rival (`+22%` slower than `tsc-rs, 8`), never improvements or regressions.
+ 	 */
+-	readonly rival?: boolean;
++	readonly rival?: boolean | undefined;
+ 	/** How a heatmap shades its cells; `shared` when absent. */
+-	readonly shading?: Shading;
++	readonly shading?: Shading | undefined;
+ 	/**
+ 	 * Indices of the categories the others read against ({@link ChartPlan.reference}),
+ 	 * at most one per group: bars and bar grids mark each with a dashed rule at
+ 	 * its value through its group, and single bars print the others' change from it.
+ 	 */
+-	readonly reference?: readonly number[];
++	readonly reference?: readonly number[] | undefined;
+ 	/** `stacked`: the whole each category's parts make up ({@link ChartPlan.whole}), one point per category. */
+-	readonly whole?: ChartSeries;
++	readonly whole?: ChartSeries | undefined;
+ 	/**
+ 	 * `stacked`: each bar is its category's mix, parts as percentages of its total; `histogram`: each
+ 	 * distribution as shares of its own total ({@link ChartPlan.normalize}).
+ 	 */
+-	readonly normalized?: boolean;
++	readonly normalized?: boolean | undefined;
+ 	/**
+ 	 * Outcome of each part of a whole, coloring it `success`/`warning`/`error`/
+ 	 * `muted` instead of a series color: per series of a `stacked` chart
+@@ -345,34 +347,34 @@ export interface ChartSpec {
+ 	 * `undefined` for a part naming none. Absent unless most parts read as
+ 	 * statuses ({@link outcomeTones}) and they are not all alike.
+ 	 */
+-	readonly tones?: readonly (Status | undefined)[];
++	readonly tones?: readonly (Status | undefined)[] | undefined;
+ 	/**
+ 	 * `waterfall`: the bar the steps build to — the table's total row as
+ 	 * written, else the steps' sum written like their figures (`~$8.0M`).
+ 	 */
+-	readonly total?: { readonly name: string; readonly point: ChartPoint };
++	readonly total?: { readonly name: string; readonly point: ChartPoint } | undefined;
+ 	/**
+ 	 * `range`: the central estimate of the first series' intervals, one point per category, from a
+ 	 * plotted column whose values all fall inside them (`≈ $6,700` beside `$6.0k–7.3k`); drawn as a tick.
+ 	 */
+-	readonly estimate?: ChartSeries;
++	readonly estimate?: ChartSeries | undefined;
+ 	/**
+ 	 * `bullet`: each category's target ({@link ChartPlan.target}), against the
+ 	 * first series' point; `null` where the row states none in its unit.
+ 	 */
+-	readonly targets?: readonly (ChartTarget | null)[];
++	readonly targets?: readonly (ChartTarget | null)[] | undefined;
+ 	/** `bullet`: what the targets are called, lowercased from their header (`target`, `budget`, `limit`). */
+-	readonly targetName?: string;
++	readonly targetName?: string | undefined;
+ 	/**
+ 	 * The one fact the chart states over it ({@link ChartPlan.title}: `Every
+ 	 * scenario improved (median 14× less)`); no title line without one.
+ 	 */
+-	readonly title?: string;
++	readonly title?: string | undefined;
+ 	/**
+ 	 * Muted note beside the title. Absent: the renderer writes how the chart
+ 	 * encodes the data where that is not obvious (`log scale`, `scaled per column`).
+ 	 */
+-	readonly subtitle?: string;
++	readonly subtitle?: string | undefined;
+ 	/**
+ 	 * The two series of a `paired` chart are one quantity before and after
+ 	 * (`a → b` cells, before/after headers per {@link isTransition}): drawn as a
+@@ -383,38 +385,38 @@ export interface ChartSpec {
+ 	 * the judge's `pair`) draw as `paired` at all. A `ladder`'s two ladders
+ 	 * (`before fix` | `after fix`) by the same reading: the first muted.
+ 	 */
+-	readonly transition?: boolean;
++	readonly transition?: boolean | undefined;
+ 	/** Marks laid over the chart by a planner: reference lines, highlighted categories, callouts. */
+-	readonly annotations?: readonly ChartAnnotation[];
++	readonly annotations?: readonly ChartAnnotation[] | undefined;
+ 	/**
+ 	 * Each series is a table row (a metric in its own unit) and the categories
+ 	 * are the plotted columns ({@link ChartPlan.transpose}); {@link axis} then
+ 	 * names the series rather than the categories.
+ 	 */
+-	readonly transposed?: boolean;
++	readonly transposed?: boolean | undefined;
+ 	/** Which way each category's metric improves where categories are metrics or items moving by a factor (`change`); neutral absent. */
+-	readonly categoryPolarity?: readonly (Polarity | undefined)[];
++	readonly categoryPolarity?: readonly (Polarity | undefined)[] | undefined;
+ 	/**
+ 	 * Per category, the series holding its best value where the plotted
+ 	 * columns are rivals sharing a unit and a polarity; absent where tied.
+ 	 */
+-	readonly leaders?: readonly (number | undefined)[];
++	readonly leaders?: readonly (number | undefined)[] | undefined;
+ 	/** Status of each category (`ok`, `FAIL`, `pending`), badged beside its name. */
+-	readonly status?: readonly (Status | undefined)[];
++	readonly status?: readonly (Status | undefined)[] | undefined;
+ 	/** Header of the column the {@link status} badges come from, named in their key. */
+-	readonly statusName?: string;
++	readonly statusName?: string | undefined;
+ 	/**
+ 	 * Status columns the chart does not plot (`Preserves layout? | Machine-parseable? | Renderable?`),
+ 	 * drawn as a matrix of status dots between the row names and the marks, each column headed by its
+ 	 * name; two to {@link MAX_MATRIX}, in place of the single {@link status} badge.
+ 	 */
+-	readonly matrix?: readonly StatusColumn[];
++	readonly matrix?: readonly StatusColumn[] | undefined;
+ 	/**
+ 	 * `ladder`: the series of each ladder drawn on every category, lowest quantile first; one ladder per
+ 	 * condition measured (`Startup p50 | Startup p95 | Wall p50 | Wall p95`), named by it (empty when
+ 	 * there is one). Each series is named by its quantile (`p50`, `max`).
+ 	 */
+-	readonly ladders?: readonly ChartLadder[];
++	readonly ladders?: readonly ChartLadder[] | undefined;
+ }
+ 
+ /** One measurement's quantiles in a `ladder` chart: its name and its series, lowest quantile first. */
+@@ -454,10 +456,15 @@ export type ChartAnnotation =
+ 			readonly value: number;
+ 			readonly label: string;
+ 			/** Series whose axis the value is on, for charts with an axis per unit (`range` bands); 0 by default. */
+-			readonly series?: number;
++			readonly series?: number | undefined;
+ 	  }
+ 	| { readonly kind: "highlight"; readonly category: number }
+-	| { readonly kind: "callout"; readonly category: number; readonly series?: number; readonly text: string };
++	| {
++			readonly kind: "callout";
++			readonly category: number;
++			readonly series?: number | undefined;
++			readonly text: string;
++	  };
+ 
+ const BEFORE =
+ 	/\b(?:before|old|baseline|base|main|master|prev|previous|original|orig|cold|was|from|v1|stock|default|unpatched|without)\b/i;
+@@ -1062,8 +1069,8 @@ export function outcomeTones(names: readonly string[]): (Status | undefined)[] |
+ interface Flow {
+ 	readonly kind: "timeline" | "waterfall";
+ 	readonly column: TableColumn;
+-	readonly offsets?: number;
+-	readonly limit?: number;
++	readonly offsets?: number | undefined;
++	readonly limit?: number | undefined;
+ }
+ 
+ /**
+@@ -1332,7 +1339,7 @@ function measuredCell(cell: Cell | undefined): NumberCell | undefined {
+  * ≤ 120 ms`), a window (`60–100 ms`), or a bare number; `text` writes a bound as `≤`/`≥`. `undefined` without
+  * one, or for two targets in one cell (`30 / 200 ms`, `1 / 4`).
+  */
+-function targetCell(written: string): { cell: NumberCell; bound?: Bound; text: string } | undefined {
++function targetCell(written: string): { cell: NumberCell; bound?: Bound | undefined; text: string } | undefined {
+ 	const bound = BOUND.exec(written);
+ 	const rest = bound ? written.slice(bound.index + bound[0].length) : written;
+ 	// `≤ 3s / ≤ 6s`: one target per measure of a pair, none for the row.
+@@ -1856,15 +1863,15 @@ const MAX_LADDERS = 3;
+ export interface Rung {
+ 	readonly column: TableColumn;
+ 	/** Which listed value of each cell (`p99` of `79 / 124 µs`); absent when the column holds the quantile alone. */
+-	readonly slot?: number;
++	readonly slot?: number | undefined;
+ 	/** How many values each cell of a listing column holds (the quantiles its header lists). */
+-	readonly slots?: number;
++	readonly slots?: number | undefined;
+ 	/** The quantile as the header writes it (`p50`, `max`). */
+ 	readonly name: string;
+ 	/** Where it ranks: 0 the minimum, 50 the median (or a mean beside quantiles), 100 the maximum. */
+ 	readonly rank: number;
+ 	/** The unit the header gives bare numbers (`cpu p50 / p95 (ms)`): their dimension and base factor. */
+-	readonly scale?: readonly [Dimension, number];
++	readonly scale?: readonly [Dimension, number] | undefined;
+ }
+ 
+ /**
+@@ -1920,7 +1927,7 @@ function quantileRank(word: string): number {
+  * What a header names besides its quantiles (`Startup p95` → `Startup`, `zoom 1, p50 / p95` → `zoom 1`),
+  * and the unit it gives bare numbers (`cpu p50 / p95 (ms)` → milliseconds).
+  */
+-function ladderSubject(rest: string): { name: string; scale?: readonly [Dimension, number] } {
++function ladderSubject(rest: string): { name: string; scale?: readonly [Dimension, number] | undefined } {
+ 	let scale: readonly [Dimension, number] | undefined;
+ 	const words = rest
+ 		.replace(/[()[\],:;]/g, " ")
+@@ -2426,7 +2433,7 @@ function spreadOf(values: readonly number[]): number {
+  * `series` with the first interval series leading, and a series of the same unit whose values all
+  * fall inside its intervals (two at least) taken out as its estimate: `≈ $6,700` beside `$6.0k–7.3k`.
+  */
+-function foldEstimate(series: readonly ChartSeries[]): { series: ChartSeries[]; estimate?: ChartSeries } {
++function foldEstimate(series: readonly ChartSeries[]): { series: ChartSeries[]; estimate?: ChartSeries | undefined } {
+ 	const ranged = series.find(entry => intervalShare([entry]) >= RANGE_SHARE);
+ 	if (!ranged) return { series: [...series] };
+ 	const inside = (entry: ChartSeries) => {
+@@ -4477,7 +4484,7 @@ function changeChart(
+ 	// Each series improves the way its measure does: the compared column's polarity, else its baseline's.
+ 	const improves = (column: TableColumn, before = baseline) =>
+ 		plan.polarity?.[column.index] ?? plan.polarity?.[before.index];
+-	let pairs: { name: string; polarity?: Polarity; at: (row: number) => ChartPoint | undefined }[];
++	let pairs: { name: string; polarity?: Polarity | undefined; at: (row: number) => ChartPoint | undefined }[];
+ 	let against: string;
+ 	let rival = false;
+ 	if (baselines) {
+@@ -4574,7 +4581,7 @@ interface RowNames {
+ 	readonly names: readonly string[];
+ 	/** Headers of the columns the names come from. */
+ 	readonly axis: string;
+-	readonly groups?: readonly ChartGroup[];
++	readonly groups?: readonly ChartGroup[] | undefined;
+ }
+ 
+ /**
+diff --git a/packages/tui/src/charts/chart-svg.ts b/packages/tui/src/charts/chart-svg.ts
+index 43a0f02842..eec99e468f 100644
+--- a/packages/tui/src/charts/chart-svg.ts
++++ b/packages/tui/src/charts/chart-svg.ts
+@@ -190,22 +190,22 @@ interface Layer {
+ 	readonly height: number;
+ 	readonly body: string;
+ 	/** Series keys the header draws beside the title (or under it when they do not fit). */
+-	readonly legend?: readonly LegendItem[];
++	readonly legend?: readonly LegendItem[] | undefined;
+ 	/** A heat scale key the header draws instead of a legend. */
+-	readonly ramp?: RampKey;
++	readonly ramp?: RampKey | undefined;
+ 	/** How the chart encodes its data where that is not obvious (`log scale`); the derived subtitle. */
+-	readonly notes?: readonly string[];
++	readonly notes?: readonly string[] | undefined;
+ }
+ 
+ /** A legend entry: a name beside a filled dot of `color`, or a hollow ring for a transition's start. */
+ interface LegendItem {
+ 	readonly name: string;
+ 	readonly color: string;
+-	readonly ring?: boolean;
++	readonly ring?: boolean | undefined;
+ 	/** Further dot colors drawn beside the first, for marks colored by meaning (a toned end: `success`, `error`). */
+-	readonly tones?: readonly string[];
++	readonly tones?: readonly string[] | undefined;
+ 	/** The dot's opacity, matching a fainter mark (a second part in one outcome color); opaque by default. */
+-	readonly opacity?: number;
++	readonly opacity?: number | undefined;
+ }
+ 
+ /** A heat scale key: the faintest and strongest cells' figures either side of a strip of swatches. */
+@@ -221,7 +221,7 @@ interface Scale {
+ 	readonly ticks: readonly number[];
+ 	readonly log: boolean;
+ 	/** A broken axis: values above `below` jump the gap from `start` to `end` onto a second, zoomed segment. */
+-	readonly cut?: Cut;
++	readonly cut?: Cut | undefined;
+ }
+ 
+ /** Where a broken axis parts its segments: the first ends at `start` (value `below`), the second begins at `end`. */
+@@ -3245,7 +3245,7 @@ interface EndLabel {
+ 	readonly text: string;
+ 	readonly color: string;
+ 	/** The line's name, set before its value when lines are labelled directly instead of through a legend. */
+-	readonly name?: string;
++	readonly name?: string | undefined;
+ }
+ 
+ /**
+@@ -3615,9 +3615,9 @@ function valueScale(
+ 	to: number,
+ 	options: {
+ 		zero: boolean;
+-		breakable?: boolean;
++		breakable?: boolean | undefined;
+ 		/** One tick unit in base units ({@link tickUnit}): a linear axis ticks on nice multiples of it. */
+-		unit?: number;
++		unit?: number | undefined;
+ 	},
+ ): Scale {
+ 	let min = Math.min(...values);
+@@ -4243,7 +4243,11 @@ function groupNameWidth(groups: readonly ChartGroup[]): number {
+  */
+ function tickFormat(
+ 	scale: Scale,
+-	axis: { readonly dim: Dimension; readonly unit: string; readonly points?: readonly (ChartPoint | null)[] },
++	axis: {
++		readonly dim: Dimension;
++		readonly unit: string;
++		readonly points?: readonly (ChartPoint | null)[] | undefined;
++	},
+ ): (tick: number) => string {
+ 	const unit = binaryBytes(axis) ? "iB" : axis.unit;
+ 	const format = (ticks: readonly number[], magnitude: number) =>
+@@ -4260,7 +4264,10 @@ function tickFormat(
+ }
+ 
+ /** Whether `axis` holds sizes the table wrote in binary units (`GiB`, `MiB`), which its ticks then read in too. */
+-function binaryBytes(axis: { readonly dim: Dimension; readonly points?: readonly (ChartPoint | null)[] }): boolean {
++function binaryBytes(axis: {
++	readonly dim: Dimension;
++	readonly points?: readonly (ChartPoint | null)[] | undefined;
++}): boolean {
+ 	return axis.dim === "bytes" && !!axis.points?.some(point => point && /[KMGTP]iB/i.test(point.text));
+ }
+ 
+@@ -4438,18 +4445,18 @@ function num(value: number): string {
+ }
+ 
+ interface TextStyle {
+-	size?: number;
++	size?: number | undefined;
+ 	fill: string;
+-	anchor?: "start" | "middle" | "end";
+-	weight?: number;
+-	italic?: boolean;
++	anchor?: ("start" | "middle" | "end") | undefined;
++	weight?: number | undefined;
++	italic?: boolean | undefined;
+ }
+ 
+ /** A stretch of one {@link text} set apart from the rest: its own color and/or weight. */
+ interface TextRun {
+ 	readonly content: string;
+-	readonly fill?: string;
+-	readonly weight?: number;
++	readonly fill?: string | undefined;
++	readonly weight?: number | undefined;
+ }
+ 
+ /**
+@@ -4596,7 +4603,7 @@ function barRect(
+ 	height: number,
+ 	fill: string,
+ 	opacity: number,
+-	options: { estimate?: boolean } = {},
++	options: { estimate?: boolean | undefined } = {},
+ ): string {
+ 	if (!options.estimate) return rect(x, y, width, height, fill, opacity);
+ 	const radius = Math.min(RADIUS, width / 2, height / 2);
+diff --git a/packages/tui/src/charts/table-data.ts b/packages/tui/src/charts/table-data.ts
+index 867556874c..068f52fb91 100644
+--- a/packages/tui/src/charts/table-data.ts
++++ b/packages/tui/src/charts/table-data.ts
+@@ -40,28 +40,28 @@ export interface NumberCell {
+ 	/** The number as written, with approximation, sign, currency and unit (`~$250`, `12.5 ms`, `24–72 h`). */
+ 	readonly figure: string;
+ 	/** `a → b`: `b`, in the same base units. */
+-	readonly to?: number;
++	readonly to?: number | undefined;
+ 	/** `a → b`: `b` as written. */
+-	readonly toFigure?: string;
++	readonly toFigure?: string | undefined;
+ 	/** `a–b`: `b`, in the same base units. */
+-	readonly upper?: number;
++	readonly upper?: number | undefined;
+ 	/**
+ 	 * `a/b`: `b`. {@link analyzeTable} reads a score (`12/12`, `154/160`, a mean
+ 	 * like `0.6/4`) as the percent of `b` reached, unless its column also holds a
+ 	 * plain fraction; a pair (`85 / 147` under `Edit / read calls`) keeps `a`.
+ 	 */
+-	readonly denominator?: number;
++	readonly denominator?: number | undefined;
+ 	/**
+ 	 * `a ± e` (`3.67s ± 0.69`, `~404ms ± 60`, `$0.72 (±0.16)`): `e`, in the same base units — the
+ 	 * spread the table states around the value; {@link figure} then writes both (`3.67s ± 0.69`).
+ 	 */
+-	readonly error?: number;
++	readonly error?: number | undefined;
+ 	/**
+ 	 * A slash list of measurements in one unit (`79 / 124 µs`, `1,864 ms /
+ 	 * 2,678 ms`, `**675ms** / 680ms`): every listed value, the first included,
+ 	 * in base units, 2–4 of them. `value` is the first.
+ 	 */
+-	readonly values?: readonly number[];
++	readonly values?: readonly number[] | undefined;
+ }
+ 
+ /** A cell that is not a quantity. */
+@@ -98,7 +98,7 @@ export interface TableColumn {
+ 	 * Per row, the status its cell leads with ({@link cellStatus}), when most
+ 	 * of the column's cells lead with one: a pass/fail or progress column.
+ 	 */
+-	readonly statuses?: readonly (Status | undefined)[];
++	readonly statuses?: readonly (Status | undefined)[] | undefined;
+ 	/** Every numeric data cell holds the same value: an echoed setting, not a measure. */
+ 	readonly constant: boolean;
+ 	/** Share of numeric cells written with an explicit sign. */
+@@ -113,7 +113,7 @@ export interface TableColumn {
+ 	 * (`ratio` 0.997 for `Python (ms)` ÷ `C++ (ms)`, `Speedup` 4.1×: the
+ 	 * numerator's index). Such a column is never a measure of its own.
+ 	 */
+-	readonly restates?: number;
++	readonly restates?: number | undefined;
+ }
+ 
+ /**
+@@ -147,7 +147,7 @@ export interface TableAnalysis {
+ 	/** Total/summary rows (`Total`, `Average`, …), kept out of the scale. */
+ 	readonly totals: readonly number[];
+ 	/** Measure columns adding up to a whole, when the values show it. */
+-	readonly composition?: Composition;
++	readonly composition?: Composition | undefined;
+ }
+ 
+ /**
+diff --git a/packages/tui/src/overlays/pause-screen.ts b/packages/tui/src/overlays/pause-screen.ts
+index 59bedce166..75a09c2879 100644
+--- a/packages/tui/src/overlays/pause-screen.ts
++++ b/packages/tui/src/overlays/pause-screen.ts
+@@ -39,7 +39,13 @@ export interface PauseScreenOptions {
+  * Slice of `InteractiveModeContext` the pause screen drives. Narrow so tests
+  * can exercise the full engage → hold → release lifecycle without a real TUI.
+  */
++export interface PauseScreenControl {
++	state(): { paused: boolean; pausedAt?: string; pauseEpoch?: number };
++	pause(): { pauseEpoch: number };
++	resume(epoch: number): { heldMs: number };
++}
+ export interface PauseScreenHost {
++	readonly pauseControl?: PauseScreenControl;
+ 	ui: {
+ 		showOverlay(component: Component, options?: OverlayOptions): OverlayHandle;
+ 		setFocus(component: Component): void;
+@@ -215,7 +221,8 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
+ 
+ 	/** Start the clock; resolves once the user asks to resume. */
+ 	run(): Promise<void> {
+-		this.#startedAt = agentPauseGate.pausedAt ?? Date.now();
++		const pausedAt = this.host.pauseControl?.state().pausedAt;
++		this.#startedAt = pausedAt === undefined ? (agentPauseGate.pausedAt ?? Date.now()) : Date.parse(pausedAt);
+ 		this.#native = undefined;
+ 		this.#refreshWorkSnapshot();
+ 		this.#timer ??= setInterval(() => {
+@@ -411,12 +418,27 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
+ 
+ /**
+  * Engage the global pause gate and hold the fullscreen pause screen until the
+- * user resumes. No-op when the gate is already engaged. Always releases the
+- * gate on the way out (including teardown throws) — a leaked pause would
+- * freeze every agent in the process with no UI left to release it.
++ * user resumes. If another authorized surface already paused this Runtime, the
++ * TUI attaches to that pause epoch instead of silently doing nothing. Always
++ * releases the observed epoch on the way out (including teardown throws).
+  */
+ export async function runPauseScreen(host: PauseScreenHost, options?: PauseScreenOptions): Promise<void> {
+-	if (!agentPauseGate.pause()) return;
++	const pauseControl = host.pauseControl ?? {
++		state: () => ({ paused: agentPauseGate.paused, pauseEpoch: 0 }),
++		pause: () => {
++			agentPauseGate.pause();
++			return { pauseEpoch: 0 };
++		},
++		resume: (_epoch: number) => ({ heldMs: agentPauseGate.resume() ?? 0 }),
++	};
++	const existing = pauseControl.state();
++	let pauseEpoch: number;
++	if (existing.paused) {
++		if (existing.pauseEpoch === undefined) throw new Error("Paused Runtime has no pause epoch");
++		pauseEpoch = existing.pauseEpoch;
++	} else {
++		pauseEpoch = pauseControl.pause().pauseEpoch;
++	}
+ 	const component = new PauseScreenComponent(host, options);
+ 	const overlay = host.ui.showOverlay(component, {
+ 		width: "100%",
+@@ -432,9 +454,11 @@ export async function runPauseScreen(host: PauseScreenHost, options?: PauseScree
+ 		component.dispose();
+ 		host.ui.setFocus(component);
+ 		overlay.hide();
+-		const heldMs = agentPauseGate.resume();
+-		if (heldMs !== undefined) {
++		try {
++			const { heldMs } = pauseControl.resume(pauseEpoch);
+ 			host.showStatus(`Resumed after ${formatCoarseDuration(heldMs)} — agents are running again.`);
++		} catch {
++			// Another authorized surface may already have resumed this pause epoch.
+ 		}
+ 	}
+ }

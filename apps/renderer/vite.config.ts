@@ -1,0 +1,103 @@
+import { fileURLToPath } from "node:url";
+import { graphicVendorPlugin } from "./graphic-vendor-plugin";
+import { fileViewerVendorPlugin } from "./file-viewer-vendor-plugin";
+import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
+
+// Must stay in lockstep with apps/desktop/src/security.ts RENDERER_CSP.
+// file:// loads do not reliably get webRequest CSP headers, so the packaged
+// index.html carries the policy as a meta tag. `frame-ancestors` is enforced
+// by the desktop response header because browsers ignore it in meta CSP; the
+// statistics page's loopback frame lives in `frame-src` here because listing
+// any source there replaces the `default-src` fallback.
+// Vite dev still needs HMR.
+const PACKAGED_RENDERER_CSP =
+  "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: omp-artifact: omp-file:; media-src 'self' blob: omp-artifact: omp-file:; font-src 'self' data:; connect-src 'self' omp-artifact: omp-file:; frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847; object-src 'none'; base-uri 'self'; form-action 'self'";
+
+function packagedCspPlugin() {
+  return {
+    name: "omp-packaged-csp",
+    apply: "build" as const,
+    transformIndexHtml(html: string) {
+      if (html.includes("Content-Security-Policy")) return html;
+      return html.replace(
+        "<head>",
+        `<head>\n    <meta http-equiv="Content-Security-Policy" content="${PACKAGED_RENDERER_CSP}" />`,
+      );
+    },
+  };
+}
+
+// P0 renderer: a pure browser build with no host-specific coupling. The
+// relative base keeps the same bundle loadable from any origin the shell
+// later serves it from (including file:// during early desktop bring-up).
+export default defineConfig({
+  plugins: [react(), packagedCspPlugin(), graphicVendorPlugin(), fileViewerVendorPlugin()],
+  base: "./",
+  resolve: {
+    alias: [
+      { find: "@oh-my-pi/pi-tui/charts/table-data", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/charts/table-data.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/charts/chart-plan", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/charts/chart-plan.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/charts/chart-svg", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/charts/chart-svg.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/html-form/data", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/html-form/data.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/html-form/model", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/html-form/parse.ts", import.meta.url)) },
+    ],
+  },
+  server: { cors: { origin: ["null", /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/] } },
+  test: {
+    environment: "jsdom",
+    setupFiles: ["src/test/setup.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  },
+  build: {
+    rollupOptions: {
+      input: { index: fileURLToPath(new URL("./index.html", import.meta.url)), graphic: fileURLToPath(new URL("./graphic-preview.html", import.meta.url)) },
+      output: {
+        onlyExplicitManualChunks: true,
+        // Keep the entry under the 500 kB warning: React, xterm, and the
+        // Harness client stay on their own cacheable vendor chunks.
+        // Mermaid is only imported lazily for fenced "mermaid" blocks, so its
+        // whole dependency tree rides its own chunk instead of inflating vendor.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("/three/") || id.includes("\\three\\")) return "three";
+          if (id.includes("@xterm")) return "xterm";
+          if (id.includes("pdfjs-dist")) return "pdf-viewer";
+          const language = /@codemirror[/\\](lang-[^/\\]+|legacy-modes|language-data)/.exec(id);
+          if (language) return `codemirror-${language[1]}`;
+          if (id.includes("@codemirror") || id.includes("@lezer") || /node_modules[/\\]codemirror[/\\]/.test(id)) {
+            return "codemirror";
+          }
+          const mermaidPackages = [
+            "mermaid",
+            "@mermaid-js",
+            "d3",
+            "dagre",
+            "dagre-d3",
+            "graphlib",
+            "cytoscape",
+            "khroma",
+            "dompurify",
+            "katex",
+            "dayjs",
+            "@braintree",
+            "non-layered-tidy-tree-layout",
+            "@iconify",
+            "langium",
+            "stylis",
+            "ts-dedent",
+            "uuid",
+            "delaunator",
+            "internmap",
+            "robust-predicates",
+          ];
+          const pkg = id.split(/node_modules[/\\]/)[1] ?? "";
+          if (mermaidPackages.some((name) => pkg.startsWith(name))) return "mermaid";
+          if (id.includes("@juling-harness")) return "harness-client";
+          if (/node_modules[/\\](?:react-dom|react|scheduler)[/\\]/.test(id)) return "react";
+          return "vendor";
+        },
+      },
+    },
+  },
+});

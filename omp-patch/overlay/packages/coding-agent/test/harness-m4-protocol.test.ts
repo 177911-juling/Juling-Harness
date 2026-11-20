@@ -1,0 +1,171 @@
+import { describe, expect, test } from "bun:test";
+import { parseHarnessRequest, HarnessFrameError } from "@oh-my-pi/pi-coding-agent/harness/bridge-protocol";
+
+const base = { type: "harness.request" as const, requestId: "request-m4", runtimeEpoch: 1 };
+
+describe("M4 Runtime protocol mirror", () => {
+	test("parses interaction responses and explicit TUI transfer", () => {
+		expect(
+			parseHarnessRequest({
+				...base,
+				operation: {
+					kind: "interaction.respond",
+					interactionId: "interaction-1",
+					commandId: "command-1",
+					decision: "submit",
+					value: true,
+				},
+			}).operation.kind,
+		).toBe("interaction.respond");
+		expect(
+			parseHarnessRequest({
+				...base,
+				operation: { kind: "tui.transfer", commandId: "command-1", interactionId: "interaction-1" },
+			}).operation.kind,
+		).toBe("tui.transfer");
+	});
+
+	test("parses fast and prewalk session operations", () => {
+		for (const operation of [
+			{ kind: "session.fast.set", enabled: true },
+			{ kind: "session.prewalk.arm" },
+			{ kind: "session.prewalk.arm", target: "@smol" },
+			{ kind: "session.prewalk.disarm" },
+		]) {
+			expect(parseHarnessRequest({ ...base, operation }).operation.kind as string).toBe(operation.kind);
+		}
+		for (const operation of [
+			{ kind: "session.fast.set", enabled: "yes" },
+			{ kind: "session.prewalk.arm", target: "" },
+			{ kind: "session.prewalk.disarm", extra: true },
+		]) {
+			expect(() => parseHarnessRequest({ ...base, operation })).toThrow(HarnessFrameError);
+		}
+	});
+
+	test("parses session model and thinking operations", () => {
+		for (const operation of [
+			{ kind: "session.model.set", selector: "anthropic/claude-sonnet-4-5" },
+			{ kind: "session.model.set", selector: "anthropic/claude-sonnet-4-5", thinking: "high" },
+			{ kind: "session.thinking.set", level: "auto" },
+			{ kind: "session.thinking.set", level: "off" },
+		]) {
+			expect(parseHarnessRequest({ ...base, operation }).operation.kind as string).toBe(operation.kind);
+		}
+		for (const operation of [
+			{ kind: "session.model.set", selector: "" },
+			{ kind: "session.model.set", selector: "anthropic/claude-sonnet-4-5", thinking: "inherit" },
+			{ kind: "session.thinking.set", level: "inherit" },
+			{ kind: "session.thinking.set", extra: true },
+		]) {
+			expect(() => parseHarnessRequest({ ...base, operation })).toThrow(HarnessFrameError);
+		}
+	});
+
+	test("parses Plan save-and-quit and only the closed Runtime settings allowlist", () => {
+		expect(
+			parseHarnessRequest({
+				...base,
+				operation: { kind: "mode.plan.review.saveAndQuit", path: "notes/plan.md" },
+			}).operation,
+		).toEqual({ kind: "mode.plan.review.saveAndQuit", path: "notes/plan.md" });
+		expect(
+			parseHarnessRequest({
+				...base,
+				operation: { kind: "runtime.settings.get", keys: ["edit.autoRepair.enabled", "extendedContext"] },
+			}).operation,
+		).toMatchObject({ kind: "runtime.settings.get" });
+		expect(
+			parseHarnessRequest({
+				...base,
+				operation: { kind: "runtime.settings.set", key: "edit.autoRepair.enabled", value: true, persist: false },
+			}).operation,
+		).toMatchObject({ kind: "runtime.settings.set", key: "edit.autoRepair.enabled" });
+		for (const operation of [
+			{ kind: "mode.plan.review.saveAndQuit", path: "../escape.md" },
+			{ kind: "mode.plan.review.saveAndQuit", path: "." },
+			{ kind: "mode.plan.review.saveAndQuit", path: " notes/plan.md " },
+			{ kind: "mode.plan.review.saveAndQuit", path: '"notes/plan.md"' },
+			{ kind: "mode.plan.review.saveAndQuit", path: "'notes/plan.md'" },
+			{ kind: "runtime.settings.get", keys: ["unknown.setting"] },
+			{ kind: "runtime.settings.set", key: "unknown.setting", value: true, persist: false },
+			{ kind: "runtime.settings.set", key: "compaction.asyncEnabled", value: "yes", persist: false },
+		]) {
+			expect(() => parseHarnessRequest({ ...base, operation })).toThrow(HarnessFrameError);
+		}
+	});
+
+	test("rejects unknown fields and non-JSON argument values", () => {
+		for (const operation of [
+			{ kind: "interaction.respond", interactionId: "i", commandId: "c", decision: "maybe" },
+			{ kind: "interaction.respond", interactionId: "i", commandId: "c", decision: "cancel", extra: true },
+			{ kind: "operator.invoke", commandId: "builtin.force", arguments: Number.NaN },
+			{ kind: "operator.invoke", commandId: "builtin.force", arguments: new Date() },
+			{ kind: "tui.transfer", commandId: "", interactionId: "i" },
+		]) {
+			expect(() => parseHarnessRequest({ ...base, operation })).toThrow(HarnessFrameError);
+		}
+	});
+
+	test("parses TAN and OMFG composite operations with strict fields", () => {
+		for (const operation of [
+			{ kind: "tan.start", work: "review the tests" },
+			{ kind: "omfg.generate", complaint: "avoid this mistake" },
+			{ kind: "omfg.amend", candidateId: "candidate-1", feedback: "make it narrower" },
+			{ kind: "omfg.commit", candidateId: "candidate-1", scope: "project", overwrite: false },
+		]) {
+			expect(parseHarnessRequest({ ...base, operation }).operation.kind as string).toBe(operation.kind);
+		}
+		for (const operation of [
+			{ kind: "tan.start", work: "" },
+			{ kind: "omfg.generate", complaint: "", extra: true },
+			{ kind: "omfg.amend", candidateId: "candidate-1", feedback: "" },
+			{ kind: "omfg.commit", candidateId: "candidate-1", scope: "machine", overwrite: false },
+		]) {
+			expect(() => parseHarnessRequest({ ...base, operation })).toThrow(HarnessFrameError);
+		}
+	});
+
+	test("parses Agent Hub and Job operations and rejects unsafe lifecycle inputs", () => {
+		for (const operation of [
+			{ kind: "agent.list", includeTerminal: true },
+			{ kind: "agent.spawn", definition: "researcher", assignment: "audit", isolation: "patch", effort: "hi" },
+			{ kind: "agent.send", agentId: "Child-1", expectedGeneration: 1, text: "continue", mode: "steer" },
+			{
+				kind: "agent.send",
+				agentId: "Child-1",
+				expectedGeneration: 1,
+				text: "[图1]",
+				mode: "prompt",
+				images: [{ type: "image", mimeType: "image/png", data: "abc" }],
+			},
+			{ kind: "agent.transcript.read", agentId: "Child-1", limit: 50 },
+			{ kind: "agent.conversation.read", agentId: "Child-1", limit: 50 },
+			{ kind: "agent.subscribe", level: "events" },
+			{ kind: "job.list", ownerAgentId: "Main", includeRecent: true },
+			{ kind: "job.cancel", jobId: "job-1", expectedGeneration: 1 },
+			{ kind: "job.subscribe" },
+		]) {
+			expect(parseHarnessRequest({ ...base, operation }).operation.kind as string).toBe(operation.kind);
+		}
+		for (const operation of [
+			{ kind: "agent.spawn", definition: "researcher", assignment: "audit", isolation: "none" },
+			{ kind: "agent.spawn", definition: "researcher", assignment: "audit", effort: "high" },
+			{ kind: "agent.send", agentId: "Child-1", expectedGeneration: 0, text: "continue", mode: "prompt" },
+			{
+				kind: "agent.send",
+				agentId: "Child-1",
+				expectedGeneration: 1,
+				text: "continue",
+				mode: "prompt",
+				images: [null],
+			},
+			{ kind: "agent.kill", agentId: "Child-1", expectedGeneration: 1, force: true },
+			{ kind: "agent.subscribe", level: "all" },
+			{ kind: "job.cancel", jobId: "job-1", expectedGeneration: 0 },
+			{ kind: "job.subscribe", extra: true },
+		]) {
+			expect(() => parseHarnessRequest({ ...base, operation })).toThrow(HarnessFrameError);
+		}
+	});
+});

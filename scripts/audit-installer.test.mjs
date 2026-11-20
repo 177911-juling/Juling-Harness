@@ -1,0 +1,198 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rename, writeFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+
+import { assertWindowsPtyHelper, auditInstallerOutput, findInstallerExecutable, findPrivateKeyFiles } from "./audit-installer.mjs";
+
+test("Windows x64 packaging must retain the WinPTY helper outside asar", async () => {
+  const unpacked = await mkdtemp(join(tmpdir(), "omp-audit-winpty-"));
+  assert.throws(() => assertWindowsPtyHelper(unpacked, "x64"), /winpty-agent\.exe is missing/u);
+  const directory = join(unpacked, "resources", "app.asar.unpacked", "node_modules", "node-pty", "build", "Release");
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "winpty-agent.exe"), "packaged-helper-fixture");
+  assert.doesNotThrow(() => assertWindowsPtyHelper(unpacked, "x64"));
+  const prebuilt = join(unpacked, "resources", "app.asar.unpacked", "node_modules", "node-pty", "prebuilds", "win32-x64");
+  await mkdir(prebuilt, { recursive: true });
+  await rename(join(directory, "winpty-agent.exe"), join(prebuilt, "winpty-agent.exe"));
+  assert.doesNotThrow(() => assertWindowsPtyHelper(unpacked, "x64"));
+  // Windows ARM64 starts at Windows 11 and uses ConPTY, not the x64 WinPTY helper.
+  assert.doesNotThrow(() => assertWindowsPtyHelper(join(unpacked, "arm64"), "arm64"));
+});
+
+test("the installer audit selects the current version and architecture even when older Setup files remain", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-audit-version-"));
+  for (const name of ["Juling-Harness-Setup-0.1.5-windows-x64.exe", "Juling-Harness-Setup-0.1.14-windows-x64.exe", "Juling-Harness-Setup-0.1.14-windows-arm64.exe"]) await writeFile(join(root, name), "fixture");
+  assert.equal(findInstallerExecutable(root, "0.1.14", "x64"), join(root, "Juling-Harness-Setup-0.1.14-windows-x64.exe"));
+  assert.equal(findInstallerExecutable(root, "0.1.14", "arm64"), join(root, "Juling-Harness-Setup-0.1.14-windows-arm64.exe"));
+  assert.throws(() => findInstallerExecutable(root, "0.1.15", "x64"), /NSIS Setup exe missing/);
+});
+
+test("findPrivateKeyFiles reports a PEM private key and ignores a public key", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-audit-keys-"));
+  await mkdir(join(root, "runtime-keys"), { recursive: true });
+  await writeFile(join(root, "runtime-keys", "trusted-public.pem"), "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----\n");
+  await writeFile(join(root, "runtime-keys", "signing-private.pem"), "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----\n");
+  const hits = findPrivateKeyFiles(root).map((path) => path.replaceAll("\\", "/"));
+  assert.ok(hits.some((path) => path.endsWith("signing-private.pem")));
+  assert.equal(
+    hits.some((path) => path.endsWith("trusted-public.pem")),
+    false,
+  );
+});
+
+test("auditInstallerOutput fails closed when the renderer extraResources tree is missing", async () => {
+  const output = await mkdtemp(join(tmpdir(), "omp-audit-out-"));
+  await mkdir(join(output, "win-unpacked"), { recursive: true });
+  await writeFile(join(output, "win-unpacked", "Juling Harness.exe"), "fake-exe\n");
+  await writeFile(join(output, "Juling-Harness-Setup-0.1.0-win-x64.exe"), "fake-setup\n");
+  await assert.throws(
+    () => auditInstallerOutput(output),
+    /Renderer extraResources missing/u,
+  );
+});
+
+test("auditInstallerOutput fails when trusted-keys.json is missing", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { SERIES_JSON_PATH, VENDOR_CODING_AGENT_PACKAGE_JSON, deriveRuntimeVersion } = await import("./runtime-artifact.mjs");
+  const output = await mkdtemp(join(tmpdir(), "omp-audit-no-tk-"));
+  const unpacked = join(output, "win-unpacked");
+  await mkdir(join(unpacked, "resources", "renderer", "dist"), { recursive: true });
+  await mkdir(join(unpacked, "resources", "app.asar.unpacked", "dist"), { recursive: true });
+  await writeFile(join(unpacked, "Juling Harness.exe"), "fake-exe\n");
+  await writeFile(join(output, "Juling-Harness-Setup-0.1.0-win-x64.exe"), "fake-setup\n");
+  await writeFile(
+    join(unpacked, "resources", "renderer", "dist", "index.html"),
+    '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'"></head></html>',
+  );
+  await writeFile(join(unpacked, "resources", "app.asar.unpacked", "dist", "preload.cjs"), "preload");
+  await mkdir(join(unpacked, "resources", "app"), { recursive: true });
+  await writeFile(join(unpacked, "resources", "app", "package.json"), JSON.stringify({ main: "./dist/src/main.js" }));
+
+  const series = JSON.parse(readFileSync(SERIES_JSON_PATH, "utf8"));
+  const vendorPkg = JSON.parse(readFileSync(VENDOR_CODING_AGENT_PACKAGE_JSON, "utf8"));
+  const expectedVersion = deriveRuntimeVersion(vendorPkg.version, series);
+
+  const versionDir = join(unpacked, "runtime", "versions", expectedVersion);
+  await mkdir(versionDir, { recursive: true });
+  await writeFile(join(versionDir, "juling.exe"), "juling");
+  await writeFile(
+    join(versionDir, "runtime-manifest.json"),
+    JSON.stringify({ runtimeVersion: expectedVersion, entrypoint: "juling.exe" }),
+  );
+
+  const keysDir = join(unpacked, "runtime-keys");
+  await mkdir(keysDir, { recursive: true });
+  await writeFile(join(keysDir, "key-id.txt"), "test-key\n");
+  await writeFile(join(keysDir, "trusted-public.pem"), "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----\n");
+
+  assert.throws(
+    () => auditInstallerOutput(output),
+    /trusted-keys\.json missing/u,
+  );
+});
+
+test("auditInstallerOutput fails when a trusted key contains a private key marker", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { SERIES_JSON_PATH, VENDOR_CODING_AGENT_PACKAGE_JSON, deriveRuntimeVersion } = await import("./runtime-artifact.mjs");
+  const output = await mkdtemp(join(tmpdir(), "omp-audit-priv-tk-"));
+  const unpacked = join(output, "win-unpacked");
+  await mkdir(join(unpacked, "resources", "renderer", "dist"), { recursive: true });
+  await mkdir(join(unpacked, "resources", "app.asar.unpacked", "dist"), { recursive: true });
+  await writeFile(join(unpacked, "Juling Harness.exe"), "fake-exe\n");
+  await writeFile(join(output, "Juling-Harness-Setup-0.1.0-win-x64.exe"), "fake-setup\n");
+  await writeFile(
+    join(unpacked, "resources", "renderer", "dist", "index.html"),
+    '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'"></head></html>',
+  );
+  await writeFile(join(unpacked, "resources", "app.asar.unpacked", "dist", "preload.cjs"), "preload");
+  await mkdir(join(unpacked, "resources", "app"), { recursive: true });
+  await writeFile(join(unpacked, "resources", "app", "package.json"), JSON.stringify({ main: "./dist/src/main.js" }));
+
+  const series = JSON.parse(readFileSync(SERIES_JSON_PATH, "utf8"));
+  const vendorPkg = JSON.parse(readFileSync(VENDOR_CODING_AGENT_PACKAGE_JSON, "utf8"));
+  const expectedVersion = deriveRuntimeVersion(vendorPkg.version, series);
+
+  const versionDir = join(unpacked, "runtime", "versions", expectedVersion);
+  await mkdir(versionDir, { recursive: true });
+  await writeFile(join(versionDir, "juling.exe"), "juling");
+  await writeFile(
+    join(versionDir, "runtime-manifest.json"),
+    JSON.stringify({ runtimeVersion: expectedVersion, entrypoint: "juling.exe" }),
+  );
+
+  const keysDir = join(unpacked, "runtime-keys");
+  await mkdir(keysDir, { recursive: true });
+  await writeFile(join(keysDir, "key-id.txt"), "test-key\n");
+  await writeFile(join(keysDir, "trusted-public.pem"), "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----\n");
+  await writeFile(
+    join(keysDir, "trusted-keys.json"),
+    JSON.stringify({
+      schema: 1,
+      activeKeyId: "test-key",
+      keys: { "test-key": "bad-key.pem" },
+    }),
+  );
+  await writeFile(
+    join(keysDir, "bad-key.pem"),
+    "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----\n-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----\n",
+  );
+
+  assert.throws(
+    () => auditInstallerOutput(output),
+    /contains a private key marker/u,
+  );
+});
+
+test("auditInstallerOutput fails when packaged package.json main entrypoint is invalid", async () => {
+  const output = await mkdtemp(join(tmpdir(), "omp-audit-main-"));
+  const unpacked = join(output, "win-unpacked");
+  await mkdir(join(unpacked, "resources", "renderer", "dist"), { recursive: true });
+  await mkdir(join(unpacked, "resources", "app.asar.unpacked", "dist"), { recursive: true });
+  await mkdir(join(unpacked, "resources", "app"), { recursive: true });
+  await writeFile(join(unpacked, "Juling Harness.exe"), "fake-exe\n");
+  await writeFile(join(output, "Juling-Harness-Setup-0.1.0-win-x64.exe"), "fake-setup\n");
+  await writeFile(
+    join(unpacked, "resources", "renderer", "dist", "index.html"),
+    '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'"></head></html>',
+  );
+  await writeFile(join(unpacked, "resources", "app.asar.unpacked", "dist", "preload.cjs"), "preload");
+  await writeFile(join(unpacked, "resources", "app", "package.json"), JSON.stringify({ main: "./invalid.js" }));
+
+  assert.throws(
+    () => auditInstallerOutput(output),
+    /package\.json main entrypoint must be '\.\/dist\/src\/main\.js'/u,
+  );
+});
+
+test("auditInstallerOutput rejects a malformed asar containing plausible entrypoint text", async () => {
+  const output = await mkdtemp(join(tmpdir(), "omp-audit-corrupt-asar-"));
+  const resources = join(output, "win-unpacked", "resources");
+  await mkdir(join(resources, "renderer", "dist"), { recursive: true });
+  await writeFile(join(output, "win-unpacked", "Juling Harness.exe"), "fake-exe");
+  await writeFile(join(resources, "renderer", "dist", "index.html"), '<meta http-equiv="Content-Security-Policy" content="default-src self">');
+  await writeFile(join(resources, "app.asar"), 'not an asar: preload.cjs {"main":"./dist/src/main.js"}');
+  assert.throws(() => auditInstallerOutput(output));
+});
+
+test("published Runtime signing key ids stay trusted after the Harness rename", async () => {
+  const table = JSON.parse(await readFile(new URL("../packaging/keys/trusted-keys.json", import.meta.url), "utf8"));
+  assert.equal(table.activeKeyId, "juling-harness-release-2026b");
+  // Already-published runtimes and update catalogs were signed under these ids.
+  // Dropping them makes every existing signed artifact fail verification.
+  for (const legacy of ["omp-studio-release-2026a", "omp-studio-release-2026b"]) {
+    assert.ok(table.keys[legacy], `${legacy} must stay trusted for published artifacts`);
+    const pem = await readFile(new URL(`../packaging/keys/${table.keys[legacy]}`, import.meta.url), "utf8");
+    assert.match(pem, /BEGIN PUBLIC KEY/u);
+  }
+});
+
+test("the trusted key table still holds the ids published artifacts were signed with", async () => {
+  const table = JSON.parse(await readFile(new URL("../packaging/keys/trusted-keys.json", import.meta.url), "utf8"));
+  // Runtime and update artifacts in the 0.2.0 release were signed under these ids.
+  for (const id of ["omp-studio-release-2026a", "omp-studio-release-2026b"]) {
+    assert.equal(typeof table.keys[id], "string", `${id} must remain trusted`);
+  }
+  assert.equal(table.activeKeyId, "juling-harness-release-2026b");
+});

@@ -1,0 +1,693 @@
+import assert from "node:assert/strict";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { gzipSync } from "node:zlib";
+import { test } from "node:test";
+import { createRuntimeArchive, RuntimeInstaller, updateSigningBytes, type ComponentRelease, type UpdateFile, type UpdateManifest, type SignedUpdateManifest } from "@juling-harness/runtime-installer";
+import { downloadDifferentialArtifact, cachedUpdatePath } from "../src/differential-artifact.js";
+import { createDifferentialDownloader } from "../src/electron-update-adapter.js";
+import { discoverUpdates } from "../src/update-discovery.js";
+import { UpdateCoordinator } from "../src/update-coordinator.js";
+import { DEFAULT_UPDATE_PREFS, type UpdatePrefs } from "../src/update-prefs-store.js";
+import { migrateLegacyRuntime } from "../src/migrate-runtime.js";
+import { UpdateRestartBlockedError } from "../src/update-restart.js";
+import type { ChromeUpdatesSender } from "../src/chrome-updates.js";
+import { registerUnifiedUpdatesIpc } from "../src/unified-updates-ipc.js";
+import { CHROME_UPDATES_CHANNELS } from "../src/chrome-updates-shared.js";
+
+const pair = generateKeyPairSync("ed25519"), keys = { test: pair.publicKey.export({ type: "spki", format: "pem" }) };
+function file(asset: string, bytes: Buffer): UpdateFile { return { asset, url: `https://github.com/owner/repo/releases/download/v2/${asset}`, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), sha512: createHash("sha512").update(bytes).digest("base64") }; }
+const map = gzipSync(JSON.stringify({ version: "2", files: [{ name: "file", offset: 0, checksums: ["checksum"], sizes: [3] }] }));
+const binary = Buffer.from("new");
+function component(name = "setup.exe", version = "2.0.0"): ComponentRelease { return { version, sequence: 2, channel: "stable", file: file(name, binary), blockmap: file(`${name}.blockmap`, map), minAppVersion: "1.0.0", harnessProtocol: { min: 1, max: 1 } }; }
+function signed(parts: Partial<Pick<UpdateManifest, "app" | "runtime" | "platform" | "firstInstall">>): SignedUpdateManifest {
+  const manifest: UpdateManifest = { schema: 2, repo: "owner/repo", platform: "win32-x64", generatedAt: "2026-09-17T00:00:00Z", releaseNotesUrl: "https://github.com/owner/repo/releases/tag/v2", ...parts };
+  return { manifest, signature: { algorithm: "ed25519", keyId: "test", value: sign(null, updateSigningBytes(manifest), pair.privateKey).toString("base64url") } };
+}
+function fetcher(envelopes: SignedUpdateManifest[], counter: string[] = []): typeof fetch {
+  const assetName = (envelope: SignedUpdateManifest) => `updates-${envelope.manifest.platform}.json`;
+  return (async (url: string | URL | Request) => {
+    const u = String(url); counter.push(u);
+    if (u.includes("api.github.com")) return new Response(JSON.stringify(envelopes.map(envelope => ({ assets: [{ name: assetName(envelope), browser_download_url: `https://github.com/owner/repo/releases/download/v${envelopes.indexOf(envelope)}/${assetName(envelope)}` }] }))));
+    const requested = u.split("/").at(-1) ?? "";
+    const versionMatch = /\/v(\d+)\//.exec(u);
+    const versioned = versionMatch ? envelopes[Number(versionMatch[1])] : undefined;
+    if (versioned && requested === assetName(versioned)) return new Response(JSON.stringify(versioned));
+    const index = envelopes.findIndex(envelope => assetName(envelope) === requested);
+    if (index >= 0) return new Response(JSON.stringify(envelopes[index]));
+    const bytes = u.endsWith("blockmap") ? map : binary;
+    return new Response(new Uint8Array(bytes), { headers: { "content-length": String(bytes.length) } });
+  }) as typeof fetch;
+}
+
+for (const format of ["app", "firstInstall"] as const) test(`Linux ${format} installs expose a signed download while compatible Runtime updates prepare normally`, async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-linux-"));
+  const app = component("Juling-Harness-2.0.0-linux-x64.AppImage");
+  const runtime = component("runtime.zip", "18.0.0-harness.2");
+  const deb = file("Juling-Harness-2.0.0-linux-x64.deb", binary);
+  const requests: string[] = [];
+  const coordinator = new UpdateCoordinator({ root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "linux-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, restart: () => {}, quit: () => {},
+    manualDesktopDownload: format, fetcher: fetcher([signed({ platform: "linux-x64", app, runtime, firstInstall: deb })], requests) });
+  await coordinator.initialize();
+  assert.equal((await coordinator.check()).app.manualInstallUrl, format === "app" ? app.file.url : deb.url);
+  await coordinator.prepare("all");
+  assert.equal(coordinator.state.app.phase, "idle");
+  assert.equal(coordinator.state.runtime.phase, "ready");
+  assert.equal(coordinator.state.error, undefined);
+  assert.equal(requests.some(url => /\.(AppImage|deb)(\.blockmap)?$/u.test(url)), false);
+});
+
+test("Linux waits for a required manual desktop upgrade before downloading an incompatible Runtime", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-linux-minimum-"));
+  const requests: string[] = [];
+  const coordinator = new UpdateCoordinator({ root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "linux-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, restart: () => {}, quit: () => {},
+    fetcher: fetcher([signed({ platform: "linux-x64", app: component("new.AppImage"), runtime: { ...component("runtime.zip", "18.0.0-harness.2"), minAppVersion: "2.0.0" } })], requests) });
+  await coordinator.initialize(); await coordinator.check(); await coordinator.prepare("all");
+  assert.match(coordinator.state.runtime.blockedReason!, /update the desktop app first|请先更新桌面/u);
+  assert.equal(coordinator.state.error, undefined);
+  assert.equal(requests.some(url => url.endsWith("runtime.zip")), false);
+});
+
+test("Linux AppImage uses the installed image as a differential baseline and confirms the new version", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-linux-appimage-"));
+  const image = join(root, "installed.AppImage");
+  await writeFile(image, binary);
+  const previous = { ...component("old.AppImage", "1.0.0"), sequence: 1 };
+  const next = component("next.AppImage", "2.0.0");
+  let differences = 0;
+  const installs: boolean[] = [];
+  const options = { root, initialInstallerPath: image, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "linux-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {},
+    installDesktop: async (_path: string, _release: ComponentRelease, rollback: boolean) => { installs.push(rollback); }, restart: () => {}, quit: () => {}, desktopCommit: "confirmed" as const, trackAppBaselineWithoutBase: true,
+    differential: async (_old: string, target: string) => { differences++; await writeFile(target, binary); },
+    fetcher: fetcher([signed({ platform: "linux-x64", app: next }), signed({ platform: "linux-x64", app: previous })]) };
+  const first = new UpdateCoordinator(options);
+  await first.initialize(); await first.check(); await first.prepare("app");
+  assert.equal(differences, 1);
+  assert.equal(first.state.app.method, "differential");
+  assert.equal((await first.apply()).ok, true);
+  assert.deepEqual(installs, [false]);
+  const upgraded = new UpdateCoordinator({ ...options, appVersion: "2.0.0" });
+  await upgraded.initialize();
+  assert.equal(upgraded.state.app.phase, "verifying");
+  await upgraded.confirmDesktopStartup();
+  assert.equal(upgraded.state.rollbackAppVersion, "1.0.0");
+  assert.equal(upgraded.state.app.phase, "idle");
+  assert.equal((await upgraded.rollbackDesktop()).ok, true);
+  assert.equal((await upgraded.apply()).ok, true);
+  assert.deepEqual(installs, [false, true]);
+});
+
+test("deb discovers its signed catalog beside independent Runtime releases and reuses the recovery package for differential updates", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-linux-deb-"));
+  const oldBytes = Buffer.from("old");
+  const deb = (version: string, sequence: number, bytes: Buffer) => {
+    const name = `Juling-Harness-${version}-linux-x64.deb`;
+    return { ...component(name, version), sequence, file: file(name, bytes) };
+  };
+  const previous = deb("1.0.0", 1, oldBytes), next = deb("2.0.0", 2, binary);
+  const primary = (app: ComponentRelease) => signed({ platform: "linux-x64", app: { ...app, file: file(`${app.version}.AppImage`, binary), blockmap: file(`${app.version}.AppImage.blockmap`, map) }, firstInstall: app.file });
+  const debEnvelope = (app: ComponentRelease) => signed({ platform: "linux-x64", app });
+  const runtime = signed({ platform: "linux-x64", runtime: component("runtime.zip", "18.0.0-harness.2") });
+  const rows = [[runtime], [primary(next), debEnvelope(next)], [primary(previous), debEnvelope(previous)]];
+  const requests: string[] = [];
+  const source: typeof fetch = (async (url: string | URL | Request) => {
+    const u = String(url); requests.push(u);
+    if (u.includes("api.github.com")) return new Response(JSON.stringify(rows.map((envelopes, index) => ({ assets: envelopes.map(envelope => {
+      const name = envelope.manifest.app?.file.asset.endsWith(".deb") ? "updates-linux-deb-x64.json" : "updates-linux-x64.json";
+      return { name, browser_download_url: `https://github.com/owner/repo/releases/download/v${index}/${name}` };
+    }) }))));
+    if (u.includes("updates-linux-")) {
+      const index = Number(/\/v(\d+)\//u.exec(u)![1]);
+      const isDeb = u.endsWith("updates-linux-deb-x64.json");
+      return new Response(JSON.stringify(rows[index]!.find(value => Boolean(value.manifest.app?.file.asset.endsWith(".deb")) === isDeb)));
+    }
+    const bytes = u.endsWith(".blockmap") ? map : u.endsWith(previous.file.asset) ? oldBytes : binary;
+    return new Response(new Uint8Array(bytes), { headers: { "content-length": String(bytes.length) } });
+  }) as typeof fetch;
+  let differences = 0, backups = 0;
+  const options = { root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "linux-x64", appVersion: "1.0.0", keys,
+    linuxDesktopFormat: "deb" as const, desktopRequiresRollbackBase: true, trackAppBaselineWithoutBase: true, desktopCommit: "confirmed" as const,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {},
+    installDesktop: async (_path: string, _release: ComponentRelease, _rollback: boolean, _envelope: SignedUpdateManifest, backup?: { path: string }) => { if (backup) { assert.deepEqual(await readFile(backup.path), oldBytes); backups++; } },
+    restart: () => {}, quit: () => {}, fetcher: source,
+    differential: async (_old: string, target: string) => { differences++; await writeFile(target, binary); } };
+  const coordinator = new UpdateCoordinator(options);
+  await coordinator.initialize(); await coordinator.check(); await coordinator.prepare("app");
+  assert.equal(coordinator.state.app.method, "differential");
+  assert.equal(differences, 1);
+  assert.equal(requests.filter(url => url.endsWith(previous.file.asset)).length, 1);
+  assert.equal((await coordinator.apply()).ok, true);
+  assert.equal(backups, 1);
+  const upgraded = new UpdateCoordinator({ ...options, appVersion: "2.0.0" });
+  await upgraded.initialize(); await upgraded.confirmDesktopStartup();
+  assert.equal(upgraded.state.rollbackAppVersion, "1.0.0");
+  const discovery = { repo: "owner/repo", platform: "linux-x64", keys, mirror: "", channel: "stable" as const, signal: new AbortController().signal, watermarks: {}, currentVersions: { app: "1.0.0" }, linuxDesktopFormat: "deb" as const, fetcher: source };
+  rows[1] = [primary(next)];
+  await assert.rejects(discoverUpdates(discovery), /no deb update catalog|缺少 deb 更新清单/u);
+  rows[1] = [primary(next), debEnvelope({ ...next, minAppVersion: "9.0.0" })];
+  await assert.rejects(discoverUpdates(discovery), /catalogs do not match|清单.*不一致/u);
+});
+
+for (const scenario of [
+  { name: "downloads by default", initial: {}, duringCheck: {}, checks: 1, downloads: 1 },
+  { name: "only checks when automatic downloads are disabled", initial: { autoDownload: false }, duringCheck: {}, checks: 1, downloads: 0 },
+  { name: "does nothing when automatic checks are disabled", initial: { autoCheck: false }, duringCheck: {}, checks: 0, downloads: 0 },
+  { name: "honors automatic downloads disabled during a check", initial: {}, duringCheck: { autoDownload: false }, checks: 1, downloads: 0 },
+  { name: "honors automatic checks disabled during a check", initial: {}, duringCheck: { autoCheck: false }, checks: 1, downloads: 0 },
+] satisfies Array<{ name: string; initial: Partial<UpdatePrefs>; duringCheck: Partial<UpdatePrefs>; checks: number; downloads: number }>) {
+  test(`background updater ${scenario.name}`, async t => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    let prefs: UpdatePrefs = { ...DEFAULT_UPDATE_PREFS, ...scenario.initial };
+    const coordinator = new UpdateCoordinator({ root: tmpdir(), runtimeRoot: tmpdir(), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+      prefs: { read: async () => prefs }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {} });
+    const check = t.mock.method(coordinator, "check", async () => {
+      prefs = { ...prefs, ...scenario.duringCheck };
+      return coordinator.state;
+    });
+    const prepare = t.mock.method(coordinator, "prepare", async () => {});
+    try {
+      coordinator.startBackground();
+      t.mock.timers.tick(15_000);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(check.mock.callCount(), scenario.checks);
+      assert.equal(prepare.mock.callCount(), scenario.downloads);
+      prefs = { ...prefs, autoCheck: true, autoDownload: false };
+      t.mock.timers.tick(4 * 60 * 60 * 1000);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(check.mock.callCount(), scenario.checks + 1);
+      assert.equal(prepare.mock.callCount(), scenario.downloads);
+    } finally { coordinator.dispose(); }
+  });
+}
+
+test("differential reconstruction falls back exactly once and never executes unverified bytes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-diff-test-"));
+  const previous = component("old.exe", "1.0.0"), next = component();
+  const path = cachedUpdatePath(root, previous.file); await mkdir(dirname(path), { recursive: true }); await writeFile(path, binary);
+  const events: string[] = [], requests: string[] = [];
+  let attempts = 0;
+  const result = await downloadDifferentialArtifact({ root, previous, release: next, mirror: "", signal: new AbortController().signal, fetcher: fetcher([], requests), progress: method => events.push(method), differential: async () => { attempts++; throw new Error("Range unsupported"); } });
+  assert.equal(attempts, 1); assert.ok(events.includes("differential")); assert.ok(events.includes("full"));
+  assert.deepEqual(await readFile(result), binary);
+  assert.equal(requests.filter(u => u.endsWith("setup.exe")).length, 1);
+});
+test("cancelled differential download never triggers full fallback", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-cancel-diff-")), previous = component("old.exe");
+  const path = cachedUpdatePath(root, previous.file); await mkdir(dirname(path), { recursive: true }); await writeFile(path, binary);
+  const controller = new AbortController(), requests: string[] = [];
+  await assert.rejects(() => downloadDifferentialArtifact({ root, previous, release: component(), mirror: "", signal: controller.signal, fetcher: fetcher([], requests), progress: () => {}, differential: async () => { controller.abort(new Error("cancelled")); throw new Error("cancelled"); } }), /cancelled/);
+  assert.equal(requests.filter(u => u.endsWith("setup.exe")).length, 0);
+});
+
+test("differential requests reconstruct changed ranges and stop immediately when Range is ignored", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-range-http-"));
+  const old = Buffer.from("aabbccdd"), next = Buffer.from("xxbbyydd");
+  const oldFile = join(root, "old"), newFile = join(root, "new");
+  await writeFile(oldFile, old);
+  const blockmap = (checksums: string[]) => ({ version: "2" as const, files: [{ name: "file", offset: 0, sizes: [2, 2, 2, 2], checksums }] });
+  const oldMap = blockmap(["a", "b", "c", "d"]), newMap = blockmap(["x", "b", "y", "d"]);
+  let ignoreRange = false, requests = 0;
+  const server = createServer((request, response) => {
+    requests++;
+    const range = /^bytes=(\d+)-(\d+)$/u.exec(request.headers.range ?? "")!;
+    const start = Number(range[1]), end = Number(range[2]);
+    if (ignoreRange) { response.writeHead(200); response.end(next); return; }
+    response.writeHead(206, { "content-range": `bytes ${start}-${end}/${next.length}` });
+    response.end(next.subarray(start, end + 1));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server address");
+    const download = createDifferentialDownloader(fetch);
+    const url = `http://127.0.0.1:${address.port}/artifact`;
+    await download(oldFile, newFile, url, oldMap, newMap, file("next.exe", next), new AbortController().signal, () => {});
+    assert.deepEqual(await readFile(newFile), next);
+    assert.equal(requests, 2);
+    ignoreRange = true; requests = 0;
+    await assert.rejects(download(oldFile, newFile, url, oldMap, newMap, file("next.exe", next), new AbortController().signal, () => {}), /invalid Range response/u);
+    assert.equal(requests, 1);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+test("cancelling a stalled differential request closes its HTTP connection", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-range-cancel-"));
+  const old = Buffer.from("aabb"), next = Buffer.from("xxbb"), oldFile = join(root, "old");
+  await writeFile(oldFile, old);
+  let arrived!: () => void, closed!: () => void;
+  const requestArrived = new Promise<void>(resolve => { arrived = resolve; });
+  const responseClosed = new Promise<void>(resolve => { closed = resolve; });
+  const server = createServer((_request, response) => { response.once("close", closed); arrived(); });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server address");
+    const map = (checksums: string[]) => ({ version: "2" as const, files: [{ name: "file", offset: 0, sizes: [2, 2], checksums }] });
+    const controller = new AbortController();
+    const task = createDifferentialDownloader(fetch)(oldFile, join(root, "new"), `http://127.0.0.1:${address.port}/artifact`, map(["a", "b"]), map(["x", "b"]), file("next.exe", next), controller.signal, () => {});
+    await requestArrived;
+    controller.abort(new Error("user cancelled"));
+    await assert.rejects(task, /user cancelled/u);
+    await Promise.race([responseClosed, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("HTTP connection stayed open")), 2_000).unref())]);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+test("discovery combines desktop and independent Runtime, rejecting sequence rollback", async () => {
+  const app = signed({ app: component() }), runtime = signed({ runtime: component("runtime.zip", "18.0.0-harness.2") });
+  const input = { repo: "owner/repo", platform: "win32-x64", channel: "stable" as const, mirror: "", keys, signal: new AbortController().signal, fetcher: fetcher([runtime, app]), watermarks: {} };
+  const found = await discoverUpdates(input);
+  assert.equal(found.app?.manifest.app?.version, "2.0.0"); assert.equal(found.runtime?.manifest.runtime?.version, "18.0.0-harness.2");
+  await assert.rejects(() => discoverUpdates({ ...input, watermarks: { "app:stable:win32-x64": 3 } }), /rollback/);
+});
+for (const [name, minimum, protocol, appProtocol] of [
+  ["minimum desktop version", "0.1.11", { min: 1, max: 1 }, { min: 1, max: 1 }],
+  ["Harness protocol", "0.1.0", { min: 2, max: 2 }, { min: 1, max: 2 }],
+] as const) {
+  test(`update checks expose the ${name} blocker before downloading and a prepared desktop clears it`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "omp-update-compatibility-"));
+    const runtime = { ...component("runtime.zip", "18.12.6-harness.1"), minAppVersion: minimum, harnessProtocol: protocol };
+    const app = { ...component("setup.exe", "0.1.12"), harnessProtocol: appProtocol, bundledRuntimeVersion: runtime.version };
+    const requests: string[] = [];
+    const coordinator = new UpdateCoordinator({ root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "win32-x64", appVersion: "0.1.10", keys,
+      prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([signed({ runtime, app })], requests) });
+    const handlers = new Map<string, (event: { sender: ChromeUpdatesSender }, value?: unknown) => unknown>();
+    const remove = registerUnifiedUpdatesIpc({ ipcMain: { removeHandler: channel => { handlers.delete(channel); }, handle: (channel, action) => { handlers.set(channel, action); } }, isTrustedSender: () => true }, coordinator);
+    try {
+      await coordinator.initialize();
+      const check = () => handlers.get(CHROME_UPDATES_CHANNELS.check)!({ sender: { isDestroyed: () => false, getURL: () => "file:///qa/index.html" } });
+      const first = await check() as { runtime: { plan: string; reason?: string } };
+      assert.equal(first.runtime.plan, "blocked");
+      assert.match(first.runtime.reason!, /请先更新桌面/);
+      assert.equal(coordinator.state.runtime.phase, "idle");
+      await assert.rejects(coordinator.prepare("runtime"), /请先更新桌面/);
+      assert.equal(requests.some(url => url.endsWith("runtime.zip") || url.endsWith("runtime.zip.blockmap")), false);
+      await coordinator.prepare("app");
+      const paired = await check() as { runtime: { plan: string; reason?: string } };
+      assert.equal(paired.runtime.plan, "available");
+      assert.equal(paired.runtime.reason, undefined);
+      await coordinator.prepare("runtime");
+      assert.equal(coordinator.state.runtime.phase, "ready");
+    } finally { remove(); }
+  });
+}
+
+test("discovery routes both the release catalog and manifests through the mirror", async () => {
+  const requests: string[] = [];
+  const app = signed({ app: component() });
+  const mirror = "https://mirror.example.com/";
+  const found = await discoverUpdates({ repo: "owner/repo", platform: "win32-x64", channel: "stable", mirror, keys, signal: new AbortController().signal, fetcher: fetcher([app], requests), watermarks: {} });
+  assert.equal(found.app?.manifest.app?.version, "2.0.0");
+  assert.ok(requests.length > 0);
+  assert.ok(requests.every(u => u.startsWith(mirror)), `unmirrored request: ${requests.find(u => !u.startsWith(mirror))}`);
+});
+test("discovery reports an incomplete catalog when one signed manifest is invalid", async () => {
+  const broken = signed({ app: { ...component("old.exe", "1.5.0"), sequence: 1 } });
+  broken.manifest.app!.version = "9.9.9"; // Mutating after signing breaks the signature.
+  const valid = signed({ app: { ...component(), sequence: 3 } });
+  await assert.rejects(discoverUpdates({ repo: "owner/repo", platform: "win32-x64", channel: "stable", mirror: "", keys, signal: new AbortController().signal, fetcher: fetcher([broken, valid]), watermarks: {} }), /latest version cannot be determined|无法确定最新版本/u);
+});
+test("discovery still rejects conflicting signed sequences for one component", async () => {
+  const first = signed({ app: { ...component(), sequence: 2 } });
+  const conflicting = signed({ app: { ...component(), version: "2.1.0", sequence: 2 } });
+  await assert.rejects(() => discoverUpdates({ repo: "owner/repo", platform: "win32-x64", channel: "stable", mirror: "", keys, signal: new AbortController().signal, fetcher: fetcher([first, conflicting]), watermarks: {} }), /Conflicting signed update sequence/);
+});
+test("prepared updates survive restart; busy sessions and tampered cache prevent apply", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-journal-"));
+  let busy = false, shutdowns = 0, installs = 0;
+  const options = { root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => busy, beforeQuit: async () => { shutdowns++; }, installDesktop: async () => { installs++; }, restart: () => {}, quit: () => {}, fetcher: fetcher([signed({ app: component() })]) };
+  const first = new UpdateCoordinator(options); await first.initialize(); await first.check(); await first.prepare("app");
+  assert.equal(first.state.app.phase, "ready");
+  const second = new UpdateCoordinator(options); await second.initialize(); assert.equal(second.state.app.phase, "ready");
+  busy = true; assert.equal((await second.apply()).deferred, true); assert.equal(shutdowns, 0);
+  busy = false;
+  await writeFile(cachedUpdatePath(join(root, "cache"), component().file), "bad");
+  assert.equal((await second.apply()).ok, false); assert.equal(installs, 0); assert.equal(shutdowns, 0);
+});
+test("apply re-verifies the desktop artifact after shutdown and never launches a tampered installer", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-tampered-quit-"));
+  let installs = 0, quits = 0, restarts = 0;
+  const options = { root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false,
+    beforeQuit: async () => { await writeFile(cachedUpdatePath(join(root, "cache"), component().file), "tampered"); },
+    installDesktop: async () => { installs++; }, restart: () => { restarts++; }, quit: () => { quits++; }, fetcher: fetcher([signed({ app: component() })]) };
+  const coordinator = new UpdateCoordinator(options);
+  await coordinator.initialize(); await coordinator.check(); await coordinator.prepare("app");
+  assert.equal(coordinator.state.app.phase, "ready");
+  assert.equal((await coordinator.apply()).ok, false);
+  assert.equal(installs, 0); assert.equal(quits, 0);
+  assert.equal(restarts, 1); // The stopped Host is brought back instead of quitting.
+  assert.equal(JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8")).authorized, false);
+});
+test("downloading and ordinary startup never authorize applying an update", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-no-auto-apply-")); let installs = 0;
+  const options = { root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => { installs++; }, restart: () => {}, quit: () => {}, fetcher: fetcher([signed({ app: component() })]) };
+  const first = new UpdateCoordinator(options); await first.initialize(); await first.prepare("all");
+  const second = new UpdateCoordinator(options); await second.initialize(); assert.equal(installs, 0);
+  assert.equal((await second.apply()).ok, true); assert.equal(installs, 1);
+});
+
+test("a newer manually installed desktop supersedes an older prepared update", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-desktop-superseded-"));
+  let installs = 0;
+  const runtime = component("runtime.zip", "18.0.0-harness.2");
+  const app = { ...component(), bundledRuntimeVersion: runtime.version };
+  const options = { root, runtimeRoot: join(root, "runtime"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => { installs++; }, restart: () => {}, quit: () => {}, fetcher: fetcher([signed({ app, runtime })]) };
+  const first = new UpdateCoordinator(options);
+  await first.initialize(); await first.prepare("all");
+  const newer = new UpdateCoordinator({ ...options, appVersion: "3.0.0" });
+  await newer.initialize(); await newer.check();
+  assert.equal(newer.state.app.version, undefined);
+  assert.equal(newer.state.app.phase, "idle");
+  assert.equal((await newer.apply()).ok, false);
+  assert.equal(installs, 0);
+  const pending = JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8")).pending;
+  assert.equal(pending.app, undefined);
+  assert.equal(pending.runtime, undefined, "a Runtime borrowed from the superseded desktop must be prepared again");
+});
+test("a failed desktop installation surfaces the incomplete transaction and keeps the pending Runtime prepared", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-incomplete-transaction-"));
+  const journal = { schema: 2, authorized: true,
+    pending: { app: signed({ app: component() }), runtime: signed({ runtime: component("runtime.zip", "18.0.0-harness.2") }) },
+    previous: {}, watermarks: {} };
+  await writeFile(join(root, "transaction-v2.json"), JSON.stringify(journal));
+  const options = { root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([]) };
+  const coordinator = new UpdateCoordinator(options);
+  await coordinator.initialize();
+  assert.match(coordinator.state.error ?? "", /事务不完整/);
+  const saved = JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8"));
+  assert.equal(saved.authorized, false);
+  assert.equal(saved.pending.runtime.manifest.runtime.version, "18.0.0-harness.2");
+  assert.equal(coordinator.state.runtime.phase, "ready");
+});
+
+async function runtimeFixture(root: string, version: string): Promise<string> {
+  const directory = join(root, version); await mkdir(directory, { recursive: true });
+  const executable = Buffer.from(`fixture-${version}`);
+  const manifest = Buffer.from(JSON.stringify({ runtimeVersion: version, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "harness.1", harnessProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: "win32-x64", entrypoint: "juling.exe", channel: "stable" }));
+  const hash = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+  const checksums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { "runtime-manifest.json": hash(manifest), "juling.exe": hash(executable) } }));
+  const payload = Buffer.concat([manifest, Buffer.from("\0"), checksums]);
+  for (const [name, bytes] of [["juling.exe", executable], ["runtime-manifest.json", manifest], ["checksums.json", checksums], ["runtime-signature.json", Buffer.from(JSON.stringify({ algorithm: "ed25519", keyId: "test", payloadSha256: hash(payload), signature: sign(null, payload, pair.privateKey).toString("base64url") }))]] as const) await writeFile(join(directory, name), bytes);
+  return directory;
+}
+test("authorized Runtime activates after restart and failed session startup restores the verified previous Runtime", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-runtime-transaction-")), runtimeRoot = join(root, "installed");
+  const installer = new RuntimeInstaller(runtimeRoot, { trustedKeys: keys });
+  const selfCheck = { run: async () => {} };
+  await installer.install(await runtimeFixture(root, "18.0.0-harness.1"));
+  await installer.activate("18.0.0-harness.1", { selfCheck });
+  const newDirectory = await runtimeFixture(root, "18.0.0-harness.2"), zipPath = join(root, "runtime.zip");
+  await createRuntimeArchive(newDirectory, zipPath);
+  const bytes = await readFile(zipPath), release = { ...component("runtime.zip", "18.0.0-harness.2"), file: file("runtime.zip", bytes) };
+  const envelope = signed({ runtime: release });
+  const source = fetcher([envelope]);
+  const runtimeFetch = (async (...args: Parameters<typeof fetch>) => String(args[0]).endsWith("runtime.zip") ? new Response(new Uint8Array(bytes), { headers: { "content-length": String(bytes.length) } }) : source(...args)) as typeof fetch;
+  const options = { root: join(root, "updates"), runtimeRoot, repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: runtimeFetch, activateOptions: { selfCheck } };
+  const first = new UpdateCoordinator(options); await first.initialize(); await first.prepare("runtime");
+  assert.equal((await installer.current())?.runtimeVersion, "18.0.0-harness.1");
+  assert.equal((await first.apply()).ok, true);
+  const second = new UpdateCoordinator(options); await second.initialize();
+  assert.equal((await installer.current())?.runtimeVersion, "18.0.0-harness.2");
+  assert.equal(await second.completeStartup(false, true), true);
+  assert.equal((await installer.current())?.runtimeVersion, "18.0.0-harness.1");
+  assert.equal(second.state.runtime.phase, "failed");
+});
+test("migration copies only a verified Runtime and preserves a newer per-user installation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-runtime-migration-"));
+  const legacyInstallRoot = join(root, "machine"), userRuntimeRoot = join(root, "user");
+  const old = new RuntimeInstaller(join(legacyInstallRoot, "runtime"), { trustedKeys: keys }), target = new RuntimeInstaller(userRuntimeRoot, { trustedKeys: keys });
+  const activateOptions = { selfCheck: { run: async () => {} } };
+  await old.install(await runtimeFixture(root, "18.0.0-harness.1")); await old.activate("18.0.0-harness.1", activateOptions);
+  await migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot, trustedKeys: keys, activateOptions });
+  assert.equal((await target.current())?.runtimeVersion, "18.0.0-harness.1");
+  await target.install(await runtimeFixture(root, "18.0.0-harness.2")); await target.activate("18.0.0-harness.2", activateOptions);
+  await migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot, trustedKeys: keys, activateOptions });
+  assert.equal((await target.current())?.runtimeVersion, "18.0.0-harness.2");
+  await writeFile(join(legacyInstallRoot, "runtime", "versions", "18.0.0-harness.1", "juling.exe"), "tampered");
+  await assert.rejects(() => migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot, trustedKeys: keys, activateOptions }), /Checksum/);
+});
+
+for (const checkpoint of ["before-activate", "after-activate", "after-journal-save"] as const) {
+  test(`Runtime rollback survives a process exit ${checkpoint}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "omp-runtime-checkpoint-")), runtimeRoot = join(root, "installed");
+    const installer = new RuntimeInstaller(runtimeRoot, { trustedKeys: keys });
+    const selfCheck = { run: async () => {} };
+    const oldVersion = "18.0.0-harness.1", version = "18.0.0-harness.2";
+    await installer.install(await runtimeFixture(root, oldVersion)); await installer.activate(oldVersion, { selfCheck });
+    const next = await runtimeFixture(root, version), archive = join(root, "runtime.zip");
+    await createRuntimeArchive(next, archive);
+    const bytes = await readFile(archive), release = { ...component("runtime.zip", version), file: file("runtime.zip", bytes) };
+    const source = fetcher([signed({ runtime: release })]);
+    const runtimeFetch = (async (...args: Parameters<typeof fetch>) => String(args[0]).endsWith("runtime.zip") ? new Response(new Uint8Array(bytes), { headers: { "content-length": String(bytes.length) } }) : source(...args)) as typeof fetch;
+    const options = { root: join(root, "updates"), runtimeRoot, repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: runtimeFetch, activateOptions: { selfCheck } };
+    const first = new UpdateCoordinator(options); await first.initialize(); await first.prepare("runtime"); await first.apply();
+    const path = join(options.root, "transaction-v2.json");
+    if (checkpoint === "after-journal-save") {
+      await new UpdateCoordinator(options).initialize();
+    } else {
+      const journal = JSON.parse(await readFile(path, "utf8"));
+      journal.runtimeTrial = { version, previousVersion: oldVersion };
+      await writeFile(path, JSON.stringify(journal));
+      await installer.install(next);
+      if (checkpoint === "after-activate") await installer.activate(version, { selfCheck });
+    }
+    const resumed = new UpdateCoordinator(options); await resumed.initialize();
+    assert.equal(JSON.parse(await readFile(path, "utf8")).runtimeTrial.previousVersion, oldVersion);
+    assert.equal(await resumed.completeStartup(false, true), true);
+    assert.equal((await installer.current())?.runtimeVersion, oldVersion);
+  });
+}
+
+test("a legacy journal carrying the removed trial attempts counter still rolls back", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-legacy-trial-")), runtimeRoot = join(root, "installed");
+  const installer = new RuntimeInstaller(runtimeRoot, { trustedKeys: keys });
+  const selfCheck = { run: async () => {} };
+  const oldVersion = "18.0.0-harness.1", version = "18.0.0-harness.2";
+  await installer.install(await runtimeFixture(root, oldVersion)); await installer.activate(oldVersion, { selfCheck });
+  const updates = join(root, "updates"); await mkdir(updates, { recursive: true });
+  const path = join(updates, "transaction-v2.json");
+  await writeFile(path, JSON.stringify({
+    schema: 2, authorized: false, pending: {}, previous: {}, watermarks: {},
+    runtimeTrial: { version, previousVersion: oldVersion, attempts: 0 },
+  }));
+  const options = { root: updates, runtimeRoot, repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([]), activateOptions: { selfCheck } };
+  const coordinator = new UpdateCoordinator(options); await coordinator.initialize();
+  assert.equal(coordinator.hasRuntimeTrial, true);
+  assert.equal(coordinator.state.error, undefined);
+  assert.equal(JSON.parse(await readFile(path, "utf8")).runtimeTrial.attempts, undefined);
+  await installer.install(await runtimeFixture(root, version)); await installer.activate(version, { selfCheck });
+  assert.equal(await coordinator.completeStartup(false, true), true);
+  assert.equal((await installer.current())?.runtimeVersion, oldVersion);
+});
+
+for (const target of ["app", "all"] as const) {
+  test(`apply rejects an incompatible pair after preparing ${target} over a pending Runtime`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "omp-final-compat-"));
+    const runtime = component("runtime.zip", "18.0.0-harness.2");
+    const catalogs = [signed({ runtime })];
+    let stopped = 0, installed = 0;
+    const options = { root, runtimeRoot: join(root, "runtime"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => { stopped++; }, installDesktop: async () => { installed++; }, restart: () => {}, quit: () => {}, fetcher: fetcher(catalogs) };
+    const coordinator = new UpdateCoordinator(options); await coordinator.initialize(); await coordinator.prepare("runtime");
+    catalogs.unshift(signed({ app: { ...component(), harnessProtocol: { min: 2, max: 2 } } }));
+    await coordinator.check();
+    if (target === "all") await assert.rejects(() => coordinator.prepare(target), /兼容|compatible/i);
+    else await coordinator.prepare(target);
+    const resumed = new UpdateCoordinator(options); await resumed.initialize();
+    assert.equal((await resumed.apply()).ok, false);
+    assert.equal(stopped, 0); assert.equal(installed, 0);
+    assert.equal(JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8")).authorized, false);
+  });
+}
+
+test("a prepared desktop rollback survives restart and cannot be overwritten by update preparation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-desktop-rollback-"));
+  const old = signed({ app: { ...component("old.exe", "1.0.0"), sequence: 1 } });
+  const initialInstallerPath = join(root, "installer.exe"); await writeFile(initialInstallerPath, binary);
+  let installs = 0;
+  const options = { root, initialInstallerPath, runtimeRoot: join(root, "runtime"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => { installs++; }, restart: () => {}, quit: () => {}, fetcher: fetcher([signed({ app: component() }), old]) };
+  const first = new UpdateCoordinator(options); await first.initialize(); await first.prepare("app"); await first.apply();
+  const upgraded = new UpdateCoordinator({ ...options, appVersion: "2.0.0" }); await upgraded.initialize();
+  assert.equal(upgraded.state.rollbackAppVersion, "1.0.0");
+  assert.equal((await upgraded.rollbackDesktop()).ok, true);
+  assert.equal(installs, 1); // Preparing rollback never installs it.
+  const resumed = new UpdateCoordinator({ ...options, appVersion: "2.0.0" }); await resumed.initialize();
+  assert.equal(resumed.state.rollbackAppPending, true);
+  assert.equal(resumed.state.app.version, "1.0.0");
+  await resumed.check();
+  await assert.rejects(() => resumed.prepare("all"), /回滚已准备|rollback is staged/i);
+  assert.equal((await resumed.apply()).ok, true); assert.equal(installs, 2);
+  const restored = new UpdateCoordinator(options); await restored.initialize();
+  assert.equal(restored.state.rollbackAppPending, false);
+});
+
+test("apply rechecks a pending Runtime minimum desktop version after an external desktop change", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-runtime-min-app-"));
+  let stopped = 0;
+  const options = { root, runtimeRoot: join(root, "runtime"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => { stopped++; }, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([signed({ runtime: component("runtime.zip", "18.0.0-harness.2") })]) };
+  const first = new UpdateCoordinator(options); await first.initialize(); await first.prepare("runtime");
+  const downgraded = new UpdateCoordinator({ ...options, appVersion: "0.9.0" }); await downgraded.initialize();
+  assert.equal((await downgraded.apply()).ok, false);
+  assert.equal(stopped, 0);
+});
+
+for (const entry of ["startup", "check", "prepare", "apply", "discovered"] as const) {
+  test(`an externally installed prepared Runtime is reconciled during ${entry}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "omp-runtime-satisfied-"));
+    const runtimeRoot = join(root, "installed"), version = "18.0.0-harness.2";
+    const installer = new RuntimeInstaller(runtimeRoot, { trustedKeys: keys });
+    const selfCheck = { run: async () => {} };
+    await installer.install(await runtimeFixture(root, "18.0.0-harness.1"));
+    await installer.activate("18.0.0-harness.1", { selfCheck });
+    const candidate = await runtimeFixture(root, version), archive = join(root, "runtime.zip");
+    await createRuntimeArchive(candidate, archive);
+    const bytes = await readFile(archive);
+    const envelope = signed({ runtime: { ...component("runtime.zip", version), file: file("runtime.zip", bytes) } });
+    const requests: string[] = [], source = fetcher([envelope], requests);
+    const runtimeFetch = (async (...args: Parameters<typeof fetch>) => String(args[0]).endsWith("runtime.zip")
+      ? new Response(new Uint8Array(bytes), { headers: { "content-length": String(bytes.length) } }) : source(...args)) as typeof fetch;
+    let shutdowns = 0;
+    const options = { root: join(root, "updates"), runtimeRoot, repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+      prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false,
+      beforeQuit: async () => { shutdowns++; }, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: runtimeFetch, activateOptions: { selfCheck } };
+    let coordinator = new UpdateCoordinator(options);
+    await coordinator.initialize();
+    if (entry === "discovered") await coordinator.check();
+    else await coordinator.prepare("runtime");
+    await installer.install(candidate); await installer.activate(version, { selfCheck });
+    const path = join(options.root, "transaction-v2.json");
+    if (entry === "startup") {
+      const journal = JSON.parse(await readFile(path, "utf8"));
+      journal.authorized = true;
+      journal.lastError = "Finish active sessions and pending interactions before restarting";
+      journal.runtimeTrial = { version, previousVersion: "18.0.0-harness.1" };
+      await writeFile(path, JSON.stringify(journal));
+      coordinator = new UpdateCoordinator(options); await coordinator.initialize();
+      assert.equal(coordinator.state.error, undefined);
+      assert.deepEqual(JSON.parse(await readFile(path, "utf8")).runtimeTrial, journal.runtimeTrial);
+    } else if (entry === "check") await coordinator.check();
+    else if (entry === "prepare" || entry === "discovered") await coordinator.prepare("runtime");
+    else assert.equal((await coordinator.apply()).ok, true);
+    assert.equal(coordinator.state.runtime.currentVersion, version);
+    assert.equal(coordinator.state.runtime.version, undefined);
+    assert.equal(coordinator.state.runtime.phase, "idle");
+    assert.equal(JSON.parse(await readFile(path, "utf8")).pending.runtime, undefined);
+    await coordinator.check();
+    assert.equal(coordinator.state.runtime.version, undefined);
+    assert.equal(shutdowns, 0);
+  });
+}
+
+for (const entry of ["startup", "check"] as const) {
+  test(`a newer installed Runtime supersedes a prepared older update during ${entry}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "omp-runtime-superseded-"));
+    const runtimeRoot = join(root, "installed"), updates = join(root, "updates");
+    const version = "18.12.6-harness.1", obsoleteVersion = "18.10.4-harness.8";
+    const installer = new RuntimeInstaller(runtimeRoot, { trustedKeys: keys });
+    const selfCheck = { run: async () => {} };
+    const obsolete = signed({ runtime: component("runtime.zip", obsoleteVersion) });
+    const baseline = signed({ runtime: component("previous.zip", "18.8.0-harness.20") });
+    const options = { root: updates, runtimeRoot, repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+      prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false,
+      beforeQuit: async () => { assert.fail("an obsolete update must not shut down the Host"); },
+      installDesktop: async () => {}, restart: () => { assert.fail("an obsolete update must not restart the app"); }, quit: () => {},
+      fetcher: fetcher([obsolete]), activateOptions: { selfCheck } };
+    const coordinator = new UpdateCoordinator(options);
+    if (entry === "check") { await coordinator.initialize(); await coordinator.prepare("runtime"); }
+    else {
+      await mkdir(updates, { recursive: true });
+      await writeFile(join(updates, "transaction-v2.json"), JSON.stringify({ schema: 2, authorized: true, pending: { runtime: obsolete }, previous: { runtime: baseline }, watermarks: {}, lastError: "Finish active sessions before restarting" }));
+    }
+    await installer.install(await runtimeFixture(root, version));
+    await installer.activate(version, { selfCheck });
+    if (entry === "startup") await coordinator.initialize();
+    await coordinator.check();
+    assert.equal(coordinator.state.runtime.currentVersion, version);
+    assert.equal(coordinator.state.runtime.version, undefined);
+    assert.equal(coordinator.state.runtime.phase, "idle");
+    assert.equal(coordinator.state.error, undefined);
+    const journal = JSON.parse(await readFile(join(updates, "transaction-v2.json"), "utf8"));
+    assert.equal(journal.pending.runtime, undefined);
+    if (entry === "startup") assert.deepEqual(journal.previous.runtime, baseline);
+    await coordinator.prepare("runtime");
+    assert.equal((await coordinator.apply()).ok, false);
+    assert.equal((await installer.current())?.runtimeVersion, version);
+  });
+}
+
+test("a corrupt active Runtime keeps its prepared same-version repair", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-runtime-repair-pending-"));
+  const runtimeRoot = join(root, "installed"), version = "18.0.0-harness.2";
+  const installer = new RuntimeInstaller(runtimeRoot, { trustedKeys: keys });
+  const source = await runtimeFixture(root, version), selfCheck = { run: async () => {} };
+  await installer.install(source); await installer.activate(version, { selfCheck });
+  const archive = join(root, "runtime.zip"); await createRuntimeArchive(source, archive);
+  const bytes = await readFile(archive), release = { ...component("runtime.zip", version), file: file("runtime.zip", bytes) };
+  const updates = join(root, "updates"); await mkdir(updates, { recursive: true });
+  await writeFile(join(updates, "transaction-v2.json"), JSON.stringify({ schema: 2, authorized: false, pending: { runtime: signed({ runtime: release }) }, previous: {}, watermarks: {} }));
+  const cached = cachedUpdatePath(join(updates, "cache"), release.file); await mkdir(dirname(cached), { recursive: true }); await writeFile(cached, bytes);
+  await writeFile(join(runtimeRoot, "versions", version, "juling.exe"), "corrupt");
+  const options = { root: updates, runtimeRoot, repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {},
+    installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([]), activateOptions: { selfCheck } };
+  const coordinator = new UpdateCoordinator(options); await coordinator.initialize();
+  assert.equal(coordinator.state.runtime.phase, "ready");
+  assert.equal(coordinator.state.runtime.version, version);
+  assert.equal((await coordinator.apply()).ok, true);
+  await new UpdateCoordinator(options).initialize();
+  assert.equal((await installer.currentManifest())?.manifest.runtimeVersion, version);
+});
+
+test("a final restart blocker defers without losing the prepared artifact or recording a failure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-final-blocker-"));
+  const requests: string[] = [];
+  let blocked = true, installs = 0, restarts = 0;
+  const options = { root, runtimeRoot: join(root, "installed"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false,
+    beforeQuit: async () => { if (blocked) throw new UpdateRestartBlockedError("请先处理待完成的交互，再重启更新"); },
+    installDesktop: async () => { installs++; }, restart: () => { restarts++; }, quit: () => {}, fetcher: fetcher([signed({ app: component() })], requests) };
+  const coordinator = new UpdateCoordinator(options); await coordinator.initialize(); await coordinator.prepare("app");
+  const preparedRequests = requests.length;
+  assert.deepEqual(await coordinator.apply(), { ok: true, deferred: true, message: "请先处理待完成的交互，再重启更新" });
+  assert.equal(coordinator.state.app.phase, "ready");
+  assert.equal(coordinator.state.error, undefined);
+  const journal = JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8"));
+  assert.equal(journal.authorized, false); assert.equal(journal.lastError, undefined);
+  blocked = false;
+  assert.equal((await coordinator.apply()).ok, true);
+  assert.equal(installs, 1); assert.equal(restarts, 0); assert.equal(requests.length, preparedRequests);
+});
+
+test("a Host cleanup failure after shutdown starts restarts the old desktop for recovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-partial-shutdown-"));
+  let restarts = 0, installs = 0;
+  const phases: string[] = [];
+  const coordinator = new UpdateCoordinator({ root, runtimeRoot: join(root, "installed"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: s => { phases.push(s.app.phase); }, isBusy: () => false,
+    beforeQuit: async started => { started(); throw new Error("Host cleanup failed"); },
+    installDesktop: async () => { installs++; }, restart: () => { restarts++; }, quit: () => {}, fetcher: fetcher([signed({ app: component() })]) });
+  await coordinator.initialize(); await coordinator.prepare("app");
+  assert.deepEqual(await coordinator.apply(), { ok: false, message: "Host cleanup failed" });
+  assert.equal(restarts, 1); assert.equal(installs, 0); assert.ok(phases.includes("applying"));
+  assert.equal(coordinator.state.app.phase, "ready"); assert.equal(coordinator.state.errorStage, "apply");
+  const saved = JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8"));
+  assert.equal(saved.authorized, false); assert.equal(saved.lastErrorStage, "apply");
+});
+
+test("a failed update check reports its stage and preserves an already prepared update", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-check-offline-"));
+  let offline = false, installs = 0;
+  const source = fetcher([signed({ app: component() })]);
+  const coordinator = new UpdateCoordinator({ root, runtimeRoot: join(root, "installed"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {},
+    installDesktop: async () => { installs++; }, restart: () => {}, quit: () => {},
+    fetcher: (async (...args) => offline ? new Response(null, { status: 403 }) : source(...args)) as typeof fetch });
+  await coordinator.initialize(); await coordinator.prepare("app");
+  offline = true; await coordinator.check();
+  assert.equal(coordinator.state.errorStage, "check"); assert.match(coordinator.state.error ?? "", /403/);
+  assert.equal(coordinator.state.app.phase, "ready");
+  assert.equal((await coordinator.apply()).ok, true); assert.equal(installs, 1);
+});

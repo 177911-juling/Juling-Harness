@@ -1,0 +1,759 @@
+import { pauseWorkStatus } from "../slash-commands/builtin-control";
+import { cfgToolsApprovalMode } from "../tools/settings";
+import { cfgHindsightApiToken } from "../hindsight/settings";
+import { logger } from "@oh-my-pi/pi-utils";
+import * as AIError from "@oh-my-pi/pi-ai/error";
+import {
+	currentRuntimeIdentity,
+	type RuntimeIdentity,
+	runtimeIdentityHistory,
+	sameRuntimeIdentity,
+} from "../session/runtime-identity";
+import type { SessionEntry } from "../session/session-entries";
+import {
+	type HarnessEventEnvelope,
+	type HarnessInteractionRequiredEvent,
+	type HarnessInteractionResolvedEvent,
+	type HarnessOperatorStateSnapshot,
+	type HarnessPendingInteraction,
+	type HarnessReceipt,
+	type HarnessRetryState,
+	type HarnessRuntimeIdentitySnapshot,
+	type HarnessSessionTelemetry,
+	type HarnessSnapshotResponse,
+	stableImplementedManifestHash,
+} from "./bridge-protocol";
+import type { ConversationRuntimeEvent } from "./conversation-protocol";
+import { CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION } from "./conversation-protocol";
+import type { HarnessBtwSnapshot } from "./services/btw-service";
+import type { HarnessLiveService } from "./services/live-service";
+import type { HarnessLoopService } from "./services/loop-service";
+import type { HarnessModeControlService } from "./services/mode-control-service";
+import type { HarnessPauseService } from "./services/pause-service";
+import { HarnessSessionTranscriptService } from "./services/session-transcript-service";
+import { buildHarnessSessionTelemetry } from "./session-telemetry";
+import type { HarnessHostRuntime } from "./harness-host-mode";
+
+function conversationAdvancesStateVersion(kind: ConversationRuntimeEvent["kind"]): boolean {
+	if (kind === "conversation.message.delta") return CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION;
+	return (
+		kind === "conversation.message.completed" ||
+		kind === "conversation.tool.completed" ||
+		kind === "conversation.turn.completed" ||
+		kind === "conversation.turn.aborted" ||
+		kind === "conversation.compaction.completed"
+	);
+}
+
+function goalStatus(status: string): "off" | "active" | "paused" | "complete" {
+	switch (status) {
+		case "active":
+			return "active";
+		case "paused":
+		case "budget-limited":
+			return "paused";
+		case "complete":
+			return "complete";
+		default:
+			return "off";
+	}
+}
+
+function cloneSnapshot(snapshot: HarnessOperatorStateSnapshot): HarnessOperatorStateSnapshot {
+	return structuredClone(snapshot);
+}
+
+/**
+ * Equality key for `commitStateChange`. `stateVersion` is normalized out
+ * because the commit is what bumps it: keeping it would make every key differ
+ * from the previously committed one and turn the equality check into a no-op.
+ * One serialization per call, cached next to `#committedSnapshot`, replaces the
+ * two `JSON.stringify` passes this comparison used to cost — the path runs
+ * several times a second while subagents stream.
+ */
+function stateComparisonKey(snapshot: HarnessOperatorStateSnapshot): string {
+	return JSON.stringify({ ...snapshot, stateVersion: 0 });
+}
+
+const PLAN_BODY_MAX_CHARS = 32 * 1024;
+
+interface SessionTitlePort {
+	getSessionName?: () => string | undefined;
+	readonly titleSource?: "user" | "auto";
+	onSessionNameChanged?: (listener: () => void) => () => void;
+}
+
+function truncatePlanBody(body: string): string {
+	return body.length <= PLAN_BODY_MAX_CHARS ? body : body.slice(0, PLAN_BODY_MAX_CHARS);
+}
+
+export class HarnessStateProjector {
+	#unsubscribeEvaluations: (() => void) | undefined;
+	readonly #runtime: HarnessHostRuntime;
+	readonly #pauseService: HarnessPauseService;
+	readonly #loopService: HarnessLoopService;
+	readonly #liveService: HarnessLiveService;
+	readonly #modeService: HarnessModeControlService;
+	readonly #listeners = new Set<(event: HarnessEventEnvelope) => void>();
+	readonly #terminalReceipts: HarnessReceipt[] = [];
+	#pauseRefresh: NodeJS.Timeout | undefined;
+	readonly #unsubscribePause: () => void;
+	readonly #unsubscribeLoop: () => void;
+	readonly #unsubscribeLive: () => void;
+	readonly #unsubscribeModes: () => void;
+	readonly #unsubscribeModel: () => void;
+	readonly #unsubscribeTaskModel: () => void;
+	readonly #unsubscribeAgents: () => void;
+	#unsubscribeJobs: () => void = () => {};
+	#unsubscribeMemoryCredential: () => void = () => {};
+	#unsubscribeSessionTitle: () => void = () => {};
+	readonly #unsubscribeSessionChange: () => void;
+	readonly #unsubscribeConversation: () => void;
+	readonly #unsubscribeWorker: () => void;
+	#committedSnapshot: HarnessOperatorStateSnapshot | undefined;
+	/**
+	 * Change-detection key for `#committedSnapshot`, computed lazily so a commit
+	 * driven by a conversation event never pays for a serialization no
+	 * `commitStateChange` will read. `undefined` means "recompute on demand".
+	 */
+	#committedKey: string | undefined;
+	#stateVersion = 0;
+	#eventSeq = 0;
+	#pendingInteraction: HarnessPendingInteraction | undefined;
+	#agentsRevision = 0;
+	#jobsRevision = 0;
+	#ownedTranscript: HarnessSessionTranscriptService | undefined;
+	#stateCommitTimer: ReturnType<typeof setTimeout> | undefined;
+	#stateCommitQueued = false;
+	#lastCoalescedCommitAt = 0;
+	#disposed = false;
+	#telemetryTimer: ReturnType<typeof setTimeout> | undefined;
+	#telemetryInFlight = false;
+	#telemetryQueued = false;
+	#lastRateAt = 0;
+	#telemetrySnapshot: HarnessSessionTelemetry;
+	#retry: HarnessRetryState | undefined;
+	#retrySessionId: string | undefined;
+	#awaitingAsyncWork = false;
+	#identity: { sessionId: string; history: Array<RuntimeIdentity | null> } | undefined;
+
+	constructor(runtime: HarnessHostRuntime) {
+		this.#runtime = runtime;
+		this.#pauseService = runtime.services.pause;
+		this.#loopService = runtime.services.loop;
+		this.#liveService = runtime.services.live;
+		this.#modeService = runtime.services.modes;
+		this.#telemetrySnapshot = this.#telemetry();
+		this.#committedSnapshot = this.snapshot();
+		this.#unsubscribePause = this.#pauseService.onChange(state => {
+			clearInterval(this.#pauseRefresh);
+			this.#pauseRefresh = state.paused ? setInterval(() => this.commitStateChange(), 1000) : undefined;
+			this.#pauseRefresh?.unref();
+			this.commitStateChange();
+		});
+		this.#unsubscribeLoop = this.#loopService.onChange(() => this.commitStateChange());
+		this.#unsubscribeLive = this.#liveService.onChange(() => this.commitStateChange());
+		this.#unsubscribeModes = this.#modeService.onChange(() => this.commitStateChange());
+		// The model pill must stay truthful no matter who switched: Bridge, the
+		// `harness-host` TUI, a Plan-role transition, or a retry fallback.
+		this.#unsubscribeModel =
+			runtime.session.subscribe?.(event => {
+				if (event.type === "auto_retry_start") {
+					this.#retrySessionId = runtime.sessionManager.getSessionId();
+					this.#retry = {
+						attempt: event.attempt,
+						maxAttempts: event.maxAttempts,
+						nextRetryAt: Date.now() + Math.max(0, Math.ceil(event.delayMs)),
+						reason: AIError.is(event.errorId ?? 0, AIError.Flag.UsageLimit) ? "usage-limit" : "retry",
+					};
+					this.commitStateChange();
+				} else if (
+					event.type === "auto_retry_end" ||
+					(event.type === "message_start" && event.message.role === "assistant")
+				) {
+					if (this.#retry !== undefined) {
+						this.#retry = undefined;
+						this.commitStateChange();
+					}
+				}
+				if (event.type === "agent_start" || event.type === "agent_end") {
+					// A non-terminal end that only a background-job result resumes is
+					// not a finished run: surface it until a run starts or settles.
+					const awaiting = event.type === "agent_end" && event.awaitingAsyncWork === true;
+					if (awaiting !== this.#awaitingAsyncWork) {
+						this.#awaitingAsyncWork = awaiting;
+						this.commitStateChange();
+					}
+				}
+				if (event.type === "advisor_cost_changed") this.#scheduleTelemetry(false);
+				if (event.type === "model_changed" || event.type === "thinking_level_changed") this.commitStateChange();
+			}) ?? (() => {});
+		// Bridge-side Task subagent model switches carry their own signal; TUI
+		// alt+p writes go through the settings override layer with no event and
+		// surface on the next unrelated state commit instead.
+		this.#unsubscribeTaskModel = runtime.services.models?.onChange(() => this.commitStateChange()) ?? (() => {});
+		this.#unsubscribeAgents = runtime.services.agents.onChange(() => {
+			this.#agentsRevision += 1;
+			this.#scheduleStateCommit();
+		});
+		let unsubscribeJobManager = () => {};
+		const bindJobManager = (): void => {
+			unsubscribeJobManager();
+			const manager = runtime.session.asyncJobManager;
+			const onJobsChanged = (): void => {
+				this.#jobsRevision += 1;
+				this.#scheduleStateCommit();
+			};
+			// Widgets refresh in the background while shown; their registry pushes
+			// those repaints separately from job state changes.
+			const unsubscribeJobs = manager?.onChange(onJobsChanged) ?? (() => {});
+			const unsubscribeWidgets = manager?.widgets?.subscribe(onJobsChanged) ?? (() => {});
+			unsubscribeJobManager = () => {
+				unsubscribeJobs();
+				unsubscribeWidgets();
+			};
+		};
+		bindJobManager();
+		const bindMemoryCredential = (): void => {
+			this.#unsubscribeMemoryCredential();
+			this.#unsubscribeMemoryCredential = runtime.services.settings
+				? cfgHindsightApiToken.listen(runtime.session.settings, () => {
+						this.commitStateChange();
+					})
+				: () => {};
+		};
+		bindMemoryCredential();
+		this.#unsubscribeJobs = () => unsubscribeJobManager();
+		let boundTitleManager: SessionTitlePort | undefined;
+		const bindSessionTitle = (): void => {
+			const residency = runtime.workerResidency?.() ?? "active";
+			if (residency !== "active" && residency !== "sleeping") {
+				this.#unsubscribeSessionTitle();
+				this.#unsubscribeSessionTitle = () => {};
+				boundTitleManager = undefined;
+				return;
+			}
+			const sessionManager = runtime.sessionManager as SessionTitlePort | undefined;
+			if (sessionManager === boundTitleManager) return;
+			this.#unsubscribeSessionTitle();
+			boundTitleManager = sessionManager;
+			const onSessionNameChanged = sessionManager?.onSessionNameChanged;
+			this.#unsubscribeSessionTitle =
+				typeof onSessionNameChanged === "function" && sessionManager !== undefined
+					? onSessionNameChanged.call(sessionManager, () => this.commitStateChange())
+					: () => {};
+		};
+		bindSessionTitle();
+		this.#unsubscribeSessionChange =
+			typeof runtime.session.registerSessionChangeCallback === "function"
+				? runtime.session.registerSessionChangeCallback(() => {
+						bindJobManager();
+						bindMemoryCredential();
+						bindSessionTitle();
+						this.commitStateChange();
+					})
+				: () => {};
+		this.#unsubscribeEvaluations = runtime.services.workbench?.evaluations?.subscribe((id, revision) =>
+			this.#emitEvent({ kind: "evaluation.changed", id, revision }),
+		);
+		this.#unsubscribeConversation =
+			runtime.services.conversation?.onEvent(event => this.#emitConversation(event)) ?? (() => {});
+		this.#unsubscribeWorker =
+			runtime.onWorkerStateChange?.(() => {
+				bindJobManager();
+				bindMemoryCredential();
+				bindSessionTitle();
+				this.commitStateChange();
+			}) ?? (() => {});
+	}
+
+	get stateVersion(): number {
+		return this.#stateVersion;
+	}
+
+	get lastEventSeq(): number {
+		return this.#eventSeq;
+	}
+
+	snapshot(): HarnessOperatorStateSnapshot {
+		const workerResidency = this.#runtime.workerResidency?.() ?? "active";
+		const workerGeneration = this.#runtime.workerGeneration?.() ?? 0;
+		// A recycled Worker releases its in-memory transcript and closes its
+		// SessionManager. Keep serving the last committed read model while the
+		// old Worker is being torn down or revived (or after a failed recycle)
+		// instead of dereferencing that terminal object.
+		// The next state change still goes through commitStateChange and updates the
+		// residency/generation fields monotonically.
+		if (
+			(workerResidency === "recycling" ||
+				workerResidency === "reviving" ||
+				workerResidency === "dormant" ||
+				workerResidency === "failed") &&
+			this.#committedSnapshot !== undefined
+		) {
+			return cloneSnapshot({
+				...this.#committedSnapshot,
+				workerResidency,
+				workerGeneration,
+				stateVersion: this.stateVersion,
+			});
+		}
+		const sessionManager = this.#runtime.sessionManager as SessionTitlePort | undefined;
+		const sessionTitle = sessionManager?.getSessionName?.();
+		const modes = this.#modeService.state();
+		const plan = modes.plan;
+		const goal = modes.goal;
+		const vibe = modes.vibe;
+		const loop = this.#loopService.state();
+		const live = this.#liveService.state();
+		const model = this.#runtime.services.models?.state();
+		const taskModel = this.#runtime.services.models?.taskState();
+		const activeMode =
+			goal?.status === "active"
+				? "goal"
+				: plan?.status === "active" || plan?.status === "review"
+					? "plan"
+					: vibe?.enabled
+						? "vibe"
+						: "normal";
+		const rootAgentId = this.#runtime.session.getAgentId() ?? "Main";
+		const jobs = this.#runtime.services.jobs.list({ callerAgentId: rootAgentId, includeRecent: true });
+		const jobAgents = jobs.length === 0 ? [] : this.#runtime.services.jobs.agentLinks(jobs, rootAgentId);
+		const awaitingAsyncWork =
+			this.#awaitingAsyncWork && jobs.some(job => job.status === "running" || job.status === "queued");
+		const runtimeIdentity = this.#runtimeIdentity();
+		const lastTurnOutcome = this.#runtime.session.isStreaming ? undefined : this.#lastTurnOutcome();
+		const snapshot: HarnessOperatorStateSnapshot = {
+			runtimeId: this.#runtime.runtimeId,
+			runtimeEpoch: this.#runtime.runtimeEpoch,
+			stateVersion: this.stateVersion,
+			sessionId: this.#runtime.sessionId,
+			...(this.#runtime.resumedFromSessionId ? { resumedFromSessionId: this.#runtime.resumedFromSessionId } : {}),
+			...(this.#runtime.sessionManager?.getHeader?.()?.continuationOf
+				? { continuationOf: this.#runtime.sessionManager.getHeader()!.continuationOf }
+				: {}),
+			workerResidency,
+			workerGeneration,
+			...(sessionTitle === undefined ? {} : { sessionTitle }),
+			...(sessionManager?.titleSource === undefined ? {} : { sessionTitleSource: sessionManager.titleSource }),
+			isStreaming: this.#runtime.session.isStreaming,
+			isCompacting: this.#runtime.session.isCompacting,
+			activeMode,
+			approvalMode: this.#runtime.services.permissions?.state() ?? this.#approvalMode(),
+			pause:
+				this.#pauseService.state().paused && typeof this.#runtime.session.getAdvisorStatusOverview === "function"
+					? { ...this.#pauseService.state(), ...pauseWorkStatus(this.#runtime.session) }
+					: this.#pauseService.state(),
+			// Service- and projector-owned members go in by reference: the literal
+			// is local and `cloneSnapshot` below deep-copies it before it escapes,
+			// so cloning them here only copied the same bytes twice per snapshot.
+			...(this.#pendingInteraction === undefined ? {} : { pendingInteraction: this.#pendingInteraction }),
+			...(loop === undefined ? {} : { loop }),
+			...(model === undefined ? {} : { model }),
+			...(taskModel === undefined ? {} : { taskModel }),
+			live,
+			pendingMessages: this.#runtime.session.queuedMessageCount,
+			activeCommandIds: [],
+			agentsRevision: this.#agentsRevision,
+			jobsRevision: this.#jobsRevision,
+			agents: this.#runtime.services.agents.list({ includeTerminal: true, includePersisted: true }),
+			jobs,
+			...(jobAgents.length > 0 ? { jobAgents } : {}),
+			...(awaitingAsyncWork ? { awaitingAsyncWork: true } : {}),
+			// A running turn has nothing to resume, and reading the branch on every
+			// streaming state change would walk the whole session per token flush.
+			...(this.#runtime.session.isStreaming
+				? {}
+				: { ...(lastTurnOutcome === undefined ? {} : { lastTurnOutcome }) }),
+			...(runtimeIdentity === undefined ? {} : { runtimeIdentity }),
+			telemetry: this.#telemetrySnapshot,
+			...(this.#retry === undefined || this.#retrySessionId !== this.#runtime.sessionManager.getSessionId()
+				? {}
+				: { retry: { ...this.#retry } }),
+			...(this.#runtime.services.settings === undefined
+				? {}
+				: {
+						runtimeSettings: this.#runtime.services.settings.snapshot(),
+						runtimeSettingsActivation: this.#runtime.services.settings.activation(),
+					}),
+			...(this.#runtime.session.compactionSpeculation === undefined
+				? {}
+				: { compactionSpeculation: this.#runtime.session.compactionSpeculation }),
+		};
+		if (plan !== undefined) {
+			snapshot.plan = {
+				status: plan.status,
+				...(plan.planFilePath ? { planReference: plan.planFilePath } : {}),
+				...(plan.title ? { title: plan.title } : {}),
+				...(plan.body ? { body: truncatePlanBody(plan.body) } : {}),
+			};
+		}
+		if (goal !== undefined) {
+			snapshot.goal = {
+				status: goalStatus(goal.status),
+				objective: goal.objective ?? "",
+				tokenBudget: goal.tokenBudget,
+				tokensUsed: goal.tokensUsed ?? 0,
+			};
+		}
+		if (vibe !== undefined) snapshot.vibe = { enabled: vibe.enabled, workerAgentIds: vibe.workerAgentIds };
+		if (this.#runtime.session.isFastModeEnabled?.() === true) {
+			snapshot.fast = {
+				enabled: true,
+				active: this.#runtime.session.isFastModeActive?.() === true,
+			};
+		}
+		const prewalk = this.#runtime.session.getPrewalkState?.();
+		if (prewalk?.target) {
+			snapshot.prewalk = {
+				status: "armed",
+				target: `${prewalk.target.provider}/${prewalk.target.id}`,
+			};
+		}
+		return cloneSnapshot(snapshot);
+	}
+
+	response(requestId: string): HarnessSnapshotResponse {
+		return {
+			type: "harness.snapshot",
+			requestId,
+			snapshot: this.snapshot(),
+			commandManifestHash: this.#runtime.services.commands.manifestHash(),
+			capabilityHash: stableImplementedManifestHash("capabilities"),
+			lastEventSeq: this.lastEventSeq,
+			messagesCursor: this.#transcript().headCursor(),
+			terminalReceipts: structuredClone(this.#terminalReceipts),
+		};
+	}
+
+	onEvent(listener: (event: HarnessEventEnvelope) => void): () => void {
+		this.#listeners.add(listener);
+		return () => this.#listeners.delete(listener);
+	}
+
+	recordTerminalReceipt(receipt: HarnessReceipt): void {
+		if (receipt.status !== "completed" && receipt.status !== "failed" && receipt.status !== "rejected") return;
+		this.#terminalReceipts.push(structuredClone(receipt));
+		if (this.#terminalReceipts.length > 128) this.#terminalReceipts.shift();
+	}
+
+	setPendingInteraction(pending: HarnessPendingInteraction | undefined): void {
+		this.#pendingInteraction = pending === undefined ? undefined : structuredClone(pending);
+		this.commitStateChange();
+	}
+
+	emitInteractionRequired(eventBody: HarnessInteractionRequiredEvent): void {
+		this.#emitEvent(eventBody);
+	}
+
+	emitInteractionResolved(eventBody: HarnessInteractionResolvedEvent): void {
+		this.#emitEvent(eventBody);
+	}
+
+	emitBtwChanged(snapshot: HarnessBtwSnapshot): void {
+		this.#emitEvent({ kind: "btw.changed", snapshot });
+	}
+
+	emitRuntimeQuiescing(): void {
+		this.#emitEvent({ kind: "runtime.quiescing" });
+	}
+
+	emitRuntimeShutdownComplete(): void {
+		this.#emitEvent({ kind: "runtime.shutdownComplete" });
+	}
+
+	#transcript(): HarnessSessionTranscriptService {
+		if (this.#runtime.services.transcript !== undefined) return this.#runtime.services.transcript;
+		if (this.#ownedTranscript === undefined) {
+			this.#ownedTranscript = new HarnessSessionTranscriptService(() => ({
+				runtimeEpoch: this.#runtime.runtimeEpoch,
+				sessionId: this.#runtime.sessionId,
+				sessionManager: this.#runtime.sessionManager,
+			}));
+		}
+		return this.#ownedTranscript;
+	}
+
+	/**
+	 * How the last turn on the active branch ended, read from the tail assistant
+	 * message's `stopReason`. Live events cannot answer this: after a restart the
+	 * only trace of an interrupted turn is the terminal record load recovery
+	 * appended, and a restored conversation must still offer the operator a way
+	 * to go on.
+	 */
+	#lastTurnOutcome(): "completed" | "interrupted" | undefined {
+		const sessionManager = this.#runtime.sessionManager as
+			| { getBranch?: () => SessionEntry[]; getEntries?: () => SessionEntry[] }
+			| undefined;
+		const entries = sessionManager?.getBranch?.() ?? sessionManager?.getEntries?.() ?? [];
+		for (let index = entries.length - 1; index >= 0; index -= 1) {
+			const entry = entries[index];
+			if (entry?.type !== "message") continue;
+			const message = entry.message;
+			if (message.role !== "assistant") return undefined;
+			return message.stopReason === "aborted" || message.stopReason === "error" ? "interrupted" : "completed";
+		}
+		return undefined;
+	}
+
+	/** Current tail reading, for commands that must decide whether a turn is resumable. */
+	get lastTurnOutcome(): "completed" | "interrupted" | undefined {
+		return this.#lastTurnOutcome();
+	}
+
+	/**
+	 * Builds that wrote this session plus the running one. The file's stamps are
+	 * read once per session: entries this process appends carry the current
+	 * identity, which is appended here already.
+	 */
+	#runtimeIdentity(): HarnessRuntimeIdentitySnapshot | undefined {
+		const sessionId = this.#runtime.sessionId;
+		try {
+			if (this.#identity?.sessionId !== sessionId) {
+				const sessionManager = this.#runtime.sessionManager as { getEntries?: () => SessionEntry[] } | undefined;
+				this.#identity = { sessionId, history: runtimeIdentityHistory(sessionManager?.getEntries?.() ?? []) };
+			}
+			// `current` is re-read: a source checkout's diff hash resolves after start.
+			const current = currentRuntimeIdentity();
+			const history = [...this.#identity.history];
+			const last = history.at(-1);
+			if (last === undefined || !sameRuntimeIdentity(last, current)) history.push(current);
+			// Keep the newest builds; a session revived across many builds stays bounded.
+			return { current: { ...current }, history: history.slice(-32).map(item => (item ? { ...item } : null)) };
+		} catch (error) {
+			logger.debug("Harness runtime identity unavailable", { error: String(error) });
+			return undefined;
+		}
+	}
+
+	/** Effective tool approval mode: runtime override layer first, then the persisted default. */
+	#approvalMode(): "always-ask" | "always-ask-cached" | "write" | "yolo" {
+		const settings = this.#runtime.session.settings;
+		if (settings === undefined) return "yolo";
+		const value = cfgToolsApprovalMode.get(settings);
+		return value === "always-ask" || value === "always-ask-cached" || value === "write" || value === "yolo"
+			? value
+			: "yolo";
+	}
+
+	#emitConversation(event: ConversationRuntimeEvent): void {
+		const isMain = event.sessionId === this.#runtime.sessionId;
+		const advances = isMain && conversationAdvancesStateVersion(event.kind);
+		if (advances) {
+			this.#stateVersion += 1;
+			this.#committedSnapshot = this.snapshot();
+			this.#committedKey = undefined;
+		}
+		this.#emitEvent(event);
+		if (!isMain) return;
+		if (
+			event.kind === "conversation.message.completed" ||
+			event.kind === "conversation.turn.completed" ||
+			event.kind === "conversation.turn.aborted" ||
+			event.kind === "conversation.compaction.completed"
+		)
+			this.#scheduleTelemetry(true);
+		// A pure text delta cannot move any telemetry number a user can observe —
+		// usage is accounted at message/turn/compaction terminals — so it must not
+		// schedule a rebuild. Every other kind still does: tool boundaries and
+		// notices can follow a context mutation.
+		else if (event.kind !== "conversation.message.delta") this.#scheduleTelemetry(false);
+		else if (Date.now() - this.#lastRateAt >= 500) {
+			this.#lastRateAt = Date.now();
+			const rate = this.#runtime.session.tokenRate?.rate();
+			if (typeof rate === "number" && Number.isFinite(rate) && rate >= 0) {
+				this.#telemetrySnapshot = {
+					...this.#telemetrySnapshot,
+					capturedAt: new Date().toISOString(),
+					generationTps: rate,
+				};
+				this.#emitEvent({
+					kind: "session.telemetry.changed",
+					sessionId: this.#runtime.sessionId,
+					telemetry: this.#telemetrySnapshot,
+				});
+			}
+		}
+		if (advances && this.#committedSnapshot !== undefined) {
+			// No clone here: `#emitEvent` copies the body into the envelope and
+			// `#notify` copies again per listener, so neither a listener nor the
+			// envelope can reach `#committedSnapshot`.
+			this.#emitEvent({ kind: "state.changed", snapshot: this.#committedSnapshot });
+		}
+	}
+
+	#telemetry(): HarnessSessionTelemetry {
+		try {
+			return buildHarnessSessionTelemetry({
+				sessionId: this.#runtime.sessionId,
+				session: this.#runtime.session,
+				capturedAt: new Date().toISOString(),
+			});
+		} catch (error) {
+			logger.debug("Harness telemetry unavailable while Worker is not live", { error: String(error) });
+			return (
+				this.#telemetrySnapshot ?? {
+					sessionId: this.#runtime.sessionId,
+					capturedAt: new Date().toISOString(),
+					tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0 },
+					context: null,
+					unavailableReason: "model_context_unknown",
+				}
+			);
+		}
+	}
+
+	#scheduleTelemetry(immediate: boolean): void {
+		if (immediate) {
+			if (this.#telemetryTimer !== undefined) clearTimeout(this.#telemetryTimer);
+			this.#telemetryTimer = undefined;
+			void this.#emitTelemetry();
+			return;
+		}
+		if (this.#telemetryTimer !== undefined) return;
+		this.#telemetryTimer = setTimeout(() => {
+			this.#telemetryTimer = undefined;
+			void this.#emitTelemetry();
+		}, 250);
+	}
+
+	/**
+	 * Recompute telemetry now and push `session.telemetry.changed`. Context
+	 * mutations that finish without a following conversation turn (manual
+	 * /compact, /clear, handoff) emit no AgentSessionEvent on the vendor side,
+	 * so the cached snapshot would keep serving pre-mutation numbers until the
+	 * next turn's conversation event recomputes it.
+	 */
+	refreshTelemetry(): void {
+		this.#scheduleTelemetry(true);
+	}
+
+	async #emitTelemetry(): Promise<void> {
+		if (this.#telemetryInFlight) {
+			this.#telemetryQueued = true;
+			return;
+		}
+		this.#telemetryInFlight = true;
+		try {
+			const telemetry = this.#telemetry();
+			const storedTelemetry = structuredClone(telemetry);
+			this.#telemetrySnapshot = storedTelemetry;
+			if (this.#committedSnapshot !== undefined) {
+				this.#committedSnapshot = { ...this.#committedSnapshot, telemetry: storedTelemetry };
+				this.#committedKey = undefined;
+			}
+			this.#emitEvent({ kind: "session.telemetry.changed", sessionId: this.#runtime.sessionId, telemetry });
+		} finally {
+			this.#telemetryInFlight = false;
+			if (this.#telemetryQueued) {
+				this.#telemetryQueued = false;
+				this.#scheduleTelemetry(false);
+			}
+		}
+	}
+
+	#scheduleStateCommit(): void {
+		if (this.#disposed || this.#stateCommitQueued || this.#stateCommitTimer !== undefined) return;
+		const elapsed = Date.now() - this.#lastCoalescedCommitAt;
+		if (elapsed >= 16) {
+			this.#stateCommitQueued = true;
+			queueMicrotask(() => {
+				this.#stateCommitQueued = false;
+				if (this.#disposed) return;
+				this.commitStateChange();
+			});
+			return;
+		}
+		this.#stateCommitTimer = setTimeout(
+			() => {
+				this.#stateCommitTimer = undefined;
+				if (this.#disposed) return;
+				this.commitStateChange();
+			},
+			Math.max(1, 16 - elapsed),
+		);
+		this.#stateCommitTimer.unref?.();
+	}
+
+	#notify(event: HarnessEventEnvelope): void {
+		const listeners = [...this.#listeners];
+		for (let index = 0; index < listeners.length; index += 1) {
+			const listener = listeners[index]!;
+			const delivered = index + 1 < listeners.length ? structuredClone(event) : event;
+			try {
+				listener(delivered);
+			} catch (error) {
+				logger.warn("Harness state projector listener failed", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+	}
+
+	#emitEvent(eventBody: HarnessEventEnvelope["event"]): void {
+		this.#eventSeq += 1;
+		if (this.#listeners.size === 0) return;
+		const event: HarnessEventEnvelope = {
+			type: "harness.event",
+			runtimeEpoch: this.#runtime.runtimeEpoch,
+			eventSeq: this.#eventSeq,
+			stateVersion: this.#stateVersion,
+			occurredAt: new Date().toISOString(),
+			event: Object.isFrozen(eventBody) ? eventBody : structuredClone(eventBody),
+		};
+		this.#notify(event);
+	}
+
+	dispose(): void {
+		this.#disposed = true;
+		if (this.#stateCommitTimer !== undefined) clearTimeout(this.#stateCommitTimer);
+		this.#stateCommitTimer = undefined;
+		this.#stateCommitQueued = false;
+		this.#unsubscribeEvaluations?.();
+		clearInterval(this.#pauseRefresh);
+		if (this.#telemetryTimer !== undefined) clearTimeout(this.#telemetryTimer);
+		this.#telemetryTimer = undefined;
+		this.#unsubscribePause();
+		this.#unsubscribeLoop();
+		this.#unsubscribeLive();
+		this.#unsubscribeModes();
+		this.#unsubscribeModel();
+		this.#unsubscribeTaskModel();
+		this.#unsubscribeAgents();
+		this.#unsubscribeJobs();
+		this.#unsubscribeMemoryCredential();
+		this.#unsubscribeSessionTitle();
+		this.#unsubscribeSessionChange();
+		this.#unsubscribeConversation();
+		this.#unsubscribeWorker();
+		this.#listeners.clear();
+	}
+
+	/**
+	 * Bump stateVersion/eventSeq and emit a state.changed event when the
+	 * observable snapshot actually differs from the last committed one.
+	 * Returns false (and emits nothing) when no observable change occurred.
+	 */
+	commitStateChange(): boolean {
+		if (this.#stateCommitTimer !== undefined) {
+			clearTimeout(this.#stateCommitTimer);
+			this.#stateCommitTimer = undefined;
+		}
+		this.#stateCommitQueued = false;
+		this.#lastCoalescedCommitAt = Date.now();
+		const snapshot = this.snapshot();
+		const key = stateComparisonKey(snapshot);
+		if (this.#committedSnapshot !== undefined) {
+			this.#committedKey ??= stateComparisonKey(this.#committedSnapshot);
+			if (key === this.#committedKey) return false;
+		}
+		this.#stateVersion += 1;
+		snapshot.stateVersion = this.#stateVersion;
+		this.#committedSnapshot = snapshot;
+		this.#committedKey = key;
+		// `#emitEvent` bumps eventSeq, stamps the envelope, and copies the body,
+		// so the committed snapshot is never aliased into an emitted event.
+		this.#emitEvent({ kind: "state.changed", snapshot });
+		return true;
+	}
+}

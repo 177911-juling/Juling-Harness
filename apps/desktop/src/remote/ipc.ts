@@ -1,0 +1,191 @@
+import { randomUUID } from "node:crypto";
+import type { ClientTransport, ClientContextScope } from "@juling-harness/client-contract";
+import { parseClientCommandRequest, parseClientQueryRequest } from "@juling-harness/transport-desktop";
+import { REMOTE_CHANNELS, type RemoteConnectionProfile, type RemoteCredentials } from "./shared.js";
+import type { RemoteConnectionManager } from "./manager.js";
+import { RemoteOperationError } from "./wire.js";
+import { desktopText } from "../desktop-language-shared.js";
+
+interface Sender {
+  getURL(): string;
+  isDestroyed(): boolean;
+  send(channel: string, payload: unknown): void;
+  on(event: "destroyed" | "render-process-gone", listener: () => void): void;
+  on(event: "did-start-navigation", listener: (event: unknown, url: string, isInPlace: boolean, isMainFrame: boolean) => void): void;
+  removeListener(event: "destroyed" | "render-process-gone", listener: () => void): void;
+  removeListener(event: "did-start-navigation", listener: (event: unknown, url: string, isInPlace: boolean, isMainFrame: boolean) => void): void;
+}
+interface Ipc { handle(channel: string, listener: (event: { sender: Sender }, ...args: unknown[]) => unknown): void; removeHandler(channel: string): void; }
+export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnectionManager; isTrusted(sender: Sender): boolean; confirmDeployment?(profile: RemoteConnectionProfile): Promise<boolean>; installRuntime(id: string): Promise<{ installed: boolean }> }): { cancelPending(): Promise<void>; dispose(): void } {
+  const { ipc, manager } = options;
+  let disposed = false;
+  const senders = new Set<Sender>();
+  const senderCleanups = new Map<Sender, () => void>();
+  const contexts = new Map<string, { id: string; generation: number; owner: Sender; transport: ClientTransport; off: () => void }>();
+  const pruneContexts = (onlyId?: string): void => {
+    for (const [contextId, entry] of contexts) {
+      if (onlyId !== undefined && entry.id !== onlyId) continue;
+      let alive = false;
+      if (typeof manager.get === "function") {
+        try {
+          const remote = manager.get(entry.id);
+          alive = remote.generation === entry.generation;
+        } catch {
+          alive = false;
+        }
+      }
+      if (!alive) {
+        contexts.delete(contextId);
+        entry.off();
+        void entry.transport.close().catch(() => {});
+      }
+    }
+  };
+  const target = (sender: Sender, id: string, contextId?: unknown) => {
+    const remote = manager.get(id);
+    if (contextId === undefined) return remote.transport;
+    const entry = contexts.get(String(contextId));
+    if (!entry || entry.id !== id || entry.generation !== remote.generation) throw new Error("Conversation context needs reconnection");
+    if (entry.owner !== sender) throw new Error("Conversation context belongs to another renderer");
+    return entry.transport;
+  };
+  const connecting = new Map<string, { owner: Sender; controller: AbortController; clearCredentials(): void }>();
+  const releaseSender = (sender: Sender): void => {
+    senders.delete(sender);
+    senderCleanups.get(sender)?.();
+    senderCleanups.delete(sender);
+    for (const [id, attempt] of connecting) {
+      if (attempt.owner !== sender) continue;
+      attempt.controller.abort();
+      attempt.clearCredentials();
+      connecting.delete(id);
+    }
+    for (const [contextId, entry] of contexts) {
+      if (entry.owner !== sender) continue;
+      contexts.delete(contextId);
+      entry.off();
+      void entry.transport.close().catch(() => {});
+    }
+  };
+  const trackSender = (sender: Sender): void => {
+    if (senders.has(sender)) return;
+    senders.add(sender);
+    const release = () => releaseSender(sender);
+    const navigate = (_event: unknown, _url: string, isInPlace: boolean, isMainFrame: boolean) => {
+      if (isMainFrame && !isInPlace) releaseSender(sender);
+    };
+    sender.on("destroyed", release);
+    sender.on("render-process-gone", release);
+    sender.on("did-start-navigation", navigate);
+    senderCleanups.set(sender, () => {
+      sender.removeListener("destroyed", release);
+      sender.removeListener("render-process-gone", release);
+      sender.removeListener("did-start-navigation", navigate);
+    });
+  };
+  const handle = (channel: string, action: (sender: Sender, ...args: unknown[]) => unknown): void => {
+    ipc.handle(channel, (event, ...args) => {
+      if (disposed || event.sender.isDestroyed() || !options.isTrusted(event.sender)) throw new Error("Untrusted remote workspace client");
+      trackSender(event.sender);
+      return action(event.sender, ...args);
+    });
+  };
+  const idOf = (id: unknown): string => { if (typeof id !== "string" || !id) throw new Error("Connection identity is required"); return id; };
+  const read = async <T>(id: unknown, action: (remote: ReturnType<RemoteConnectionManager["get"]>) => Promise<T>): Promise<T> => {
+    const target = idOf(id);
+    const remote = manager.get(target);
+    const generation = remote.generation;
+    const result = await action(remote);
+    if (manager.get(target) !== remote || remote.generation !== generation) throw new Error(desktopText("SSH 通道已改变，请重新同步；已丢弃旧连接的读取结果", "SSH channel changed; please resynchronize (read result from previous connection was discarded)"));
+    return result;
+  };
+  const cancelPending = async (): Promise<void> => {
+    for (const attempt of connecting.values()) { attempt.controller.abort(); attempt.clearCredentials(); }
+    connecting.clear();
+    for (const sender of [...senders]) releaseSender(sender);
+    await manager.cancelPending();
+  };
+  handle(REMOTE_CHANNELS.list, () => manager.list());
+  handle(REMOTE_CHANNELS.save, (_sender, profile) => manager.save(profile as Omit<RemoteConnectionProfile, "id"> & { id?: string }));
+  handle(REMOTE_CHANNELS.remove, async (_sender, id) => {
+    const target = idOf(id);
+    try { return await manager.remove(target); }
+    finally { pruneContexts(target); }
+  });
+  handle(REMOTE_CHANNELS.connect, async (sender, id, input) => {
+    const credentials = input as RemoteCredentials | undefined;
+    const target = idOf(id);
+    if (connecting.has(target)) { if (credentials) credentials.password = ""; throw new Error("此 SSH 连接正在准备中"); }
+    const attempt = { owner: sender, controller: new AbortController(), clearCredentials: () => { if (credentials) credentials.password = ""; } };
+    connecting.set(target, attempt);
+    let stopWaiting: (() => void) | undefined;
+    try {
+      await manager.list();
+      attempt.controller.signal.throwIfAborted();
+      const cancelled = new Promise<false>(resolve => {
+        const onAbort = () => resolve(false);
+        attempt.controller.signal.addEventListener("abort", onAbort, { once: true });
+        stopWaiting = () => attempt.controller.signal.removeEventListener("abort", onAbort);
+      });
+      const confirmed = options.confirmDeployment ? await Promise.race([options.confirmDeployment(manager.profile(target)), cancelled]) : true;
+      if (!confirmed || attempt.controller.signal.aborted || disposed) throw new Error(desktopText("连接已取消", "Connection cancelled"));
+      await manager.connect(target, credentials, attempt.controller.signal);
+    } finally {
+      stopWaiting?.();
+      if (connecting.get(target) === attempt) connecting.delete(target);
+      if (credentials && typeof credentials === "object") credentials.password = "";
+    }
+  });
+  handle(REMOTE_CHANNELS.installRuntime, (_sender, id) => options.installRuntime(idOf(id)));
+  handle(REMOTE_CHANNELS.approve, (_sender, id) => manager.approveDeployment(idOf(id)));
+  handle(REMOTE_CHANNELS.retryNetwork, (_sender, id) => read(id, remote => remote.transport.peer.request("network.reset")));
+  handle(REMOTE_CHANNELS.disconnect, async (_sender, id) => {
+    const target = idOf(id);
+    const attempt = connecting.get(target);
+    if (attempt) { attempt.controller.abort(); attempt.clearCredentials(); }
+    try { return await manager.disconnect(target); }
+    finally { pruneContexts(target); }
+  });
+  handle(REMOTE_CHANNELS.select, (_sender, id) => manager.select(id === null ? null : idOf(id)));
+  handle(REMOTE_CHANNELS.openContext, async (sender, id, scope) => {
+    const name = idOf(id), remote = manager.get(name), generation = remote.generation;
+    const transport = await remote.transport.openContext(scope as ClientContextScope);
+    if (disposed || !senders.has(sender) || sender.isDestroyed() || manager.get(name) !== remote || remote.generation !== generation) {
+      await transport.close();
+      throw new Error("SSH connection changed while opening the conversation");
+    }
+    const contextId = randomUUID();
+    const off = transport.subscribe({ scope: "all" }, event => emit(REMOTE_CHANNELS.event, { id: name, generation, contextId, event }));
+    contexts.set(contextId, { id: name, generation, owner: sender, transport, off }); return contextId;
+  });
+  handle(REMOTE_CHANNELS.closeContext, async (sender, id, contextId) => {
+    const entry = contexts.get(String(contextId)); if (!entry || entry.id !== idOf(id)) return;
+    if (entry.owner !== sender) throw new Error("Conversation context belongs to another renderer");
+    contexts.delete(String(contextId)); entry.off(); await entry.transport.close();
+  });
+  handle(REMOTE_CHANNELS.bootstrap, (sender, id, contextId) => read(id, () => target(sender, idOf(id), contextId).bootstrap()));
+  handle(REMOTE_CHANNELS.query, (sender, id: unknown, request: unknown, contextId: unknown) => read(id, () => target(sender, idOf(id), contextId).query(parseClientQueryRequest(request))));
+  handle(REMOTE_CHANNELS.command, async (sender, id: unknown, request: unknown, contextId: unknown) => {
+    const name = idOf(id);
+    manager.assertWritable(name);
+    const transport = target(sender, name, contextId);
+    const command = parseClientCommandRequest(request);
+    try { return { ok: true, accepted: await transport.command(command) }; }
+    catch (error) { return { ok: false, error: { code: error instanceof RemoteOperationError ? "UNAVAILABLE" : "OUTCOME_UNKNOWN", message: error instanceof Error ? error.message : desktopText("命令结果未知；未自动重发，请重新连接核对", "Command outcome is unknown; it was not resent — reconnect to verify") } }; }
+  });
+  handle(REMOTE_CHANNELS.directories, (_sender, id, path) => read(id, remote => remote.transport.peer.request("directories", typeof path === "string" ? { path } : {})));
+  handle(REMOTE_CHANNELS.register, (_sender, id, path) => {
+    if (typeof path !== "string" || !path) throw new Error("远端目录不能为空");
+    manager.assertWritable(idOf(id));
+    return manager.get(idOf(id)).transport.registerWorkspace(path).then(async result => { await manager.rememberDirectory(idOf(id), path); return result; });
+  });
+  const emit = (channel: string, payload: unknown): void => { for (const sender of [...senders]) { if (sender.isDestroyed()) releaseSender(sender); else sender.send(channel, payload); } };
+  const offEvent = manager.onEvent(event => emit(REMOTE_CHANNELS.event, event));
+  const offChanged = manager.onChanged(() => { pruneContexts(); emit(REMOTE_CHANNELS.changed, {}); });
+  return { cancelPending, dispose() {
+    disposed = true;
+    void cancelPending().catch(() => {});
+    offEvent(); offChanged();
+    for (const channel of Object.values(REMOTE_CHANNELS)) if (channel !== REMOTE_CHANNELS.event && channel !== REMOTE_CHANNELS.changed) ipc.removeHandler(channel);
+  } };
+}

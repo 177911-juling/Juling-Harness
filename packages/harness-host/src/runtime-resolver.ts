@@ -1,0 +1,1062 @@
+import { readFileDigests } from "@juling-harness/runtime-installer";
+import { createHash } from "node:crypto";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { lstat, mkdtemp, realpath, rm, stat } from "node:fs/promises";
+import type { Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
+import { promisify } from "node:util";
+import type {
+  OperatorCommandManifest,
+  RuntimeInstallationManifest,
+  RuntimePreference,
+  RuntimeProbeResult,
+  HarnessHelloResponse,
+} from "@juling-harness/harness-protocol";
+import { FULL_PARITY_REQUIRED_CAPABILITIES, HARNESS_PROTOCOL_VERSION } from "@juling-harness/harness-protocol";
+import { HarnessBridgeClient, HarnessBridgeHandshakeError, HarnessBridgeRequestError } from "./bridge-client.js";
+import {
+  createBridgeBootstrap,
+  createWindowsBridgeAclPort,
+  type WindowsBridgeAclPort,
+} from "./bridge-auth.js";
+import { ensurePrivateSocketDirectory } from "./socket-paths.js";
+import { POSIX_PROCESS_GROUP_SPAWN_OPTIONS, PosixProcessGroupContainment } from "./posix-process-group.js";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * WP-062 System Runtime Resolver.
+ *
+ * Classifies a candidate runtime as one of:
+ *   "managed" | "compatible-system" | "limited-system" | "rejected"
+ *
+ * Classification comes from a full probe or a matching managed acceptance,
+ * never a file name or a `--version` banner. Accepted managed bytes are freshly
+ * hashed on every resolve; system/custom candidates always get a live probe.
+ * The session launcher still authenticates its own live Bridge. When evidence is
+ * missing the resolver fails closed (rejected / limited with warnings) and
+ * never claims full parity it cannot prove.
+ */
+
+export type RuntimeSource = "managed" | "system" | "custom";
+
+export type RuntimeProbeFailureCode =
+  | "PROBE_UNAVAILABLE"
+  | "SPAWN_FAILED"
+  | "PROBE_TIMEOUT"
+  | "CONNECTION_FAILED"
+  | "PROTOCOL_UNSUPPORTED"
+  | "AUTHENTICATION_FAILED"
+  | "MALFORMED_HELLO"
+  | "IDENTITY_MISMATCH"
+  | "PROCESS_CRASHED"
+  | "SMOKE_FAILED"
+  | "SHUTDOWN_FAILED";
+
+/**
+ * Probe budget. A cold first launch pays for page-faulting a ~150 MB
+ * single-file executable, on-access virus scanning and the Runtime's own
+ * first-run config creation, so the budget matches the build-time identity
+ * probe in `scripts/runtime-artifact.mjs` instead of a warm-machine guess.
+ */
+const DEFAULT_PROBE_TIMEOUT_MS = 30_000;
+
+const DEFAULT_PROBE_ATTEMPTS = 2;
+
+// Bump when the full acceptance rules below change. Protocol/capability inputs,
+// signed manifest, activation and executable content also participate in the key.
+const MANAGED_ACCEPTANCE_POLICY = 1;
+
+/** Drain grace for the graceful-shutdown gate, independent of the connect budget. */
+const SHUTDOWN_EXIT_GRACE_MS = 10_000;
+
+/**
+ * Failures that carry no evidence about the executable itself: the candidate
+ * never got far enough to say anything. Everything else (protocol, auth,
+ * hello, identity, smoke, shutdown) is a verdict and is never retried.
+ */
+const TRANSIENT_PROBE_FAILURES: Partial<Record<RuntimeProbeFailureCode, true>> = {
+  SPAWN_FAILED: true,
+  PROBE_TIMEOUT: true,
+  CONNECTION_FAILED: true,
+  PROCESS_CRASHED: true,
+};
+
+export interface RuntimeProbeOutcome {
+  /** Parsed and authenticated Harness Hello, when the probe succeeded. */
+  hello?: HarnessHelloResponse;
+  /** Fetched operator command manifest, when the probe could verify it. */
+  commandManifest?: OperatorCommandManifest;
+  /** Result of the no-side-effect smoke operations (snapshot/receipt correlation). */
+  smoke?: "passed" | "failed" | "skipped";
+  /** Graceful runtime.shutdown(drain=true) compatibility gate result. */
+  shutdown?: "passed" | "failed" | "skipped";
+  /** Present exactly when the probe could not produce a hello. */
+  failure?: RuntimeProbeFailureCode;
+  /** Host-side diagnostics; never rendered to a Renderer. */
+  failureDetail?: string;
+}
+
+export interface RuntimeProbeContext {
+  /** Resolved absolute path of the candidate executable. */
+  executablePath: string;
+  platform: NodeJS.Platform;
+  arch: string;
+  /** Empty temporary workspace handed to the runtime under probe. */
+  workspaceDirectory: string;
+  supportedProtocolVersions: readonly number[];
+  probeTimeoutMs: number;
+}
+
+/**
+ * Injectable seam for the actual process/Bridge probe. The resolver is
+ * deterministic: it only classifies from whatever this port returns and never
+ * executes anything itself. Production callers wire `createProcessProbe()`;
+ * tests inject fakes so no untrusted file is ever executed.
+ */
+export interface RuntimeProbePort {
+  probe(context: RuntimeProbeContext): Promise<RuntimeProbeOutcome>;
+}
+
+export interface ManagedRuntimeInstallation {
+  manifest: RuntimeInstallationManifest;
+  /** Absolute path of the installed entrypoint. */
+  entrypointPath: string;
+  /**
+   * Raw `sha256` hex of the entrypoint from the signature-covered
+   * `checksums.json`. The resolver compares its own fresh read against this
+   * value before the probe runs, so the execution boundary does not depend on
+   * the installer's evidence cache. Absent means "cannot prove", which fails
+   * closed.
+   */
+  entrypointSha256?: string;
+  /** Activation journal identity: upgrades, repairs and rollbacks get new acceptance. */
+  activation?: string;
+}
+
+export interface ManagedRuntimeAcceptanceValue {
+  protocol: number;
+  runtimeProfile: "full-parity-v1" | "limited";
+  missingCapabilities: string[];
+}
+
+export interface ManagedRuntimeAcceptance {
+  get(key: string): Promise<ManagedRuntimeAcceptanceValue | undefined>;
+  set(key: string, value: ManagedRuntimeAcceptanceValue): Promise<void>;
+}
+
+/** Read-only current managed installation lookup (satisfied by RuntimeInstaller#currentManifest). */
+export interface ManagedRuntimeLookup {
+  current(): Promise<ManagedRuntimeInstallation | undefined>;
+}
+
+export interface SystemRuntimeLocator {
+  locate(platform: NodeJS.Platform, arch: string): Promise<string | undefined>;
+}
+
+export interface PathCheckPort {
+  lstat(path: string): Promise<{ isFile: boolean; isSymbolicLink: boolean }>;
+}
+
+export interface RuntimeResolverEnvironment {
+  platform?: NodeJS.Platform;
+  arch?: string;
+  /** Protocol versions this Host supports; defaults to [HARNESS_PROTOCOL_VERSION]. */
+  supportedProtocolVersions?: readonly number[];
+  /** Capabilities required for a full-parity claim; defaults to FULL_PARITY_REQUIRED_CAPABILITIES. */
+  requiredCapabilities?: readonly string[];
+  /** Managed current-manifest lookup; required for `{ kind: "managed" }`. */
+  managedLookup?: ManagedRuntimeLookup;
+  /** Host-owned successful full probe, reused only for freshly verified managed bytes. */
+  managedAcceptance?: ManagedRuntimeAcceptance;
+  /** System PATH locator; used when `{ kind: "system" }` has no explicit executable. */
+  locateSystemRuntime?: SystemRuntimeLocator;
+  /** Required for a new managed acceptance and for every system/custom resolution. */
+  probe?: RuntimeProbePort;
+  /** Injectable path checks; defaults to node:fs lstat. */
+  pathCheck?: PathCheckPort;
+  /**
+   * Seam for the execution-boundary read (tests count reads through it).
+   * Production uses `readExecutableDigests`: one streamed pass that yields both
+   * the platform-salted identity and the plain content digest.
+   */
+  readDigests?: (platform: NodeJS.Platform, absolutePath: string) => Promise<ExecutableDigests>;
+  /** Workspace handed to the probe; defaults to os.tmpdir(). */
+  workspaceDirectory?: string;
+  probeTimeoutMs?: number;
+  /**
+   * Attempts for a *transient* probe failure (timeout, connection loss, spawn
+   * or crash). First install is the worst case: a freshly written 150 MB
+   * single-file executable is cold on disk, on-access virus scanning runs
+   * against it, and the Runtime creates its config tree during the very first
+   * launch. A single cold attempt is not evidence that the executable is
+   * broken. Evidence requirements never change between attempts; only
+   * transient codes are retried. Defaults to 2, minimum 1.
+   */
+  probeAttempts?: number;
+}
+
+export interface RuntimeResolution extends RuntimeProbeResult {
+  source: RuntimeSource;
+  /** Backend/profile evidence behind the classification. */
+  profile?: "full-parity-v1" | "limited";
+  commandManifestVerified: boolean;
+  smokeStatus: "passed" | "failed" | "skipped";
+  shutdownStatus: "passed" | "failed" | "skipped";
+  /** Host-side probe failure code; the Renderer-facing reason stays in `rejectionReason`. */
+  probeFailure?: RuntimeProbeFailureCode;
+  /** Compatibility evidence was reused; connection readiness still requires a live session. */
+  reusedAcceptance?: true;
+}
+
+interface Candidate {
+  source: RuntimeSource;
+  executablePath: string;
+  allowLimited: boolean;
+  installationManifest?: RuntimeInstallationManifest;
+  activation?: string;
+  /** Signed entrypoint digest for a managed candidate (see ManagedRuntimeInstallation). */
+  entrypointSha256?: string;
+}
+
+export interface ExecutablePathCheck {
+  ok: boolean;
+  /** Normalized absolute path, present when ok. */
+  absolutePath?: string;
+  reason?: string;
+}
+
+export const nodePathCheckPort: PathCheckPort = {
+  async lstat(path) {
+    const metadata = await lstat(path);
+    return { isFile: metadata.isFile(), isSymbolicLink: metadata.isSymbolicLink() };
+  },
+};
+
+/**
+ * Regular-file, non-symlink, absolute-path validation. Managed entrypoints
+ * must also pass; nothing is trusted because of where it came from.
+ */
+export async function validateExecutablePath(
+  input: string,
+  platform: NodeJS.Platform = process.platform,
+  pathCheck: PathCheckPort = nodePathCheckPort,
+): Promise<ExecutablePathCheck> {
+  if (!isAbsolute(input)) {
+    return { ok: false, reason: "executable path must be an absolute path" };
+  }
+  const absolutePath = resolve(input);
+  let metadata: { isFile: boolean; isSymbolicLink: boolean };
+  try {
+    metadata = await pathCheck.lstat(absolutePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { ok: false, reason: "executable does not exist" };
+    }
+    throw error;
+  }
+  if (metadata.isSymbolicLink) {
+    return { ok: false, reason: "symbolic links are not allowed" };
+  }
+  if (!metadata.isFile) {
+    return { ok: false, reason: "executable must be a regular file" };
+  }
+  return { ok: true, absolutePath };
+}
+
+/** Opaque executable-content fingerprint. Never contains the original path. */
+export async function fingerprintExecutable(platform: NodeJS.Platform, absolutePath: string): Promise<string> {
+  return (await readExecutableDigests(platform, absolutePath)).identity;
+}
+
+/**
+ * Both digests of one read of the candidate executable.
+ *
+ * The trust chain this has to serve is
+ * `signed metadata -> signed checksums -> executable bytes -> identity -> probe -> spawn`,
+ * and a single pass answers both questions the chain asks:
+ *
+ * - `contentSha256` — raw hex of `sha256(bytes)`. This is the value the
+ *   signature-covered `checksums.json` lists for the entrypoint, so a managed
+ *   Runtime can prove the bytes it is about to execute are the bytes that were
+ *   signed.
+ * - `identity` — `sha256(platform\0 || bytes)`, the opaque value Thread
+ *   bindings persist and the probe fence compares. The `platform\0` salt is
+ *   part of the frozen identity algorithm; changing it would invalidate every
+ *   existing binding, so it is derived here next to the plain digest instead of
+ *   being computed by a second read.
+ */
+export interface ExecutableDigests {
+  /** `sha256:`-prefixed, platform-salted identity (frozen algorithm). */
+  readonly identity: string;
+  /** Raw lowercase hex of `sha256(bytes)`, directly comparable to `checksums.json`. */
+  readonly contentSha256: string;
+  readonly bytes: number;
+}
+
+export async function readExecutableDigests(
+  platform: NodeJS.Platform,
+  absolutePath: string,
+): Promise<ExecutableDigests> {
+  const { digests, bytes } = await readFileDigests(absolutePath, [`${platform}\0`, ""]);
+  return { identity: `sha256:${digests[0]!}`, contentSha256: digests[1]!, bytes };
+}
+
+/*
+ * Every resolution reads current bytes. A full probe executes the candidate,
+ * so it also reads them afterwards: stat identity cannot detect an in-place
+ * rewrite that restores mtime. A managed acceptance reuses only compatibility
+ * results, never the executable fingerprint. Cheap status queries instead use
+ * the installer's bounded evidence cache and do not pass through this resolver.
+ */
+
+/**
+ * A POSIX PATH symlink (Homebrew, `bun -g`) stands for its real file when that
+ * file is an executable regular file only its owner or root can change.
+ */
+async function trustedLinkTarget(candidate: string): Promise<string | undefined> {
+  try {
+    const target = await realpath(candidate);
+    const metadata = await stat(target);
+    const owned = metadata.uid === 0 || metadata.uid === process.getuid?.();
+    return metadata.isFile() && owned && (metadata.mode & 0o022) === 0 && (metadata.mode & 0o111) !== 0 ? target : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * PATH-based system runtime locator. Empty PATH entries are skipped so a
+ * relative "current directory" can never be resolved implicitly. On POSIX a
+ * symlinked entry resolves to its real file, which is what gets validated,
+ * fingerprinted and spawned.
+ */
+export function createPathLocator(options: {
+  pathEnv?: string;
+  executableName?: string;
+  exists?: (candidate: string) => Promise<boolean>;
+} = {}): SystemRuntimeLocator {
+  const pathEnv = options.pathEnv ?? process.env.PATH ?? "";
+  const executableName = options.executableName;
+  const exists = options.exists;
+  return {
+    async locate(platform) {
+      const name = executableName ?? (platform === "win32" ? "juling.exe" : "juling");
+      for (const directory of pathEnv.split(platform === "win32" ? ";" : ":")) {
+        if (directory.length === 0) continue;
+        const candidate = join(directory, name);
+        if (!isAbsolute(candidate)) continue;
+        let found = false;
+        if (exists !== undefined) {
+          found = await exists(candidate);
+        } else {
+          try {
+            const metadata = await lstat(candidate);
+            if (metadata.isSymbolicLink() && platform !== "win32") {
+              const target = await trustedLinkTarget(candidate);
+              if (target !== undefined) return target;
+            }
+            found = metadata.isFile() && !metadata.isSymbolicLink();
+          } catch {
+            found = false;
+          }
+        }
+        if (found) return candidate;
+      }
+      return undefined;
+    },
+  };
+}
+
+/** Deterministic resolver core. See module docs for the classification rules. */
+export async function resolveRuntime(
+  preference: RuntimePreference,
+  environment: RuntimeResolverEnvironment = {},
+): Promise<RuntimeResolution> {
+  const platform = environment.platform ?? process.platform;
+  const arch = environment.arch ?? process.arch;
+  const supportedProtocolVersions = environment.supportedProtocolVersions ?? [HARNESS_PROTOCOL_VERSION];
+  const requiredCapabilities = environment.requiredCapabilities ?? FULL_PARITY_REQUIRED_CAPABILITIES;
+  const pathCheck = environment.pathCheck ?? nodePathCheckPort;
+  const readDigests = environment.readDigests ?? readExecutableDigests;
+
+  const candidate = await resolveCandidate(preference, environment, platform, arch);
+  if (candidate.kind === "error") {
+    return rejectedResolution(candidate.source, candidate.reason);
+  }
+
+  const candidateInfo = candidate.candidate;
+  const pathValidation = await validateExecutablePath(candidateInfo.executablePath, platform, pathCheck);
+  if (!pathValidation.ok) {
+    return rejectedResolution(candidateInfo.source, `executable rejected: ${pathValidation.reason}`);
+  }
+  const executablePath = pathValidation.absolutePath as string;
+  // Execution boundary, first half: one read of the bytes answers both questions
+  // the trust chain asks — the identity that gates the spawn (frozen algorithm,
+  // persisted by Thread bindings) and the plain content digest that the signed
+  // checksums cover. Nothing here is reused from an earlier resolve.
+  let boundary: ExecutableDigests;
+  try {
+    boundary = await readDigests(platform, executablePath);
+  } catch {
+    return rejectedResolution(candidateInfo.source, "executable could not be fingerprinted");
+  }
+  const executableIdentity = boundary.identity;
+  let acceptanceKey: string | undefined;
+
+  if (candidateInfo.source === "managed") {
+    const installationManifest = candidateInfo.installationManifest as RuntimeInstallationManifest;
+    const expectedPlatform = `${platform}-${arch}`;
+    if (installationManifest.platform !== expectedPlatform) {
+      return rejectedResolution("managed", `installation platform ${installationManifest.platform} does not match ${expectedPlatform}`);
+    }
+    // Runtimes signed before the Harness rename speak the old wire protocol
+    // (`omp-studio`, `studio.*` frames) and the old CLI mode. The adapter here
+    // cannot translate frames, so report the artifact as outdated instead of
+    // letting it fail as a malformed hello.
+    if (installationManifest.patchsetVersion.startsWith("studio.")) {
+      return rejectedResolution(
+        "managed",
+        "installed Runtime predates the Harness rename; rebuild it with `npm run omp:build:host`",
+      );
+    }
+    if (!overlapsProtocolRange(installationManifest.harnessProtocol, supportedProtocolVersions)) {
+      return rejectedResolution("managed", "installation protocol range is not supported by this Host");
+    }
+    // Prove the bytes are the ones that were signed before anything executes
+    // them. Without this, a managed Runtime could be swapped on disk and the
+    // installer's evidence cache (metadata-keyed, bounded by a TTL) would be the
+    // only thing standing between the tampered file and the probe.
+    const expectedEntrypoint = candidateInfo.entrypointSha256;
+    if (expectedEntrypoint === undefined) {
+      return rejectedResolution("managed", "signed checksums do not cover the Runtime entrypoint");
+    }
+    if (boundary.contentSha256 !== expectedEntrypoint) {
+      return rejectedResolution(
+        "managed",
+        "installed Runtime entrypoint does not match the signed checksum; reinstall or repair the Runtime",
+      );
+    }
+    if (environment.managedAcceptance) {
+      acceptanceKey = createHash("sha256").update(JSON.stringify({
+        policy: MANAGED_ACCEPTANCE_POLICY,
+        platform, arch, executablePath, activation: candidateInfo.activation,
+        protocols: [...supportedProtocolVersions].sort((a, b) => a - b),
+        capabilities: [...requiredCapabilities].sort(),
+        manifest: installationManifest,
+        identity: boundary.identity, sha256: boundary.contentSha256,
+      })).digest("hex");
+      const accepted = await environment.managedAcceptance.get(acceptanceKey);
+      if (accepted && supportedProtocolVersions.includes(accepted.protocol) &&
+        accepted.protocol >= installationManifest.harnessProtocol.min && accepted.protocol <= installationManifest.harnessProtocol.max) {
+        const missingCapabilities = accepted.missingCapabilities;
+        const resolution = classifyManaged(installationManifest, accepted.runtimeProfile, {
+          source: "managed",
+          executableIdentity, runtimeVersion: installationManifest.runtimeVersion,
+          upstreamVersion: installationManifest.upstreamVersion, upstreamCommit: installationManifest.upstreamCommit,
+          selectedProtocolVersion: accepted.protocol, capabilityHash: installationManifest.capabilityHash,
+          commandManifestHash: installationManifest.commandManifestHash,
+          commandManifestVerified: true, smokeStatus: "passed", shutdownStatus: "passed",
+          missingCapabilities,
+          warnings: missingCapabilities.length ? [`missing required capabilities: ${missingCapabilities.join(", ")}`] : [],
+        });
+        if (resolution.classification === "managed") return { ...resolution, reusedAcceptance: true };
+      }
+    }
+  }
+
+  if (environment.probe === undefined) {
+    return rejectedResolution(candidateInfo.source, "runtime probe is unavailable; runtime was not verified", {
+      probeFailure: "PROBE_UNAVAILABLE",
+    });
+  }
+
+  const probeContext = {
+    executablePath,
+    platform,
+    arch,
+    workspaceDirectory: environment.workspaceDirectory ?? tmpdir(),
+    supportedProtocolVersions,
+    probeTimeoutMs: environment.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS,
+  };
+  const attempts = Math.max(1, Math.trunc(environment.probeAttempts ?? DEFAULT_PROBE_ATTEMPTS));
+  let outcome = await environment.probe.probe(probeContext);
+  for (
+    let attempt = 2;
+    attempt <= attempts && outcome.failure !== undefined && TRANSIENT_PROBE_FAILURES[outcome.failure] === true;
+    attempt += 1
+  ) {
+    outcome = await environment.probe.probe(probeContext);
+  }
+  try {
+    // Execution boundary, second half: the probe has just *executed* this file,
+    // so read the bytes again and prove they are the same bytes the boundary
+    // check approved. A stat-only comparison cannot do that — a local writer can
+    // rewrite in place (same size, same inode) and restore `mtime`. For a
+    // managed Runtime the fresh read is also compared against the signed
+    // digest, so "changed to a different but self-consistent file" fails too.
+    const afterProbe = await readDigests(platform, executablePath);
+    const contentStillSigned = candidateInfo.source !== "managed" || afterProbe.contentSha256 === candidateInfo.entrypointSha256;
+    if (afterProbe.identity !== boundary.identity || !contentStillSigned) {
+      return rejectedResolution(candidateInfo.source, describeProbeFailure("IDENTITY_MISMATCH"), {
+        probeFailure: "IDENTITY_MISMATCH",
+      });
+    }
+  } catch {
+    return rejectedResolution(candidateInfo.source, describeProbeFailure("IDENTITY_MISMATCH"), {
+      probeFailure: "IDENTITY_MISMATCH",
+    });
+  }
+  if (outcome.failure !== undefined) {
+    return rejectedResolution(candidateInfo.source, describeProbeFailure(outcome.failure), {
+      probeFailure: outcome.failure,
+    });
+  }
+  const hello = outcome.hello;
+  if (hello === undefined) {
+    return rejectedResolution(candidateInfo.source, "runtime probe returned no hello response");
+  }
+  if (hello.capabilityManifest === undefined) {
+    return rejectedResolution(candidateInfo.source, "runtime hello omitted the capability manifest");
+  }
+  if (!supportedProtocolVersions.includes(hello.selectedProtocolVersion)) {
+    return rejectedResolution(
+      candidateInfo.source,
+      `runtime selected protocol version ${hello.selectedProtocolVersion} which is not supported`,
+    );
+  }
+
+  const capabilityById = new Map(hello.capabilityManifest.capabilities.map((entry) => [entry.id, entry]));
+  const missingCapabilities = requiredCapabilities.filter((id) => {
+    const entry = capabilityById.get(id);
+    return entry === undefined || entry.grade === "limited" || entry.grade === "unavailable";
+  });
+
+  const commandManifestVerified = outcome.commandManifest !== undefined;
+  const unclassifiedBuiltins = outcome.commandManifest?.unclassifiedBuiltins ?? [];
+  const hasUnclassifiedBuiltins = unclassifiedBuiltins.length > 0;
+  const smokeStatus = outcome.smoke ?? "skipped";
+  const shutdownStatus = outcome.shutdown ?? "skipped";
+  const profile = hello.capabilityManifest.profile;
+
+  const warnings: string[] = [];
+  if (smokeStatus === "skipped") warnings.push("no-side-effect smoke test was not performed");
+  if (shutdownStatus === "skipped") warnings.push("graceful shutdown probe was not performed");
+  if (!commandManifestVerified) warnings.push("command manifest was not verified");
+  if (hasUnclassifiedBuiltins) warnings.push(`command manifest contains ${unclassifiedBuiltins.length} unclassified builtin(s)`);
+  if (missingCapabilities.length > 0) warnings.push(`missing required capabilities: ${missingCapabilities.join(", ")}`);
+
+  // Deception or instability is always Rejected, even when limited is allowed.
+  if (hasUnclassifiedBuiltins) {
+    return rejectedResolution(candidateInfo.source, "runtime command manifest contains unclassified builtins");
+  }
+  if (smokeStatus === "failed") {
+    return rejectedResolution(candidateInfo.source, "runtime no-side-effect smoke test failed");
+  }
+  if (shutdownStatus === "failed") {
+    return rejectedResolution(candidateInfo.source, "runtime graceful shutdown probe failed");
+  }
+
+  const shared = {
+    source: candidateInfo.source,
+    executableIdentity,
+    runtimeVersion: hello.runtimeVersion,
+    upstreamVersion: hello.upstreamVersion,
+    upstreamCommit: hello.upstreamCommit,
+    selectedProtocolVersion: hello.selectedProtocolVersion,
+    capabilityHash: hello.capabilityManifest.hash,
+    commandManifestHash: hello.commandManifestHash,
+    commandManifestVerified,
+    smokeStatus,
+    shutdownStatus,
+  };
+
+  if (candidateInfo.source === "managed") {
+    const installationManifest = candidateInfo.installationManifest as RuntimeInstallationManifest;
+    const resolution = classifyManaged(installationManifest, profile, {
+      ...shared,
+      missingCapabilities,
+      warnings,
+    });
+    if (acceptanceKey && resolution.classification === "managed" &&
+      smokeStatus === "passed" && shutdownStatus === "passed" &&
+      resolution.runtimeVersion === installationManifest.runtimeVersion &&
+      resolution.upstreamVersion === installationManifest.upstreamVersion &&
+      resolution.upstreamCommit === installationManifest.upstreamCommit) {
+      await environment.managedAcceptance!.set(acceptanceKey, {
+        protocol: hello.selectedProtocolVersion, runtimeProfile: profile, missingCapabilities,
+      });
+    }
+    return resolution;
+  }
+
+  // system / custom follow identical rules; only the source label differs.
+  if (
+    profile === "full-parity-v1" &&
+    missingCapabilities.length === 0 &&
+    commandManifestVerified &&
+    smokeStatus === "passed" &&
+    shutdownStatus === "passed"
+  ) {
+    return { ...shared, classification: "compatible-system", profile: "full-parity-v1", missingCapabilities: [], warnings: [] };
+  }
+  if (profile === "limited") warnings.push("runtime profile is limited; only probed routes are supported");
+  if (candidateInfo.allowLimited) {
+    return { ...shared, classification: "limited-system", profile, missingCapabilities, warnings };
+  }
+  const detail = missingCapabilities.length > 0 ? `; missing: ${missingCapabilities.join(", ")}` : "";
+  return rejectedResolution(candidateInfo.source, `runtime is limited and limited runtimes are not allowed${detail}`, { missingCapabilities });
+}
+
+function classifyManaged(
+  installationManifest: RuntimeInstallationManifest,
+  helloProfile: "full-parity-v1" | "limited",
+  evidence: Omit<RuntimeResolution, "classification" | "profile" | "missingCapabilities" | "warnings"> & {
+    missingCapabilities: string[];
+    warnings: string[];
+  },
+): RuntimeResolution {
+  // A checksummed installation manifest that overclaims its evidence is
+  // treated as damaged or mislabeled, mirroring RT-005.
+  if (
+    installationManifest.profile === "full-parity-v1" &&
+    (helloProfile === "limited" || evidence.missingCapabilities.length > 0)
+  ) {
+    return rejectedResolution("managed", "installation manifest claims full parity but the runtime evidence does not support it");
+  }
+  if (installationManifest.capabilityHash !== evidence.capabilityHash) {
+    return rejectedResolution("managed", "managed runtime capability hash drift");
+  }
+  if (installationManifest.commandManifestHash !== evidence.commandManifestHash) {
+    return rejectedResolution("managed", "managed runtime command manifest hash drift");
+  }
+
+  const profile =
+    installationManifest.profile === "limited" || helloProfile === "limited" ? "limited" : "full-parity-v1";
+  if (!evidence.commandManifestVerified) {
+    return rejectedResolution("managed", "managed runtime command manifest could not be verified");
+  }
+  if (installationManifest.profile === "limited") {
+    evidence.warnings.push("managed runtime installation profile is limited; only probed routes are supported");
+  }
+  if (helloProfile === "limited") {
+    evidence.warnings.push("runtime hello reports a limited capability profile");
+  }
+  return { ...evidence, classification: "managed", profile };
+}
+
+async function resolveCandidate(
+  preference: RuntimePreference,
+  environment: RuntimeResolverEnvironment,
+  platform: NodeJS.Platform,
+  arch: string,
+): Promise<{ kind: "ok"; candidate: Candidate } | { kind: "error"; source: RuntimeSource; reason: string }> {
+  if (preference.kind === "managed") {
+    if (environment.managedLookup === undefined) {
+      return { kind: "error", source: "managed", reason: "no managed runtime lookup is configured" };
+    }
+    const installation = await environment.managedLookup.current();
+    if (installation === undefined) {
+      return { kind: "error", source: "managed", reason: "no managed runtime is installed" };
+    }
+    return {
+      kind: "ok",
+      candidate: {
+        source: "managed",
+        executablePath: installation.entrypointPath,
+        allowLimited: false,
+        installationManifest: installation.manifest,
+        ...(installation.activation === undefined ? {} : { activation: installation.activation }),
+        ...(installation.entrypointSha256 === undefined ? {} : { entrypointSha256: installation.entrypointSha256 }),
+      },
+    };
+  }
+  if (preference.kind === "system") {
+    const executable =
+      preference.executable ?? (environment.locateSystemRuntime === undefined ? undefined : await environment.locateSystemRuntime.locate(platform, arch));
+    if (executable === undefined) {
+      return { kind: "error", source: "system", reason: "system runtime was not found" };
+    }
+    return { kind: "ok", candidate: { source: "system", executablePath: executable, allowLimited: preference.allowLimited } };
+  }
+  return {
+    kind: "ok",
+    candidate: { source: "custom", executablePath: preference.executable, allowLimited: preference.allowLimited },
+  };
+}
+
+function overlapsProtocolRange(range: { min: number; max: number }, supported: readonly number[]): boolean {
+  return supported.some((version) => version >= range.min && version <= range.max);
+}
+
+function describeProbeFailure(code: RuntimeProbeFailureCode): string {
+  switch (code) {
+    case "PROBE_UNAVAILABLE":
+      return "runtime probe is unavailable";
+    case "SPAWN_FAILED":
+      return "runtime process failed to start";
+    case "PROBE_TIMEOUT":
+      return "runtime probe timed out";
+    case "CONNECTION_FAILED":
+      return "runtime probe connection failed";
+    case "PROTOCOL_UNSUPPORTED":
+      return "runtime protocol is unsupported";
+    case "AUTHENTICATION_FAILED":
+      return "runtime failed host authentication";
+    case "MALFORMED_HELLO":
+      return "runtime returned a malformed Harness hello";
+    case "IDENTITY_MISMATCH":
+      return "runtime identity changed during the probe";
+    case "PROCESS_CRASHED":
+      return "runtime process crashed during the probe";
+    case "SMOKE_FAILED":
+      return "runtime no-side-effect smoke test failed";
+    case "SHUTDOWN_FAILED":
+      return "runtime graceful shutdown probe failed";
+  }
+}
+
+function rejectedResolution(
+  source: RuntimeSource,
+  reason: string,
+  extra: { probeFailure?: RuntimeProbeFailureCode; missingCapabilities?: string[]; warnings?: string[] } = {},
+): RuntimeResolution {
+  return {
+    source,
+    classification: "rejected",
+    executableIdentity: "",
+    missingCapabilities: extra.missingCapabilities ?? [],
+    warnings: extra.warnings ?? [],
+    commandManifestVerified: false,
+    smokeStatus: "skipped",
+    shutdownStatus: "skipped",
+    rejectionReason: reason,
+    ...(extra.probeFailure === undefined ? {} : { probeFailure: extra.probeFailure }),
+  };
+}
+
+export interface ProcessProbeOptions {
+  /** Additional CLI args inserted before the reserved Harness Bridge arguments. */
+  args?: readonly string[];
+  /** Extra child environment; probe workspace/profile isolation takes precedence. */
+  env?: NodeJS.ProcessEnv;
+  spawnProcess?: typeof spawn;
+  /** Host-owned diagnostics; both streams are drained even without a listener. */
+  onOutput?: (stream: "stdout" | "stderr", text: string) => void;
+  /** Injectable bootstrap; defaults to createBridgeBootstrap with `windowsAcl`. */
+  createBootstrap?: (workspaceDirectory: string, platform: NodeJS.Platform) => Promise<{
+    endpoint: string;
+    token: string;
+    tokenFile: string;
+  }>;
+  /** Required on win32 when using the default createBridgeBootstrap. */
+  windowsAcl?: WindowsBridgeAclPort;
+  /** POSIX temp root for the probe's short socket directory; defaults to os.tmpdir(). */
+  socketTmpRoot?: string;
+  connectSocket?: (endpoint: string) => Socket;
+  /** Drain grace for the shutdown gate; defaults to SHUTDOWN_EXIT_GRACE_MS. */
+  shutdownGraceMs?: number;
+  /** Remove the temporary probe workspace afterwards; defaults to true. */
+  cleanupWorkspace?: boolean;
+}
+
+const PROBE_RUNTIME_EPOCH = 1;
+
+export function buildProcessProbeArgs(
+  additionalArgs: readonly string[],
+  bootstrap: { endpoint: string; tokenFile: string },
+  runtimeEpoch: number = PROBE_RUNTIME_EPOCH,
+): string[] {
+  if (!Number.isSafeInteger(runtimeEpoch) || runtimeEpoch < 1) {
+    throw new TypeError("runtimeEpoch must be a positive integer");
+  }
+  return [
+    "--mode",
+    "harness-host",
+    ...additionalArgs,
+    "--bridge-endpoint",
+    bootstrap.endpoint,
+    "--bridge-token-file",
+    bootstrap.tokenFile,
+    "--bridge-runtime-epoch",
+    String(runtimeEpoch),
+  ];
+}
+
+/**
+ * Real host-side probe: spawns the candidate with a fresh empty temporary
+ * workspace and Bridge bootstrap, authenticates with a Harness Hello through
+ * HarnessBridgeClient, fetches and validates the command manifest, and runs the
+ * snapshot smoke operation. Nothing here trusts the executable name or a
+ * `--version` banner.
+ */
+export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimeProbePort {
+  return {
+    async probe(context) {
+      const workspace = await mkdtemp(join(resolve(context.workspaceDirectory), "juling-harness-probe-"));
+      const cleanup = options.cleanupWorkspace !== false;
+      let bootstrap: { endpoint: string; token: string; tokenFile: string };
+      // A socket inside the mkdtemp workspace would exceed macOS's sun_path limit.
+      let ownedSocket: string | undefined;
+      try {
+        bootstrap =
+          options.createBootstrap !== undefined
+            ? await options.createBootstrap(workspace, context.platform)
+            : await createBridgeBootstrap(
+                workspace,
+                context.platform,
+                options.windowsAcl ?? (context.platform === "win32" ? createWindowsBridgeAclPort() : undefined),
+                context.platform === "win32"
+                  ? {}
+                  : {
+                      socketDirectory: await ensurePrivateSocketDirectory(
+                        "probe",
+                        options.socketTmpRoot === undefined ? {} : { tmpRoot: options.socketTmpRoot },
+                      ),
+                    },
+              );
+        if (options.createBootstrap === undefined && context.platform !== "win32") ownedSocket = bootstrap.endpoint;
+      } catch (error) {
+        await removeWorkspace(workspace, cleanup);
+        return { failure: "PROBE_UNAVAILABLE", failureDetail: (error as Error).message };
+      }
+
+      let child: ChildProcess;
+      try {
+        child = (options.spawnProcess ?? spawn)(
+          context.executablePath,
+          // cwd === HOME triggers the Runtime's automatic move to the shared temp root
+          // unless the launch directory is also explicit in its CLI arguments.
+          buildProcessProbeArgs([...(options.args ?? []), "--cwd", workspace], bootstrap),
+          {
+          cwd: workspace,
+          env: {
+            ...process.env,
+            ...options.env,
+            // A compatibility probe must not leave empty/project-keyed
+            // session directories in the user's real profile. Keep every
+            // probe artifact under the scratch workspace removed below.
+            JULING_AGENT_DIR: join(workspace, ".juling-agent"),
+            JULING_CODING_AGENT_DIR: join(workspace, ".juling-agent"),
+            JULING_CONFIG_DIR: ".juling",
+            JULING_PROFILE: "",
+            // ...and it must not *read* the operator's profile either. The
+            // Runtime folds every command it can discover into the manifest it
+            // reports, and `classifyManaged` compares that manifest's hash with
+            // a value frozen and signed at packaging time; a probe that sees
+            // one machine's skills, plugins, MCP prompts or user-level slash
+            // commands therefore produces evidence that cannot match any other
+            // machine's. The `JULING_*` names above are this repo's own
+            // convention (see `defaultOmpAgentDir`); a Runtime built from this
+            // vendor tree still resolves its profile from the legacy
+            // `OMP_AGENT_DIR`, `PI_CODING_AGENT_DIR`, `PI_CONFIG_DIR` and
+            // `OMP_PROFILE`/`PI_PROFILE` names, so both spellings are pinned to
+            // the scratch tree — and everything under `~/.claude`, `~/.codex`
+            // and `~/.gemini` is reached through `os.homedir()`, which only
+            // HOME/USERPROFILE can move.
+            OMP_AGENT_DIR: join(workspace, ".juling-agent"),
+            PI_CODING_AGENT_DIR: join(workspace, ".juling-agent"),
+            PI_CONFIG_DIR: ".juling",
+            PI_CONFIG_FILES: "",
+            OMP_PROFILE: "",
+            PI_PROFILE: "",
+            HOME: workspace,
+            USERPROFILE: workspace,
+            XDG_CONFIG_HOME: join(workspace, ".config"),
+            XDG_DATA_HOME: join(workspace, ".local", "share"),
+            XDG_STATE_HOME: join(workspace, ".local", "state"),
+            XDG_CACHE_HOME: join(workspace, ".cache"),
+            // Stream phase markers before a synchronous startup hang can hide them.
+            ...(options.onOutput === undefined ? {} : { PI_DEBUG_STARTUP: "1" }),
+            // A probe outlives a crashed Host only until its parent watchdog notices.
+            ...(context.platform === "darwin" ? { JULING_HARNESS_PARENT_PID: String(process.pid) } : {}),
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+          ...(context.platform === "win32" ? {} : POSIX_PROCESS_GROUP_SPAWN_OPTIONS),
+          },
+        );
+        for (const name of ["stdout", "stderr"] as const) {
+          child[name]?.setEncoding("utf8");
+          child[name]?.on("data", (text: string) => options.onOutput?.(name, text));
+        }
+        await new Promise<void>((resolveSpawn, rejectSpawn) => {
+          child.once("spawn", resolveSpawn);
+          child.once("error", rejectSpawn);
+        });
+      } catch (error) {
+        await removeWorkspace(workspace, cleanup);
+        return { failure: "SPAWN_FAILED", failureDetail: (error as Error).message };
+      }
+
+      let client: HarnessBridgeClient | undefined;
+      const deadline = Date.now() + context.probeTimeoutMs;
+      try {
+        let hello: HarnessHelloResponse | undefined;
+        while (hello === undefined) {
+          client = new HarnessBridgeClient({
+            endpoint: bootstrap.endpoint,
+            token: bootstrap.token,
+            handshakeTimeoutMs: Math.max(1, deadline - Date.now()),
+            supportedProtocolVersions: context.supportedProtocolVersions,
+            ...(options.connectSocket === undefined ? {} : { connectSocket: options.connectSocket }),
+          });
+          try {
+            hello = await client.connect();
+          } catch (error) {
+            client.close();
+            client = undefined;
+            if (
+              !(error instanceof HarnessBridgeHandshakeError) ||
+              error.code !== "CONNECTION_FAILED" ||
+              Date.now() >= deadline
+            ) {
+              throw error;
+            }
+            if (child.exitCode !== null || child.signalCode !== null) {
+              return { failure: "PROCESS_CRASHED", failureDetail: `child exited with code ${child.exitCode}` };
+            }
+            await delay(Math.min(50, Math.max(1, deadline - Date.now())));
+          }
+        }
+        if (child.exitCode !== null) {
+          return { failure: "PROCESS_CRASHED", failureDetail: `child exited with code ${child.exitCode}` };
+        }
+        const connectedClient = client;
+        if (connectedClient === undefined) throw new Error("Runtime probe connected without a Bridge client");
+        let smoke: "passed" | "failed" = "passed";
+        // Command invocation is intentionally unavailable until the initial
+        // snapshot has established the projection/epoch baseline.
+        try {
+          await connectedClient.requestSnapshot();
+        } catch {
+          smoke = "failed";
+        }
+        let commandManifest: OperatorCommandManifest | undefined;
+        let commandManifestIdentityMismatch = false;
+        try {
+          if (smoke !== "passed") throw new Error("Initial Runtime snapshot failed");
+          commandManifest = await connectedClient.requestCommandManifest();
+          if (
+            commandManifest.hash !== hello.commandManifestHash ||
+            commandManifest.upstreamCommit !== hello.upstreamCommit
+          ) {
+            commandManifestIdentityMismatch = true;
+            commandManifest = undefined;
+          }
+        } catch {
+          // A limited System Runtime may not implement the manifest route. It
+          // remains eligible only for an explicitly allowed limited result.
+          commandManifest = undefined;
+        }
+        let shutdown: "passed" | "failed" | "skipped" = "skipped";
+        if (connectedClient.state === "ready") {
+          // The Runtime destroys its Bridge socket while exiting, so the
+          // shutdown receipt can be dropped in flight. A lost ack is a
+          // delivery race; graceful shutdown is proven by a clean exit.
+          let ackFailed = false;
+          try {
+            await connectedClient.shutdown();
+          } catch (error) {
+            ackFailed = !(error instanceof HarnessBridgeRequestError || error instanceof HarnessBridgeHandshakeError);
+          }
+          // The drain wait is deliberately independent of the connect budget:
+          // a runtime that answered late still gets the full grace to exit.
+          const exited = await childExitsWithin(child, options.shutdownGraceMs ?? SHUTDOWN_EXIT_GRACE_MS);
+          shutdown = !ackFailed && exited && child.exitCode === 0 ? "passed" : "failed";
+        }
+        if (commandManifestIdentityMismatch) {
+          return {
+            hello,
+            smoke,
+            shutdown,
+            failure: "IDENTITY_MISMATCH",
+            failureDetail: "Runtime command manifest identity does not match Harness Hello",
+          };
+        }
+        return { hello, ...(commandManifest === undefined ? {} : { commandManifest }), smoke, shutdown };
+      } catch (error) {
+        if (error instanceof HarnessBridgeHandshakeError) {
+          const failure =
+            error.code === "CONNECTION_FAILED" && Date.now() >= deadline
+              ? "PROBE_TIMEOUT"
+              : mapHandshakeFailure(error.code);
+          return { failure, failureDetail: error.message };
+        }
+        return { failure: "CONNECTION_FAILED", failureDetail: (error as Error).message };
+      } finally {
+        client?.close();
+        try {
+          await terminateProbeProcessTree(child, context.platform);
+        } finally {
+          // A killed Runtime cannot unlink its socket; the short directory outlives the workspace.
+          if (ownedSocket !== undefined) await rm(ownedSocket, { force: true });
+          await removeWorkspace(workspace, cleanup);
+        }
+      }
+    },
+  };
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+}
+
+function mapHandshakeFailure(
+  code: "CONNECTION_FAILED" | "HANDSHAKE_TIMEOUT" | "PROTOCOL_UNSUPPORTED" | "UNAUTHENTICATED" | "IDENTITY_CHANGED" | "MALFORMED_RESPONSE",
+): RuntimeProbeFailureCode {
+  switch (code) {
+    case "CONNECTION_FAILED":
+      return "CONNECTION_FAILED";
+    case "HANDSHAKE_TIMEOUT":
+      return "PROBE_TIMEOUT";
+    case "PROTOCOL_UNSUPPORTED":
+      return "PROTOCOL_UNSUPPORTED";
+    case "UNAUTHENTICATED":
+      return "AUTHENTICATION_FAILED";
+    case "IDENTITY_CHANGED":
+      return "IDENTITY_MISMATCH";
+    case "MALFORMED_RESPONSE":
+      return "MALFORMED_HELLO";
+  }
+}
+
+async function terminateProbeProcessTree(child: ChildProcess, platform: NodeJS.Platform): Promise<void> {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+  // Kill the tree while its root is still alive: killing only the root first
+  // leaves detached Bun workers behind and loses taskkill's tree anchor.
+  if (platform === "win32") {
+    await execFileAsync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"),
+      ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, timeout: 5_000 });
+  } else {
+    new PosixProcessGroupContainment().forceStop(child);
+  }
+  if (!(await childExitsWithin(child, 5_000))) {
+    throw new Error("Runtime probe process tree did not stop");
+  }
+}
+
+async function childExitsWithin(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  return new Promise(resolveExit => {
+    const timer = setTimeout(() => {
+      child.off("close", onClose);
+      resolveExit(false);
+    }, timeoutMs);
+    const onClose = (): void => {
+      clearTimeout(timer);
+      resolveExit(true);
+    };
+    child.once("close", onClose);
+  });
+}
+
+async function removeWorkspace(workspace: string, cleanup: boolean): Promise<void> {
+  if (!cleanup) return;
+  try {
+    await rm(workspace, { recursive: true, force: true });
+  } catch {
+    // Best-effort cleanup of an ephemeral probe workspace.
+  }
+}

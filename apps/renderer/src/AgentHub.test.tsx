@@ -1,0 +1,791 @@
+import { selectOption } from "./test/selectOption";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { conversationPages } from "@juling-harness/testkit";
+import type { HarnessClient } from "@juling-harness/client-contract";
+import type {
+  AgentId,
+  CapabilityManifest,
+  Generation,
+  OperatorStateSnapshot,
+  RuntimeEpoch,
+  RuntimeId,
+  SessionId,
+  StateVersion,
+  HarnessAgentSnapshot,
+} from "@juling-harness/harness-protocol";
+import { AgentHubPage, setHubIntent } from "./AgentHub";
+import { PreviewModeProvider } from "./preview/PreviewContext";
+import { TAB_PANE_MS } from "./pageTransition";
+
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(null, "", window.location.pathname); });
+
+beforeAll(() => {
+  window.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }) as unknown as MediaQueryList;
+});
+
+beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  localStorage.setItem("omp.previewMode", "0");
+  localStorage.removeItem("omp.agentHub.state");
+  sessionStorage.removeItem("omp.hubIntent");
+});
+
+function snapshotAgent(overrides: Partial<HarnessAgentSnapshot> = {}): HarnessAgentSnapshot {
+  return {
+    agentId: "agent-0001",
+    generation: 1 as Generation,
+    kind: "sub",
+    displayName: "Lockfile Auditor",
+    status: "idle",
+    updatedAt: "2026-08-16T00:00:00.000Z",
+    hasLiveSession: true,
+    hasTranscript: true,
+    unreadCount: 0,
+    activeJobIds: [],
+    ...overrides,
+  } as HarnessAgentSnapshot;
+}
+
+function snapshotWith(agents: HarnessAgentSnapshot[]): OperatorStateSnapshot {
+  return {
+    runtimeId: "rt-1" as RuntimeId,
+    runtimeEpoch: 1 as RuntimeEpoch,
+    stateVersion: 1 as StateVersion,
+    sessionId: "sess-1" as SessionId,
+    isStreaming: false,
+    isCompacting: false,
+    activeMode: "normal",
+    approvalMode: "write",
+    pendingMessages: 0,
+    activeCommandIds: [],
+    agentsRevision: 1,
+    jobsRevision: 1,
+    agents,
+    jobs: [],
+  } as OperatorStateSnapshot;
+}
+
+function openedAgentConversation(input: { readonly target: { readonly parentSessionId: SessionId; readonly agentId: AgentId } }) {
+  return {
+    target: {
+      kind: "agent" as const,
+      parentSessionId: input.target.parentSessionId,
+      agentId: input.target.agentId,
+      conversationSessionId: conversationPages.userAssistant.sessionId,
+    },
+    page: conversationPages.userAssistant,
+    live: { status: "complete" as const, watermark: 0, events: [] },
+  };
+}
+
+function mockClient(query?: unknown): HarnessClient {
+  return {
+    query: query ?? (async (name: string, input: never) => {
+      if (name === "conversation.open") return openedAgentConversation(input);
+      throw new Error(name);
+    }),
+    command: vi.fn(),
+    subscribe: () => () => undefined,
+  } as unknown as HarnessClient;
+}
+
+function hubCapabilities(...ids: string[]): CapabilityManifest {
+  return {
+    profile: "full-parity-v1",
+    generatedAt: "1970-01-01T00:00:00.000Z",
+    hash: "test",
+    capabilities: ids.map((id) => ({ id, grade: "stable", version: 1, evidence: "test" })),
+  };
+}
+
+function renderHub(
+  snapshot?: OperatorStateSnapshot,
+  extras: {
+    preview?: boolean;
+    client?: HarnessClient;
+    canSend?: boolean;
+    runtimeConnected?: boolean;
+    runtime?: { status: "connected" | "disconnected" | "unavailable" | "connecting"; classification: "managed" | "unavailable" };
+    capabilities?: CapabilityManifest;
+    agents?: readonly HarnessAgentSnapshot[];
+    persistedReady?: boolean;
+    parentSessionId?: SessionId;
+    liveSessionId?: SessionId;
+    pendingInteraction?: boolean;
+    onOpenMain?: () => void;
+    /** The Hub opens on the deck; most tests drive the card list, so they switch to it unless they keep the deck. */
+    deck?: boolean;
+  } = {},
+) {
+  localStorage.setItem("omp.previewMode", extras.preview === true ? "1" : "0");
+  const effectiveLiveSessionId = extras.liveSessionId ?? snapshot?.sessionId;
+  const rendered = render(
+    <PreviewModeProvider switchEnabled>
+      <AgentHubPage
+        {...(snapshot === undefined ? {} : { snapshot })}
+        {...(extras.client === undefined ? {} : { client: extras.client })}
+        {...(extras.canSend === undefined ? {} : { canSend: extras.canSend })}
+        {...(extras.runtimeConnected === undefined ? {} : { runtimeConnected: extras.runtimeConnected })}
+        {...(extras.runtime === undefined
+          ? (extras.runtimeConnected === true ? { runtime: { status: "connected" as const, classification: "managed" as const } } : {})
+          : { runtime: extras.runtime })}
+        {...(extras.capabilities === undefined ? {} : { capabilities: extras.capabilities })}
+        {...(extras.agents === undefined ? {} : { agents: extras.agents })}
+        {...(extras.persistedReady === undefined ? {} : { persistedReady: extras.persistedReady })}
+        {...(extras.parentSessionId === undefined ? {} : { parentSessionId: extras.parentSessionId })}
+        {...(effectiveLiveSessionId === undefined ? {} : { liveSessionId: effectiveLiveSessionId })}
+        {...(extras.pendingInteraction === undefined ? {} : { pendingInteraction: extras.pendingInteraction })}
+        onOpenMain={extras.onOpenMain ?? (() => undefined)}
+      />
+    </PreviewModeProvider>,
+  );
+  const flat = screen.queryByRole("button", { name: "平铺" });
+  if (extras.deck !== true && flat) fireEvent.click(flat);
+  return rendered;
+}
+
+describe("AgentHubPage real-mode projection", () => {
+  it("keeps isolated parked agents transcript-only even when revive capability is granted", () => {
+    const client = mockClient();
+    renderHub(snapshotWith([snapshotAgent({
+      status: "parked", hasLiveSession: false, isolated: true, canRevive: false,
+      patchPath: "main.patch", nestedPatchPaths: ["nested-0.patch", "nested-1.patch"],
+    })]), { client, runtimeConnected: true, canSend: true, capabilities: hubCapabilities("agent.revive", "agent.send") });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    const revive = screen.getByRole("button", { name: /恢复/ }) as HTMLButtonElement;
+    expect(revive.disabled).toBe(true);
+    expect(revive.getAttribute("data-tip")).toContain("不可恢复");
+    expect(screen.getByText("nested-0.patch")).toBeTruthy();
+    expect(screen.getByText("nested-1.patch")).toBeTruthy();
+    fireEvent.click(revive);
+    expect(client.command).not.toHaveBeenCalled();
+  });
+  it("maps per-agent usage, model, and artifact fields from the runtime snapshot", () => {
+    renderHub(snapshotWith([
+      snapshotAgent({
+        status: "parked",
+        usage: { tokens: 12_600, requests: 9, tools: 14, cost: 0.51, durationMs: 167_000, durationKind: "active" },
+        modelRole: "@smol",
+        resolvedModel: "gemini-3.6-flash",
+        readOnly: false,
+        outputPath: "agent-0001.md",
+        patchPath: "agent-0001.patch",
+        branchName: "omp/agent-0001",
+      }),
+    ]));
+    // Card side column: tokens + cost.
+    expect(screen.getAllByText("12.6k").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("$0.510").length).toBeGreaterThan(0);
+    // Select the agent to open the detail pane.
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    expect(screen.getAllByText(/gemini-3\.6-flash/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/agent-0001\.md/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/omp\/agent-0001/).length).toBeGreaterThan(0);
+  });
+
+  it("shows the upstream activity gist and active jobs for running agents", () => {
+    renderHub(snapshotWith([
+      snapshotAgent({ status: "running", assignment: "running Grep in package-lock.json", activeJobIds: ["job-7" as HarnessAgentSnapshot["activeJobIds"][number]] }),
+    ]));
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    expect(screen.getAllByText(/running Grep in package-lock\.json/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/job-7/).length).toBeGreaterThan(0);
+  });
+
+  it("shows the selected agent's own thread from the Runtime's agent messages", async () => {
+    const now = Date.now();
+    const query = vi.fn(async (name: string, input: unknown) => {
+      if (name === "agent.messages.list") return { truncated: false, messages: [
+        { id: "m1", from: "Main", to: "agent-0001", body: "Audit the lockfile.", at: now - 60_000 },
+        { id: "m2", from: "agent-0001", to: "Main", body: "Lockfile is clean.", at: now - 30_000, replyTo: "m1" },
+        { id: "m3", from: "Main", to: "agent-0002", body: "Unrelated note.", at: now - 10_000 },
+      ] };
+      if (name === "conversation.open") return openedAgentConversation(input as never);
+      throw new Error(name);
+    });
+    renderHub(snapshotWith([snapshotAgent(), snapshotAgent({ agentId: "agent-0002" as AgentId, displayName: "Docs Writer" })]),
+      { client: mockClient(query), runtimeConnected: true });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    fireEvent.click(within(document.getElementById("hubTabs")!).getByRole("tab", { name: /消息/ }));
+    expect(await screen.findByText("Lockfile is clean.")).toBeTruthy();
+    expect(screen.getAllByText("Audit the lockfile.").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Unrelated note.")).toBeNull();
+    expect(query).toHaveBeenCalledWith("agent.messages.list", { sessionId: "sess-1" });
+  });
+
+  it("says agent messages are unavailable when the Runtime cannot read them", async () => {
+    renderHub(snapshotWith([snapshotAgent()]), { client: mockClient(), runtimeConnected: true });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    fireEvent.click(within(document.getElementById("hubTabs")!).getByRole("tab", { name: /消息/ }));
+    expect(await screen.findByText("读不到 Agent 间通讯")).toBeTruthy();
+  });
+
+  it("keeps write actions disabled without an injected Harness client", () => {
+    renderHub(snapshotWith([snapshotAgent({ status: "parked" })]));
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    const revive = screen.getByRole("button", { name: /恢复/ }) as HTMLButtonElement;
+    expect(revive.disabled).toBe(true);
+    expect(revive.getAttribute("data-tip") ?? "").toContain("无 Harness client");
+  });
+
+  it("disables kill, revive, and send for a non-advisor read-only agent", () => {
+    renderHub(snapshotWith([snapshotAgent({ status: "parked", readOnly: true })]), {
+      client: mockClient(),
+      runtimeConnected: true,
+      canSend: true,
+    });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    const revive = screen.getByRole("button", { name: /恢复/ }) as HTMLButtonElement;
+    const kill = screen.getByRole("button", { name: /停止/ }) as HTMLButtonElement;
+    // A read-only agent can still be read: only the conversation's composer is locked.
+    const open = screen.getByRole("button", { name: "打开对话" }) as HTMLButtonElement;
+    expect(revive.disabled).toBe(true);
+    expect(kill.disabled).toBe(true);
+    expect(open.disabled).toBe(false);
+    expect(revive.getAttribute("data-tip") ?? "").toContain("read-only");
+    expect(kill.getAttribute("data-tip") ?? "").toContain("read-only");
+  });
+
+  it("offers only the lifecycle actions that fit the agent's state", () => {
+    renderHub(snapshotWith([snapshotAgent({ status: "running" })]));
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    expect(screen.getByRole("button", { name: /^停止$/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /恢复/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /释放/ })).toBeNull();
+    cleanup();
+
+    renderHub(snapshotWith([snapshotAgent({ status: "aborted" })]));
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    expect(screen.getByRole("button", { name: /释放/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^停止$/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /恢复/ })).toBeNull();
+  });
+
+  it("keeps the agent id and native status in the folded technical details", () => {
+    renderHub(snapshotWith([snapshotAgent({ status: "parked" })]));
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    const fold = [...document.querySelectorAll<HTMLDetailsElement>(".hub-dossier-fold")]
+      .find((details) => details.textContent?.includes("技术信息"))!;
+    expect(fold.open).toBe(false);
+    expect(fold.textContent).toContain("agent-0001");
+    expect(fold.textContent).toContain("parked");
+  });
+
+  it("asks only whether to stop the task and submits agent.kill immediately", async () => {
+    const command = vi.fn(async () => ({
+      requestId: "req-kill",
+      commandName: "agent.kill" as const,
+      status: "local_pending" as const,
+      idempotencyKey: "idem-kill",
+      issuedAt: "2026-08-19T00:00:00.000Z",
+    }));
+    const client = {
+      ...mockClient(),
+      command,
+      getState: () => ({
+        commands: {
+          "req-kill": {
+            requestId: "req-kill",
+            commandName: "agent.kill",
+            status: "completed",
+            result: { killed: true },
+            observedAt: "2026-08-19T00:00:00.000Z",
+          },
+        },
+      }),
+    } as unknown as HarnessClient;
+    renderHub(snapshotWith([snapshotAgent()]), {
+      client,
+      runtimeConnected: true,
+      canSend: true,
+      capabilities: hubCapabilities("agent.kill"),
+    });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^停止$/ }));
+    const dialog = screen.getByRole("dialog", { name: "结束任务" });
+    expect(dialog.textContent).toMatch(/确定结束「Lockfile Auditor」吗？结束后无法恢复。/);
+    expect(dialog.textContent).not.toMatch(/tombstone|InteractionDeck|registry|abort/i);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Kill" }));
+    await waitFor(() => {
+      expect(command).toHaveBeenCalledWith("agent.kill", {
+        agentId: "agent-0001",
+        expectedGeneration: 1,
+      });
+    });
+    expect(screen.queryByRole("dialog", { name: "结束任务" })).toBeNull();
+  });
+
+  it("shows persisted parked agents when the live snapshot roster is empty", () => {
+    renderHub(snapshotWith([]), {
+      agents: [snapshotAgent({
+        agentId: "WorkerEcho" as AgentId,
+        displayName: "WorkerEcho",
+        status: "parked",
+        hasLiveSession: false,
+      })],
+    });
+    expect(screen.getByRole("option", { name: /WorkerEcho/ })).toBeTruthy();
+    expect(screen.getAllByText("已停驻").length).toBeGreaterThan(0);
+  });
+
+  it("freezes the elapsed time of a stopped agent and keeps counting a running one", () => {
+    const startedAt = new Date(Date.now() - 3_600_000).toISOString();
+    const updatedAt = new Date(Date.now() - 3_000_000).toISOString();
+    renderHub(snapshotWith([
+      snapshotAgent({ status: "parked", hasLiveSession: false, startedAt, updatedAt }),
+    ]));
+    const card = screen.getByRole("option", { name: /Lockfile Auditor/ });
+    // 停靠后 updatedAt 不再前进：10m 是真实跨度，1h 才是「还在数」的错误结果。
+    expect(card.querySelector(".hc-start")?.getAttribute("data-tip")).toBe("已运行 10m");
+    fireEvent.click(card);
+    expect(document.querySelector(".hub-dossier-meta")?.textContent).toContain("10m");
+    cleanup();
+
+    renderHub(snapshotWith([
+      snapshotAgent({ status: "running", startedAt, updatedAt }),
+    ]));
+    expect(screen.getByRole("option", { name: /Lockfile Auditor/ }).querySelector(".hc-start")?.getAttribute("data-tip")).toBe("已运行 1h");
+  });
+
+  it("orders the roster by creation time instead of last activity", () => {
+    const ids = () => screen.getAllByRole("option").map((card) => card.getAttribute("data-hub-id"));
+    const worker = (id: string, startedAt: string, updatedAt: string, overrides: Partial<HarnessAgentSnapshot> = {}) =>
+      snapshotAgent({ agentId: id as AgentId, displayName: id, startedAt, updatedAt, ...overrides });
+    // 快照顺序、状态、最后活动时间三者都与创建顺序冲突：只有 startedAt 说了算。
+    renderHub(snapshotWith([
+      worker("WorkerCharlie", "2026-08-29T09:20:00.000Z", "2026-08-29T09:30:00.000Z"),
+      worker("WorkerAlpha", "2026-08-29T09:00:00.000Z", "2026-08-29T09:05:00.000Z", { status: "parked", hasLiveSession: false }),
+      worker("WorkerBravo", "2026-08-29T09:10:00.000Z", "2026-08-29T09:40:00.000Z"),
+    ]));
+    expect(ids()).toEqual(["WorkerAlpha", "WorkerBravo", "WorkerCharlie"]);
+    cleanup();
+
+    // 最后创建的那个开始跑、并且刚刚活动过：以前会被顶到最上面，现在留在原位。
+    renderHub(snapshotWith([
+      worker("WorkerAlpha", "2026-08-29T09:00:00.000Z", "2026-08-29T09:05:00.000Z", { status: "parked", hasLiveSession: false }),
+      worker("WorkerBravo", "2026-08-29T09:10:00.000Z", "2026-08-29T09:40:00.000Z"),
+      worker("WorkerCharlie", "2026-08-29T09:20:00.000Z", "2026-08-29T09:59:00.000Z", { status: "running" }),
+    ]));
+    expect(ids()).toEqual(["WorkerAlpha", "WorkerBravo", "WorkerCharlie"]);
+  });
+
+  it("keeps the selected agent when search filters it out of the list", () => {
+    renderHub(snapshotWith([snapshotAgent()]));
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索 Agent" }), { target: { value: "zzz-no-match" } });
+    expect(screen.getByText("没有匹配的 Agent")).toBeTruthy();
+    expect(screen.queryByText("No agents in this session")).toBeNull();
+    expect(screen.getByRole("button", { name: "打开对话" })).toBeTruthy();
+    expect(screen.getAllByText("Lockfile Auditor").length).toBeGreaterThan(0);
+  });
+});
+
+describe("AgentHubPage conversation preview", () => {
+  it("opens a main-conversation pane, narrows the list, and restores Overview on back", async () => {
+    const query = vi.fn(async (name: string, input: never) => {
+      if (name === "conversation.open") return openedAgentConversation(input);
+      throw new Error(name);
+    });
+    const client = mockClient(query);
+    renderHub(snapshotWith([snapshotAgent()]), { client, runtimeConnected: true, canSend: true });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    fireEvent.click(screen.getByRole("button", { name: "打开对话" }));
+    expect(document.querySelector(".hub-page.is-chat-preview")).toBeTruthy();
+    expect(document.querySelector(".hub-cols.is-chat-preview")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "概览" })).toBeNull();
+    await vi.waitFor(() => {
+      expect(query).toHaveBeenCalledWith("conversation.open", { target: { kind: "agent", parentSessionId: "sess-1", agentId: "agent-0001" }, limit: 50 });
+      expect(screen.getByText("hello")).toBeTruthy();
+      expect(screen.getByText("world")).toBeTruthy();
+    });
+    expect(document.querySelector(".hub-tr-msg")).toBeNull();
+    expect(document.querySelector(".subagent-convo")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    expect(document.querySelector(".hub-page.is-chat-preview")).toBeNull();
+    expect(screen.getByRole("tab", { name: "概览" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "打开对话" })).toBeTruthy();
+  });
+
+  it("slides the detail pane forward on 打开 and back on 返回", async () => {
+    renderHub(snapshotWith([snapshotAgent()]), { client: mockClient(), runtimeConnected: true, canSend: true });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    fireEvent.click(screen.getByRole("button", { name: "打开对话" }));
+    expect(document.querySelector(".hub-face-enter-fwd")).toBeTruthy();
+    expect(document.querySelector('[data-hub-face="detail"].hub-face-leave-fwd')).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    expect(document.querySelector(".hub-page.is-chat-preview")).toBeNull();
+    expect(document.querySelector(".hub-face-enter-back")).toBeTruthy();
+    expect(document.querySelector('[data-hub-face="chat"].hub-face-leave-back')).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(document.querySelector(".hub-face-leave-back")).toBeNull();
+    }, { timeout: TAB_PANE_MS + 200 });
+  });
+
+  it("shows ChipComposer when the selected agent can receive agent.send", async () => {
+    const client = mockClient();
+    renderHub(snapshotWith([snapshotAgent()]), { client, runtimeConnected: true, canSend: true });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    fireEvent.click(screen.getByRole("button", { name: "打开对话" }));
+    await vi.waitFor(() => {
+      expect(document.querySelector("#hubAgentComposer")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "附件 / 图片" })).toBeTruthy();
+    });
+  });
+
+  it("shows a local ChipComposer in Harness preview and never queries Host", () => {
+    const query = vi.fn();
+    const command = vi.fn();
+    const client = {
+      ...mockClient(query),
+      command,
+    };
+    renderHub(undefined, { preview: true, client, runtimeConnected: true, canSend: true });
+    fireEvent.click(screen.getByRole("option", { name: /preview 子 Agent/ }));
+    fireEvent.click(screen.getByRole("button", { name: "打开对话" }));
+    expect(document.querySelector(".hub-page.is-chat-preview")).toBeTruthy();
+    expect(screen.getAllByText("演示").length).toBeGreaterThan(0);
+    expect(document.querySelector(".convo-md")).toBeTruthy();
+    const editor = document.querySelector("#hubAgentComposer");
+    expect(editor).toBeTruthy();
+    expect(editor?.getAttribute("aria-placeholder")).toMatch(/发给子 Agent/);
+    fireEvent.click(screen.getByRole("button", { name: "附件 / 图片" }));
+    expect(query).not.toHaveBeenCalled();
+    expect(command).not.toHaveBeenCalled();
+  });
+
+  it("hides the preview composer for advisor agents", () => {
+    renderHub(undefined, { preview: true, runtimeConnected: true, canSend: true });
+    fireEvent.click(screen.getByRole("option", { name: /空闲 advisor/ }));
+    fireEvent.click(screen.getByRole("button", { name: "打开对话" }));
+    expect(document.querySelector(".hub-page.is-chat-preview")).toBeTruthy();
+    expect(document.querySelector("#hubAgentComposer")).toBeNull();
+  });
+
+  it("does not send Host commands from preview roster write actions", () => {
+    const query = vi.fn();
+    const command = vi.fn();
+    const client = { ...mockClient(query), command };
+    renderHub(undefined, { preview: true, client, runtimeConnected: true, canSend: true });
+    fireEvent.click(screen.getByRole("option", { name: /audit 子 Agent/ }));
+    const revive = screen.getByRole("button", { name: /恢复/ }) as HTMLButtonElement;
+    expect(revive.disabled).toBe(true);
+    expect(revive.getAttribute("data-tip") ?? "").toContain("预览模式");
+    fireEvent.click(screen.getByRole("option", { name: /typecheck 子 Agent/ }));
+    fireEvent.click(within(document.getElementById("hubTabs")!).getByRole("tab", { name: /后台任务/ }));
+    const cancel = screen.getByRole("button", { name: "取消" }) as HTMLButtonElement;
+    expect(cancel.disabled).toBe(true);
+    fireEvent.click(cancel);
+    expect(command).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it("opens a persisted child transcript when the live agent is missing", async () => {
+    const query = vi.fn(async (name: string) => {
+      if (name === "agent.conversation.read") {
+        throw { code: "UNAVAILABLE", message: 'Agent "WorkerEcho" was not found' };
+      }
+      if (name === "session.transcript.readPage") return conversationPages.userAssistant;
+      throw new Error(name);
+    });
+    renderHub(snapshotWith([]), {
+      client: mockClient(query),
+      runtimeConnected: true,
+      canSend: true,
+      parentSessionId: "parent-session" as SessionId,
+      agents: [snapshotAgent({
+        agentId: "WorkerEcho" as AgentId,
+        displayName: "WorkerEcho",
+        status: "parked",
+        hasLiveSession: false,
+      })],
+    });
+    fireEvent.click(screen.getByRole("option", { name: /WorkerEcho/ }));
+    fireEvent.click(screen.getByRole("button", { name: "打开对话" }));
+    await vi.waitFor(() => {
+      expect(query).not.toHaveBeenCalledWith("agent.conversation.read", expect.anything());
+      expect(query).toHaveBeenCalledWith("session.transcript.readPage", {
+        sessionId: "parent-session",
+        agentId: "WorkerEcho",
+        limit: 50,
+      });
+      expect(screen.getByText("hello")).toBeTruthy();
+    });
+  });
+
+  it("opens conversation preview from a chat hub intent", async () => {
+    const query = vi.fn(async (name: string, input: never) => {
+      if (name === "conversation.open") return openedAgentConversation(input);
+      throw new Error(name);
+    });
+    setHubIntent("agent-0001", "chat");
+    renderHub(snapshotWith([snapshotAgent()]), {
+      client: mockClient(query),
+      runtimeConnected: true,
+      canSend: true,
+    });
+    expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(query).toHaveBeenCalledWith("conversation.open", { target: { kind: "agent", parentSessionId: "sess-1", agentId: "agent-0001" }, limit: 50 });
+      expect(screen.getByText("hello")).toBeTruthy();
+    });
+  });
+
+  it("keeps a hub chat intent until the roster contains that agent", async () => {
+    const query = vi.fn(async (name: string, input: never) => {
+      if (name === "conversation.open") return openedAgentConversation(input);
+      throw new Error(name);
+    });
+    const client = mockClient(query);
+    setHubIntent("agent-0001", "chat");
+    const { rerender } = renderHub(undefined, { client, runtimeConnected: true, canSend: true });
+    expect(screen.queryByRole("button", { name: "返回" })).toBeNull();
+    rerender(
+      <PreviewModeProvider switchEnabled>
+        <AgentHubPage
+          snapshot={snapshotWith([snapshotAgent()])}
+          client={client}
+          canSend
+          runtimeConnected
+          parentSessionId={"sess-1" as SessionId}
+          liveSessionId={"sess-1" as SessionId}
+          runtime={{ status: "connected", classification: "managed" }}
+          onOpenMain={() => undefined}
+        />
+      </PreviewModeProvider>,
+    );
+    expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(query).toHaveBeenCalledWith("conversation.open", { target: { kind: "agent", parentSessionId: "sess-1", agentId: "agent-0001" }, limit: 50 });
+    });
+  });
+
+  it("ignores invalid hub intent ids", () => {
+    setHubIntent("Main", "chat");
+    expect(sessionStorage.getItem("omp.hubIntent")).toBeNull();
+  });
+
+  it("does not drop a hub intent before the persisted roster is ready", () => {
+    setHubIntent("agent-0001", "chat");
+    renderHub(snapshotWith([]), {
+      agents: [],
+      persistedReady: false,
+      parentSessionId: "sess-1" as SessionId,
+      runtimeConnected: true,
+      canSend: true,
+      client: mockClient(),
+    });
+    expect(sessionStorage.getItem("omp.hubIntent")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "返回" })).toBeNull();
+  });
+
+  it("disables Hub writes when viewing a session that is not the live snapshot", () => {
+    const query = vi.fn(async (name: string) => {
+      if (name === "session.transcript.readPage") return conversationPages.userAssistant;
+      throw new Error(name);
+    });
+    const command = vi.fn();
+    renderHub(snapshotWith([snapshotAgent({ status: "parked" })]), {
+      client: { ...mockClient(query), command },
+      runtimeConnected: true,
+      canSend: true,
+      parentSessionId: "hist-session" as SessionId,
+      liveSessionId: "sess-1" as SessionId,
+      agents: [snapshotAgent({ status: "parked" })],
+    });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    const revive = screen.getByRole("button", { name: /恢复/ }) as HTMLButtonElement;
+    expect(revive.disabled).toBe(true);
+    expect(revive.getAttribute("data-tip") ?? "").toContain("历史会话");
+    fireEvent.click(screen.getByRole("tab", { name: "对话记录" }));
+    expect(query).not.toHaveBeenCalledWith("agent.transcript.read", expect.anything());
+    expect(screen.getByText(/归档对话/)).toBeTruthy();
+  });
+
+  it("persists Hub selection per session id", () => {
+    renderHub(snapshotWith([
+      snapshotAgent(),
+      snapshotAgent({ agentId: "agent-0002" as AgentId, displayName: "Other Worker" }),
+    ]), {
+      parentSessionId: "sess-a" as SessionId,
+    });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    const saved = JSON.parse(localStorage.getItem("omp.agentHub.state") ?? "{}") as {
+      selectedBySession?: Record<string, string>;
+    };
+    expect(saved.selectedBySession?.["sess-a"]).toBe("agent-0001");
+  });
+
+  it("reconnects a disconnected Runtime from the offline banner", async () => {
+    const command = vi.fn(async (name: string) => {
+      if (name !== "runtime.ensure") throw new Error(name);
+      return { requestId: "req-hub-ensure" };
+    });
+    const subscribe = vi.fn((_scope: unknown, listener: (event: { kind: string; receipt?: { status: string; result?: { status: string } } }) => void) => {
+      queueMicrotask(() => {
+        listener({
+          kind: "command.receipt",
+          receipt: { status: "completed", result: { status: "connected" } },
+        });
+      });
+      return () => undefined;
+    });
+    renderHub(snapshotWith([]), {
+      client: { ...mockClient(), command, subscribe } as unknown as HarnessClient,
+      runtime: { status: "disconnected", classification: "managed" },
+      runtimeConnected: false,
+    });
+    expect(screen.getByText("Runtime 连接已断开")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重新连接" }));
+    await waitFor(() => {
+      expect(command).toHaveBeenCalledWith("runtime.ensure", {});
+      expect(screen.getByText(/Runtime 已重新连接/)).toBeTruthy();
+    });
+  });
+});
+
+
+it("previews a configured agent spawn without sending Host queries or writes", async () => {
+ const query = vi.fn(); const command = vi.fn(); const client = { ...mockClient(query), command };
+ renderHub(undefined, { preview: true, client, runtimeConnected: true, canSend: true });
+ fireEvent.click(screen.getAllByRole("button", { name: "创建代理" })[0]!);
+ const dialog = await screen.findByRole("dialog", { name: "创建代理" });
+ fireEvent.change(within(dialog).getByRole("textbox", { name: "任务描述" }), { target: { value: "检查模型配置页面的布局" } });
+ expect(within(dialog).queryByRole("combobox", { name: "本次主模型" })).toBeNull();
+ fireEvent.click(within(dialog).getByText("任务级配置"));
+ selectOption(within(dialog).getByRole("combobox", { name: "本次思考强度" }), "深入");
+ fireEvent.click(within(dialog).getByRole("button", { name: "预览创建" }));
+ await screen.findByText(/演示任务已配置/); expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
+});
+
+it("submits more than four user steps in one native spawn without changing global delegation", async () => {
+  const query = vi.fn(async (name: string) => {
+    if (name === "agents.definitions.get") return { agents: [{ name: "task", description: "Native task", model: ["@task"] }] };
+    if (name === "agent.spawn.options.read") return { stepsAdvertised: false, autoParallel: "off", effortSelection: false, modelSelection: false, maxEffort: "max", models: [] };
+    throw new Error(name);
+  });
+  const command = vi.fn(async () => ({ requestId: "req-steps", commandName: "agent.spawn", status: "local_pending", idempotencyKey: "steps", issuedAt: "2026-11-12T00:00:00Z" }));
+  const client = { ...mockClient(query), command, getState: () => ({ commands: { "req-steps": { requestId: "req-steps", status: "completed", result: { agentId: "same-child", jobId: "same-job", status: "starting" } } } }) } as unknown as HarnessClient;
+  renderHub(snapshotWith([]), { client, runtimeConnected: true, canSend: true, capabilities: hubCapabilities("agent.spawn", "agent.spawn.options") });
+  fireEvent.click(screen.getAllByRole("button", { name: "创建代理" })[0]!);
+  const dialog = await screen.findByRole("dialog", { name: "创建代理" });
+  const stepsMode = within(dialog).getByRole("button", { name: "分步任务" });
+  await waitFor(() => expect((stepsMode as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(stepsMode);
+  const steps = ["Inspect contract", "Check lifecycle", "Preserve identity", "Implement seam", "Test abort", "Test restore", "Report result"];
+  const editor = within(dialog).getByRole("textbox", { name: "第 1 步" }) as HTMLTextAreaElement;
+  for (const [index, text] of steps.entries()) {
+    fireEvent.change(editor, { target: { value: text } });
+    if (index < steps.length - 1) fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true, shiftKey: true });
+  }
+  const start = within(dialog).getByRole("button", { name: "创建并启动" });
+  fireEvent.click(start); fireEvent.click(start);
+  await waitFor(() => expect(command).toHaveBeenCalledTimes(1));
+  expect(command).toHaveBeenCalledWith("agent.spawn", { definition: "task", steps, async: true });
+  expect(query.mock.calls.filter(([name]) => name === "agent.spawn.options.read")).toHaveLength(1);
+});
+
+it("shows real structured native phase counts instead of inventing progress for each user step", () => {
+  renderHub(snapshotWith([snapshotAgent({ status: "idle", taskSteps: { prompts: ["Inspect", "Implement", "Verify", "Report"], sent: 2, completed: 1, phase: "budget", reason: "Native budget reached" } })]));
+  fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+  const phases = screen.getByRole("region", { name: "原生任务阶段" });
+  expect(within(phases).getByText("已发送 2/4 组 · 已完成 1/4 组")).toBeTruthy();
+  expect(within(phases).getByText("Native budget reached")).toBeTruthy();
+  expect(within(phases).queryByRole("progressbar")).toBeNull();
+});
+
+it("uses task preview data with marks off without demo notices or Host writes", async () => {
+  window.history.replaceState(null, "", "?preview=1&marks=off");
+  const query = vi.fn(), command = vi.fn();
+  renderHub(snapshotWith([snapshotAgent({ taskSteps: { prompts: ["Real task must not leak into preview"], sent: 1, completed: 0, phase: "running" } })]), { preview: true, client: { ...mockClient(query), command } });
+  fireEvent.click(screen.getByRole("option", { name: /deps 子 Agent/ }));
+  expect(screen.getByRole("region", { name: "原生任务阶段" })).toBeTruthy();
+  expect(screen.queryByText("Real task must not leak into preview")).toBeNull();
+  fireEvent.click(screen.getAllByRole("button", { name: "创建代理" })[0]!);
+  const dialog = await screen.findByRole("dialog", { name: "创建代理" });
+  expect(dialog.textContent).not.toMatch(/演示|Demo/);
+  fireEvent.click(within(dialog).getByRole("button", { name: "分步任务" }));
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "第 1 步" }), { target: { value: "Inspect the preview layout" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "创建并启动" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "创建代理" })).toBeNull());
+  expect(screen.queryByText(/演示任务已配置/)).toBeNull();
+  expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
+});
+
+describe("AgentHubPage command deck view", () => {
+  const swarm = () => snapshotWith([
+    snapshotAgent({ agentId: "agent-lead" as AgentId, kind: "main", displayName: "Lead" }),
+    snapshotAgent({ agentId: "agent-0001" as AgentId, parentAgentId: "agent-lead" as AgentId, displayName: "Lockfile Auditor", status: "running" }),
+    snapshotAgent({ agentId: "agent-0002" as AgentId, parentAgentId: "agent-0001" as AgentId, displayName: "Docs Writer" }),
+  ]);
+  const deckCard = (name: string) => [...document.querySelectorAll<HTMLButtonElement>(".ad .ad-card-hit")]
+    .find(button => (button.getAttribute("aria-label") ?? "").includes(` · ${name} · `))!;
+  const detailName = () => document.querySelector("#hubDetail .hub-dossier-name h3")?.textContent;
+
+  it("opens on the deck beside the Hub detail, and comes back to it on the next visit", () => {
+    const first = renderHub(swarm(), { deck: true });
+    const views = within(screen.getByRole("group", { name: "Roster 视图" })).getAllByRole("button");
+    expect(views[0]?.textContent).toContain("指挥台");
+    expect(views[0]?.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector(".hub-page.is-deck .ad[data-embedded]")).toBeTruthy();
+    expect(document.querySelector("#hubList")).toBeNull();
+    expect(document.querySelector(".hub-detail")).toBeTruthy();
+    // The deck covers status and search itself.
+    expect(screen.queryByRole("searchbox", { name: "搜索 Agent" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "平铺" }));
+    expect(document.querySelector("#hubList")).toBeTruthy();
+    first.unmount();
+    renderHub(swarm(), { deck: true });
+    expect(screen.getByRole("button", { name: "指挥台" }).getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector(".ad[data-embedded]")).toBeTruthy();
+  });
+
+  it("shares one selection between the deck and the Hub detail, with no inspector of the deck's own", () => {
+    renderHub(swarm(), { deck: true });
+    fireEvent.click(deckCard("Docs Writer"));
+    expect(detailName()).toBe("Docs Writer");
+    expect(deckCard("Docs Writer").getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector(".ad-inspector, .ad-sheet")).toBeNull();
+    // Picking in the Hub moves the deck's pick too.
+    fireEvent.click(screen.getByRole("button", { name: /父代理: Lockfile Auditor/ }));
+    expect(detailName()).toBe("Lockfile Auditor");
+    expect(deckCard("Lockfile Auditor").getAttribute("aria-pressed")).toBe("true");
+    expect(deckCard("Docs Writer").getAttribute("aria-pressed")).toBe("false");
+    // The lead is the main conversation, not a Hub member.
+    fireEvent.click(deckCard("Lead"));
+    expect(detailName()).toBe("Lockfile Auditor");
+  });
+
+  it("opens the Hub's own conversation preview on double-click and sends the lead to the main conversation", async () => {
+    const onOpenMain = vi.fn();
+    const query = vi.fn(async (name: string, input: never) => {
+      if (name === "conversation.open") return openedAgentConversation(input);
+      throw new Error(name);
+    });
+    renderHub(swarm(), { client: mockClient(query), runtimeConnected: true, canSend: true, onOpenMain, deck: true });
+    fireEvent.doubleClick(deckCard("Lockfile Auditor"));
+    expect(document.querySelector('#hubDetail [data-hub-face="chat"]')).toBeTruthy();
+    expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
+    await vi.waitFor(() => expect(query).toHaveBeenCalledWith("conversation.open", expect.objectContaining({ target: expect.objectContaining({ agentId: "agent-0001" }) })));
+    fireEvent.doubleClick(deckCard("Lead"));
+    expect(onOpenMain).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the preview deck on the demo story and never reaches the Host", () => {
+    const query = vi.fn(), command = vi.fn();
+    renderHub(snapshotWith([snapshotAgent()]), { preview: true, client: { ...mockClient(query), command }, deck: true });
+    expect(deckCard("Lockfile Auditor")).toBeUndefined();
+    fireEvent.click(deckCard("audit 子 Agent"));
+    expect(detailName()).toBe("audit 子 Agent");
+    fireEvent.doubleClick(deckCard("deps 子 Agent"));
+    expect(document.querySelector('#hubDetail [data-hub-face="chat"]')).toBeTruthy();
+    expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
+  });
+});

@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_kind:
+        description: Desktop release or independently versioned Runtime
+        type: choice
+        options: [desktop, runtime]
+        default: desktop
+      target_arch:
+        description: Windows architectures for Runtime-only releases (desktop releases build both)
+        type: choice
+        options: [both, x64, arm64]
+        default: both
+      runtime_channel:
+        type: choice
+        description: Desktop releases must bundle stable Runtime
+        options: [stable, canary]
+        default: stable
+      runtime_min_app_version:
+        type: string
+        description: Tested minimum desktop version (blank uses workspace version)
+        default: ""
+      rebuild_runtime:
+        type: boolean
+        description: Force a Runtime rebuild even when its sources are unchanged
+        default: false
+      include_macos:
+        type: boolean
+        description: Include macOS arm64 for Runtime-only releases (always included for desktop)
+        default: true
+      include_linux:
+        type: boolean
+        description: Include Linux x64 for Runtime-only releases (always included for desktop)
+        default: true
+  push:
+    tags: ["v*", "runtime-v*"]
+
+permissions:
+  contents: read
+env:
+  BUN_VERSION: "1.4.4"
+concurrency:
+  group: juling-harness-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.config.outputs.release_matrix }}
+      kind: ${{ steps.config.outputs.kind }}
+      desktop_platforms: ${{ steps.config.outputs.desktop_platforms }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: config
+        env:
+          TARGET_ARCH: ${{ inputs.target_arch || 'both' }}
+          REQUEST_KIND: ${{ inputs.release_kind || (startsWith(github.ref_name, 'runtime-v') && 'runtime') || 'desktop' }}
+          INCLUDE_MACOS: ${{ github.event_name == 'push' || inputs.include_macos }}
+          INCLUDE_LINUX: ${{ github.event_name == 'push' || inputs.include_linux }}
+          CHECK_RELEASE: "true"
+          RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-plan.mjs
+
+  build:
+    needs: prepare
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    uses: ./.github/workflows/release-platform.yml
+    with:
+      target: ${{ matrix.target }}
+      runner: ${{ matrix.os }}
+      desktop: ${{ matrix.desktop }}
+      kind: ${{ needs.prepare.outputs.kind }}
+      runtime_channel: ${{ inputs.runtime_channel || 'stable' }}
+      runtime_min_app_version: ${{ inputs.runtime_min_app_version || '' }}
+      rebuild_runtime: ${{ inputs.rebuild_runtime || false }}
+    secrets: inherit
+
+  publish:
+    needs: [prepare, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-candidate-*
+          path: outputs/publish
+      - name: Publish complete immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OMP_RELEASE_KIND: ${{ needs.prepare.outputs.kind }}
+          OMP_RELEASE_PLATFORMS: ${{ needs.prepare.outputs.desktop_platforms }}
+        run: node scripts/publish-update-release.mjs

@@ -1,0 +1,115 @@
+import type { MCPManager } from "../src/mcp/manager";
+import { beforeEach } from "bun:test";
+import { resetSettingsForTest } from "../src/config/settings";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { expect, it } from "bun:test";
+import type { AgentSession } from "../src/session/agent-session";
+import { HarnessRuntimeCatalogService } from "../src/harness/services/runtime-catalog-service";
+import type { PromptTemplateRow, McpRuntimeStatus } from "../src/harness/runtime-catalog-protocol";
+
+it("expands the selected loaded template without invoking prompt, and fences changed versions", async () => {
+	const templates = [
+		{ name: "review", description: "Global", source: "(user)", content: "Global $1" },
+		{ name: "review", description: "Project", source: "(project)", content: "Project $1 / $2 / {{arguments}}" },
+	];
+	const session = {
+		sessionId: "s",
+		sessionManager: { getCwd: () => "." },
+		promptTemplates: templates,
+		prompt: () => {
+			throw new Error("Must never execute a prompt");
+		},
+	};
+	const service = new HarnessRuntimeCatalogService(session as unknown as AgentSession);
+	const result = (await service.execute({ kind: "templates.list", sessionId: "s" })) as {
+		templates: PromptTemplateRow[];
+	};
+	const project = result.templates.find(row => row.source === "(project)")!;
+	const prepared = (await service.execute({
+		kind: "templates.prepare",
+		sessionId: "s",
+		id: project.id,
+		version: project.version,
+		arguments: '"two words" third',
+	})) as { text: string };
+	expect(prepared.text).toBe("Project two words / third / two words third");
+	templates[1]!.content = "Updated template";
+	const stale = await service
+		.execute({ kind: "templates.prepare", sessionId: "s", id: project.id, version: project.version, arguments: "x" })
+		.catch(error => error);
+	expect(stale).toMatchObject({ code: "COMMAND_BLOCKED" });
+	session.sessionId = "new";
+	expect(await service.execute({ kind: "templates.list", sessionId: "s" }).catch(error => error)).toMatchObject({
+		code: "COMMAND_BLOCKED",
+	});
+});
+it("reports native startup readiness without connecting, probing or exposing credentials", async () => {
+	const waits: number[] = [];
+	const connections = { ready: { tools: [{ name: "tool" }], config: { token: "must-not-leak" } } };
+	const manager = {
+		waitForStartup: async (timeout: number) => {
+			waits.push(timeout);
+			return { connected: ["ready"], pending: ["slow"], failed: [{ name: "failed", error: "token=must-not-leak" }] };
+		},
+		getAllServerNames: () => ["ready", "slow", "failed"],
+		getConnection: (name: keyof typeof connections) => connections[name],
+		getServerConfig: (name: string) =>
+			name === "ready"
+				? { command: "node", env: { SECRET: "must-not-leak" } }
+				: { type: "http", url: "https://example.com?token=must-not-leak" },
+		getSource: () => ({ providerName: "OMP", level: "project", path: "/private/config/mcp.json" }),
+		getConnectionStatus: (name: string) =>
+			name === "slow" ? "connecting" : name === "ready" ? "connected" : "disconnected",
+	};
+	const session = {
+		sessionId: "s",
+		sessionManager: { getCwd: () => "." },
+		settings: Settings.isolated({ "mcp.startupTimeoutMs": 250 }),
+		harnessToolSession: { mcpManager: manager },
+		getAllToolInfos: () => [
+			{
+				name: "tool",
+				description: "Read a workspace file",
+				mcpServerName: "ready",
+				mcpToolName: "tool",
+				mcpReadOnlyHint: true,
+			},
+		],
+	};
+	const service = new HarnessRuntimeCatalogService(
+		session as unknown as AgentSession,
+		manager as unknown as MCPManager,
+	);
+	const result = (await service.execute({ kind: "mcp.runtime.status", sessionId: "s" })) as McpRuntimeStatus;
+	expect(waits).toEqual([1]);
+	expect(result.ready).toBe(false);
+	expect(result.settled).toBe(false);
+	expect(result.servers.find(row => row.name === "ready")).toMatchObject({
+		name: "ready",
+		state: "ready",
+		tools: 1,
+		transport: "stdio",
+		source: { providerName: "OMP", level: "project" },
+		toolInfo: [
+			{
+				name: "tool",
+				description: "Read a workspace file",
+				mcpServerName: "ready",
+				mcpToolName: "tool",
+				readOnlyHint: true,
+			},
+		],
+	});
+	expect(result.servers.find(row => row.name === "failed")).toMatchObject({
+		state: "failed",
+		transport: "http",
+		error: "token=[redacted]",
+	});
+	expect(JSON.stringify(result)).not.toContain("must-not-leak");
+	expect(JSON.stringify(result)).not.toContain("/private/config");
+});
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
+});

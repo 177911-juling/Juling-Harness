@@ -1,0 +1,113 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { packagedResourcePaths, resolveDesktopPaths } from "../src/platform/desktop-paths.js";
+
+test("Windows paths reproduce the historic APPDATA / LOCALAPPDATA layout byte for byte", () => {
+  const paths = resolveDesktopPaths({
+    platform: "win32",
+    env: { APPDATA: "C:\\Users\\me\\AppData\\Roaming", LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" },
+    homedir: "C:\\Users\\ignored",
+  });
+  assert.deepEqual(paths, {
+    appDataRoot: "C:\\Users\\me\\AppData\\Roaming",
+    stateRoot: "C:\\Users\\me\\AppData\\Roaming\\juling-harness",
+    logsRoot: "C:\\Users\\me\\AppData\\Roaming\\juling-harness\\logs",
+    keysRoot: "C:\\Users\\me\\AppData\\Roaming\\juling-harness\\keys",
+    runtimesRoot: "C:\\Users\\me\\AppData\\Local\\juling-harness\\runtimes",
+    updatesV2Root: "C:\\Users\\me\\AppData\\Local\\juling-harness\\updates-v2",
+    legacyStagingRoot: "C:\\Users\\me\\AppData\\Local\\juling-harness\\updates",
+    endpointRegistryRoot: "C:\\Users\\me\\AppData\\Roaming\\juling-harness-endpoints",
+  });
+});
+
+test("Windows falls back to the home directory when the profile variables are missing", () => {
+  const paths = resolveDesktopPaths({ platform: "win32", env: {}, homedir: "C:\\Users\\me" });
+  assert.equal(paths.stateRoot, "C:\\Users\\me\\AppData\\Roaming\\juling-harness");
+  assert.equal(paths.runtimesRoot, "C:\\Users\\me\\AppData\\Local\\juling-harness\\runtimes");
+});
+
+test("production preview isolates Runtime and update state while keeping the user's profile", () => {
+  const paths = resolveDesktopPaths({
+    platform: "win32",
+    env: {
+      APPDATA: "C:\\Users\\me\\AppData\\Roaming",
+      LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local",
+      OMP_PRODUCTION_PREVIEW_STATE: "D:\\Harness preview\\state",
+    },
+  });
+  assert.equal(paths.stateRoot, "C:\\Users\\me\\AppData\\Roaming\\juling-harness");
+  assert.equal(paths.runtimesRoot, "D:\\Harness preview\\state\\runtimes");
+  assert.equal(paths.updatesV2Root, "D:\\Harness preview\\state\\updates-v2");
+  assert.equal(paths.legacyStagingRoot, "D:\\Harness preview\\state\\updates");
+});
+
+test("macOS keeps every writable location under Application Support", () => {
+  const paths = resolveDesktopPaths({ platform: "darwin", env: { APPDATA: "ignored", LOCALAPPDATA: "ignored" }, homedir: "/Users/me" });
+  assert.deepEqual(paths, {
+    appDataRoot: "/Users/me/Library/Application Support",
+    stateRoot: "/Users/me/Library/Application Support/juling-harness",
+    logsRoot: "/Users/me/Library/Application Support/juling-harness/logs",
+    keysRoot: "/Users/me/Library/Application Support/juling-harness/keys",
+    runtimesRoot: "/Users/me/Library/Application Support/juling-harness/runtimes",
+    updatesV2Root: "/Users/me/Library/Application Support/juling-harness/updates-v2",
+    legacyStagingRoot: "/Users/me/Library/Application Support/juling-harness/updates",
+    endpointRegistryRoot: "/Users/me/Library/Application Support/juling-harness-endpoints",
+  });
+});
+
+test("Linux keeps every writable location under XDG_CONFIG_HOME", () => {
+  const paths = resolveDesktopPaths({ platform: "linux", env: { XDG_CONFIG_HOME: "/home/me/.config-custom" }, homedir: "/home/me" });
+  assert.deepEqual(paths, {
+    appDataRoot: "/home/me/.config-custom",
+    stateRoot: "/home/me/.config-custom/juling-harness",
+    logsRoot: "/home/me/.config-custom/juling-harness/logs",
+    keysRoot: "/home/me/.config-custom/juling-harness/keys",
+    runtimesRoot: "/home/me/.config-custom/juling-harness/runtimes",
+    updatesV2Root: "/home/me/.config-custom/juling-harness/updates-v2",
+    legacyStagingRoot: "/home/me/.config-custom/juling-harness/updates",
+    endpointRegistryRoot: "/home/me/.config-custom/juling-harness-endpoints",
+  });
+  assert.equal(resolveDesktopPaths({ platform: "linux", env: {}, homedir: "/home/me" }).stateRoot, "/home/me/.config/juling-harness");
+});
+
+test("an empty or relative XDG_CONFIG_HOME keeps Linux profile data out of the working directory", () => {
+  for (const XDG_CONFIG_HOME of ["", "local-config"]) {
+    const paths = resolveDesktopPaths({ platform: "linux", env: { XDG_CONFIG_HOME }, homedir: "/home/me" });
+    assert.equal(paths.stateRoot, "/home/me/.config/juling-harness");
+    assert.equal(paths.keysRoot, "/home/me/.config/juling-harness/keys");
+  }
+});
+
+test("unsupported platforms fail instead of borrowing another platform's layout", () => {
+  assert.throws(() => resolveDesktopPaths({ platform: "freebsd", env: {}, homedir: "/home/me" }), /Unsupported desktop platform: freebsd/u);
+  assert.throws(() => packagedResourcePaths({ platform: "freebsd", execPath: "/opt/omp/juling-harness" }), /Unsupported/u);
+});
+
+test("bundled seeds sit next to the exe on Windows and in Contents/Resources on macOS", () => {
+  assert.deepEqual(packagedResourcePaths({ platform: "win32", execPath: "C:\\Program Files\\Juling Harness\\Juling Harness.exe" }), {
+    bundledRuntimeRoot: "C:\\Program Files\\Juling Harness\\runtime\\versions",
+    bundledKeysRoot: "C:\\Program Files\\Juling Harness\\runtime-keys",
+  });
+  assert.deepEqual(
+    packagedResourcePaths({
+      platform: "darwin",
+      execPath: "/Applications/Juling Harness.app/Contents/MacOS/Juling Harness",
+      resourcesPath: "/Applications/Juling Harness.app/Contents/Resources",
+    }),
+    {
+      bundledRuntimeRoot: "/Applications/Juling Harness.app/Contents/Resources/runtime/versions",
+      bundledKeysRoot: "/Applications/Juling Harness.app/Contents/Resources/runtime-keys",
+    },
+  );
+  assert.throws(() => packagedResourcePaths({ platform: "darwin", execPath: "/Applications/Juling Harness.app/Contents/MacOS/Juling Harness" }), /resources path/u);
+});
+
+test("Linux bundled seeds come from Electron resources instead of the executable directory", () => {
+  assert.deepEqual(packagedResourcePaths({
+    platform: "linux", execPath: "/opt/juling-harness/juling-harness", resourcesPath: "/opt/juling-harness/resources",
+  }), {
+    bundledRuntimeRoot: "/opt/juling-harness/resources/runtime/versions",
+    bundledKeysRoot: "/opt/juling-harness/resources/runtime-keys",
+  });
+});

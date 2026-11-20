@@ -1,0 +1,575 @@
+/* ============================================================
+   Juling Harness — Design Tokens · Aurora Glass
+   画布即极光场：暗色 = Obsidian Aurora（深空黑曜 + 电光青紫辉光），
+   浅色 = Porcelain Aurora（瓷白雾蓝 + 极光微透）。
+   铬件都是浮在场上的玻璃：--shell-alpha 决定透度，--glass-* 供给模糊，
+   靛蓝→电光青的 --aurora-line 是唯一的「时刻」渐变，靛蓝仍是交互主色。
+   ============================================================ */
+
+/* Bundled typefaces（仅 latin 子集 woff2，CJK 字形沿用下方系统栈回落。
+   所有入口都会加载本文件，字体 @import 收敛在这里，不逐入口加。 */
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/700.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/600.css";
+@import "@fontsource/space-grotesk/700.css";
+/* The motion patterns travel with the tokens they spend: every entry that
+   loads this file gets the shared keyframes, the surface classes and the
+   reduced-motion policy with it. */
+@import "./motion.css";
+/* Light is a layer on top of the flat surfaces, chosen by the 光效 setting
+   (`data-light`). It only adds: base colours, borders and backgrounds stay
+   exactly what this file says, so `data-light="off"` is the flat UI. */
+@import "./light.css";
+
+:root {
+  /* Typography — UI 正文以 Inter 打头（latin），CJK 逐级回落系统栈；
+     --font-display 只用于页面题与问候层。 */
+  --font-ui-default: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-display: "Space Grotesk", "Inter", -apple-system, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-mono-default: "JetBrains Mono", "Cascadia Code", ui-monospace, "SF Mono", Menlo, Monaco,
+    Consolas, "Courier New", monospace;
+  --font-ui: var(--font-ui-default);
+  --font-mono: var(--font-mono-default);
+  --font-terminal: var(--font-mono-default);
+  --font-output: var(--font-ui-default);
+  --font-output-code: var(--font-mono-default);
+  --ui-font-scale: 1;
+  --text-font-scale: var(--ui-font-scale);
+  --output-font-scale: 1;
+  --terminal-font-size: 12px;
+
+  /* Typography scale. Four meaningful steps above body text; metadata steps
+     are deliberately small so hierarchy comes from weight and colour, not an
+     endless size ladder. */
+  --ui-fs-11: calc(11px * var(--ui-font-scale));
+  --fs-11: var(--ui-fs-11);
+  --ui-fs-12: calc(13px * var(--ui-font-scale));
+  --fs-12: var(--ui-fs-12);
+  --ui-fs-13: calc(13px * var(--ui-font-scale));
+  --fs-13: var(--ui-fs-13);
+  --ui-fs-14: calc(15px * var(--ui-font-scale));
+  --fs-14: var(--ui-fs-14);
+  --ui-fs-16: calc(17px * var(--ui-font-scale));
+  --fs-16: var(--ui-fs-16);
+  --ui-fs-18: calc(21px * var(--ui-font-scale));
+  --fs-18: var(--ui-fs-18);
+  --ui-fs-22: calc(28px * var(--ui-font-scale));
+  --fs-22: var(--ui-fs-22);
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  --lh-tight: 1.25;
+  --lh-normal: 1.5;
+  --tracking-tight: -0.015em;
+
+  /* Radius — glass architecture: chips stay tight, controls round up,
+     cards and slabs get real curvature. --r-shell is the floating-panel
+     corner (sidebar / main slab / rail). */
+  --r-4: 6px;
+  --r-6: 9px;
+  --r-8: 12px;
+  --r-10: 16px;
+  --r-shell: 18px;
+  --r-full: 999px;
+
+  /* Spacing scale — 4/8-based, scaled by the density preference. */
+  --density-scale: 1;
+  --sp-2: calc(2px * var(--density-scale));
+  --sp-4: calc(4px * var(--density-scale));
+  --sp-6: calc(6px * var(--density-scale));
+  --sp-8: calc(8px * var(--density-scale));
+  --sp-10: calc(10px * var(--density-scale));
+  --sp-12: calc(12px * var(--density-scale));
+  --sp-14: calc(14px * var(--density-scale));
+  --sp-16: calc(16px * var(--density-scale));
+  --sp-20: calc(20px * var(--density-scale));
+  --sp-24: calc(24px * var(--density-scale));
+  --sp-32: calc(32px * var(--density-scale));
+  --sp-40: calc(40px * var(--density-scale));
+  --sp-48: calc(48px * var(--density-scale));
+
+  /* Minimum pointer target (WCAG 2.2 SC 2.5.8 Target Size Minimum = 24px). */
+  --tap-min: 28px;
+
+  /* Layout metrics */
+  --topbar-h: 48px;
+  --nav-rail-w: 60px;
+  --sidebar-w: 280px;
+  --sidebar-min: 208px;
+  --sidebar-max: 420px;
+  --minimap-w: 36px;
+  --panel-w: 480px;
+  --doc-max-w: 768px;
+  --bottom-panel-h: 240px;
+
+  /* Elevation — reserved for detached surfaces (cards, menus, sheets). Inline
+     chrome stays flat and separates with the 1px border ladder. */
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-2: 0 4px 14px rgba(16, 24, 40, 0.09), 0 1px 3px rgba(16, 24, 40, 0.05);
+  --shadow-3: 0 18px 44px rgba(16, 24, 40, 0.16), 0 4px 12px rgba(16, 24, 40, 0.06);
+
+  /* ---------------- Aurora Glass ----------------
+     The canvas is an aurora field (background.css paints it from these);
+     chrome sits on it as translucent glass. --aurora-k scales the field
+     colour strength per theme, --shell-alpha is how much canvas the glass
+     shell keeps, --glass-blur/--glass-sat feed backdrop-filter. */
+  --aurora-1: #22d3ee;
+  --aurora-2: #818cf8;
+  --aurora-3: #c084fc;
+  --aurora-k: 0.16;
+  --grid-line: rgba(53, 68, 145, 0.055);
+  --shell-alpha: 72%;
+  --glass-blur: 22px;
+  --glass-sat: 1.08;
+
+  /* ---------------- Motion ----------------
+     Numbers only. The rules that spend them are in styles/motion.css, and
+     src/motion.ts mirrors them for timers and WAAPI
+     (scripts/check-renderer-motion.mjs fails when the two drift), so a value
+     changes here and in that table, and nowhere else.
+
+     Rhythm — six steps, each about ×1.4 of the one before. Pick by what is
+     moving, not by what looks nice in isolation:
+       --dur-tactile   80ms  a press being acknowledged
+       --dur-fast     120ms  colour, hover, anything that stays put; popovers
+       --dur          180ms  one element changing state: chevron, switch, reveal
+       --dur-slow     250ms  a region changing size or place: panel, drawer, card
+       --dur-slower   320ms  a whole surface arriving: page, tab pane, toast
+       --dur-hero     480ms  a morph that carries meaning: ask genie, plan sheet
+     Leaving takes the step below arriving (a 320ms surface leaves in 250ms), so
+     dismissing never feels like waiting. */
+  --dur-tactile: 80ms;
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 250ms;
+  --dur-slower: 320ms;
+  --dur-hero: 480ms;
+  /* Two durations that are not steps of the ladder, because they are not
+     transitions between states: a highlight left behind to catch the eye and
+     then fade, and a long label scrolling past at reading pace. */
+  --dur-flash: 900ms;
+  --dur-marquee: 3000ms;
+  /* Loops are status, not transitions. Three tempos, by what the loop says:
+     working (a spinner), alive (a pulse, a shimmer, a progress sweep), and
+     ambient (slow breathing at the edge of attention). */
+  --loop-spin: 800ms;
+  --loop-pulse: 1400ms;
+  --loop-drift: 2400ms;
+  /* Light loops (styles/light.css). The orbit is a light travelling round the
+     edge of a surface that is working; the ambient field drifts so slowly it
+     is only noticed as the window being alive. */
+  --loop-orbit: 3200ms;
+  --loop-ambient: 18000ms;
+
+  /* Curves — pick by what the motion means:
+       --ease           state    colour, opacity, anything that stays where it is
+       --ease-out       arrive   one element decelerating into place
+       --ease-in        leave    one element accelerating away
+       --ease-nav       travel   surfaces and indicators crossing the screen
+       --ease-ios       follow   things answering the user's own gesture
+       --ease-emphasis  morph    a large shape that starts and ends at rest
+       --ease-spring    settle   a small mark landing (the only overshoot)
+       --ease-loop      breathe  loops that go there and back */
+  --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-out: cubic-bezier(0.16, 0.84, 0.44, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+  --ease-nav: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-ios: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-emphasis: cubic-bezier(0.38, 0, 0.08, 1);
+  --ease-loop: cubic-bezier(0.42, 0, 0.58, 1);
+  --ease-spring: linear(0, 0.006 1%, 0.028 2.25%, 0.064 3.5%, 0.122 5%, 0.179 6.25%, 0.241 7.5%, 0.523 12.75%, 0.638 15%, 0.752 17.5%, 0.84 19.75%, 0.913 22%, 0.977 24.5%, 1.024 27%, 1.055 29.5%, 1.07 31.25%, 1.078 33%, 1.083 36.75%, 1.072 41.25%, 1.017 54.5%, 0.998 62.75%, 0.993 72.5%, 1);
+
+  /* Travel — distance says how big the thing is, axis says what kind of move
+     it is: vertical for depth, horizontal for siblings. */
+  --shift-xs: 4px;
+  --shift-sm: 8px;
+  --shift-md: 12px;
+  --shift-lg: 16px;
+  --stagger: 40ms;
+  --tip-delay: 500ms;
+
+  /* Z-index — the scale is the contract; raw values in component files are not. */
+  --z-base: 1;
+  --z-resizer: 5;
+  --z-scroll-aid: 9;
+  --z-rail: 10;
+  --z-rail-tools: 11;
+  --z-topbar: 20;
+  --z-panel: 30;
+  --z-fab: 40;
+  --z-menu: 60;
+  --z-float: 70;
+  --z-modal: 80;
+  --z-tip: 90;
+  --z-toast: 100;
+}
+
+/* ---------------- 信息密度（设置 → 常规） ----------------
+   只缩放间距阶梯：紧凑 ~0.85x，宽松 ~1.15x。字号与布局度量不动。 */
+:root[data-density="compact"] { --density-scale: 0.85; }
+:root[data-density="cozy"] { --density-scale: 1.15; }
+
+/* ---------------- Light · Porcelain Aurora (default) ----------------
+   A bright porcelain canvas with a faint aurora breathing through it.
+   Chrome reads as frosted glass: translucent surfaces over the field,
+   hairlines of deep indigo ink instead of grey. */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Canvas = the aurora field. Panels no longer repaint it — glass keeps
+     the same --shell-alpha and lets the field show through. */
+  --bg: #dde4f3;
+  --bg-inset: #d9e0ef;
+  --rail-bg: #e3e9f6;
+
+  /* Glass chrome: translucent ink hairlines stay legible on any panel. */
+  --rail-border: rgba(38, 44, 80, 0.26);
+  --surface: rgba(255, 255, 255, 0.78);
+  --surface-2: rgba(255, 255, 255, 0.55);
+  --surface-3: rgba(255, 255, 255, 0.34);
+  --surface-hover: rgba(38, 48, 96, 0.055);
+  --surface-active: rgba(38, 48, 96, 0.095);
+
+  --border: rgba(38, 44, 80, 0.12);
+  --border-strong: rgba(38, 44, 80, 0.22);
+
+  /* Text ramp measured against the brightest glass (#ffffff @ 78% over
+     porcelain): text 14.8:1 · text-2 7.9:1 · text-3 6.1:1 · faint 5.2:1. */
+  --text: #101526;
+  --text-2: #37405e;
+  --text-3: #454e6e;
+  --text-faint: #525b7a;
+  --text-on-accent: #ffffff;
+  --glyph-faint: #667190;
+
+  /* Indigo→aurora interaction ramp: solid for actions, aurora for moments. */
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: rgba(79, 70, 229, 0.09);
+  --accent-softer: rgba(79, 70, 229, 0.045);
+  --accent-border: rgba(79, 70, 229, 0.28);
+  --accent-2: #0e7490;
+  --accent-2-hover: #0c5f74;
+  --accent-2-soft: rgba(14, 116, 144, 0.09);
+  --accent-2-border: rgba(14, 116, 144, 0.28);
+  --aurora-line: linear-gradient(90deg, #4f46e5, #0e7490 55%, #7c3aed);
+  --glow: rgba(79, 70, 229, 0.18);
+
+  /* Status colours keep 4.5:1 for the small text they carry. */
+  --green: #067647;
+  --green-soft: rgba(6, 118, 71, 0.10);
+  --amber: #b54708;
+  --amber-soft: rgba(181, 71, 8, 0.10);
+  --red: #b42318;
+  --red-soft: rgba(180, 35, 24, 0.09);
+  --danger-orange: #c2410c;
+  --danger-orange-soft: color-mix(in srgb, var(--danger-orange) 12%, transparent);
+  --danger-glow: #fdba74;
+  --blue: #175cd3;
+  --blue-soft: rgba(23, 92, 211, 0.10);
+  --purple: var(--accent-2);
+  --purple-soft: var(--accent-2-soft);
+
+  /* Role tint palette (Agent Hub / model roles). */
+  --tint-green: #16a34a;
+  --tint-green-soft: rgba(22, 163, 74, 0.10);
+  --tint-green-border: rgba(22, 163, 74, 0.28);
+  --tint-blue: #0284c7;
+  --tint-blue-soft: rgba(2, 132, 199, 0.10);
+  --tint-blue-border: rgba(2, 132, 199, 0.28);
+  --tint-teal: #0d9488;
+  --tint-teal-soft: rgba(13, 148, 136, 0.10);
+  --tint-teal-border: rgba(13, 148, 136, 0.28);
+  --tint-violet: #7c3aed;
+  --tint-violet-soft: rgba(124, 58, 237, 0.10);
+  --tint-violet-border: rgba(124, 58, 237, 0.28);
+  --tint-pink: #db2777;
+  --tint-pink-soft: rgba(219, 39, 119, 0.10);
+  --tint-pink-border: rgba(219, 39, 119, 0.28);
+  --tint-orange: #ea580c;
+  --tint-orange-soft: rgba(234, 88, 12, 0.10);
+  --tint-orange-border: rgba(234, 88, 12, 0.28);
+  --tint-cyan: #0891b2;
+  --tint-cyan-soft: rgba(8, 145, 178, 0.10);
+  --tint-cyan-border: rgba(8, 145, 178, 0.28);
+  --tint-lime: #65a30d;
+  --tint-lime-soft: rgba(101, 163, 13, 0.10);
+  --tint-lime-border: rgba(101, 163, 13, 0.28);
+  --tint-indigo: #4f46e5;
+  --tint-indigo-soft: rgba(79, 70, 229, 0.10);
+  --tint-indigo-border: rgba(79, 70, 229, 0.28);
+  --tint-rose: #e11d48;
+  --tint-rose-soft: rgba(225, 29, 72, 0.10);
+  --tint-rose-border: rgba(225, 29, 72, 0.28);
+
+  --git-modified: #b54708;
+  --git-added: #067647;
+  --git-deleted: #b42318;
+  --git-renamed: #175cd3;
+  --git-untracked: #15803d;
+  --git-conflict: #b42318;
+
+  --diff-add-bg: rgba(6, 118, 71, 0.09);
+  --diff-add-gutter: rgba(6, 118, 71, 0.20);
+  --diff-del-bg: rgba(180, 35, 24, 0.08);
+  --diff-del-gutter: rgba(180, 35, 24, 0.18);
+
+  --code-bg: rgba(255, 255, 255, 0.6);
+  --code-chip-bg: rgba(8, 145, 178, 0.09);
+  --code-chip-text: #0c5a68;
+
+  /* Detached surfaces use a real, restrained elevation. */
+  --shadow-menu: var(--shadow-2);
+  --shadow-modal: var(--shadow-3);
+  --border-float: rgba(255, 255, 255, 0.65);
+
+  --scrollbar: rgba(38, 44, 80, 0.18);
+  --scrollbar-hover: rgba(38, 44, 80, 0.32);
+  --minimap-viewport: rgba(38, 44, 80, 0.09);
+  --selection: rgba(79, 70, 229, 0.18);
+
+  /* Switch: off thumb is white on a translucent track; on thumb follows
+     --text-on-accent. */
+  --switch-thumb: #ffffff;
+  --switch-thumb-disabled: #ffffff;
+
+  --ftype-code: #2f5a8f;
+  --ftype-markup: #7d5527;
+  --ftype-style: #8a4a70;
+  --ftype-data: #0f6b55;
+  --ftype-script: #4a6b32;
+  --ftype-test: #6d6118;
+  --ftype-image: #0e6e83;
+  --ftype-secret: #96434b;
+  --ftype-package: var(--ftype-data);
+  --ftype-doc: var(--text-3);
+  --ftype-config: var(--text-3);
+  --ftype-lock: var(--text-3);
+  --ftype-dim: #6d7d94;
+}
+
+/* ---------------- Dark · Graphite ---------------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Obsidian canvas: near-black indigo night. The aurora field glows
+     through; panels are smoked glass, not painted slabs. */
+  --bg: #05070f;
+  --bg-inset: #070a14;
+  --rail-bg: #0a0e1c;
+
+  --rail-border: rgba(148, 170, 255, 0.22);
+  --surface: rgba(23, 29, 48, 0.72);
+  --surface-2: rgba(29, 36, 58, 0.58);
+  --surface-3: rgba(38, 46, 72, 0.42);
+  --surface-hover: rgba(148, 170, 255, 0.07);
+  --surface-active: rgba(148, 170, 255, 0.11);
+
+  --border: rgba(148, 170, 255, 0.11);
+  --border-strong: rgba(148, 170, 255, 0.20);
+
+  /* Text ramp measured on the brightest glass:
+     text 15.6:1 · text-2 9.2:1 · text-3 6.3:1 · faint 5.4:1. */
+  --text: #eef1fb;
+  --text-2: #b6bed6;
+  --text-3: #8d97b5;
+  --text-faint: #7c86a4;
+  --glyph-faint: #636e8d;
+  --text-on-accent: #0b0e18;
+
+  /* Electric aurora: periwinkle for actions, teal for data. */
+  --accent: #8b8cf8;
+  --accent-hover: #a5b4fc;
+  --accent-soft: rgba(139, 140, 248, 0.15);
+  --accent-softer: rgba(139, 140, 248, 0.07);
+  --accent-border: rgba(139, 140, 248, 0.36);
+  --accent-2: #5eead4;
+  --accent-2-hover: #99f6e4;
+  --accent-2-soft: rgba(94, 234, 212, 0.12);
+  --accent-2-border: rgba(94, 234, 212, 0.30);
+  --aurora-line: linear-gradient(90deg, #818cf8, #22d3ee 55%, #c084fc);
+  --glow: rgba(129, 140, 248, 0.24);
+
+  /* Night field breathes stronger, glass runs clearer. */
+  --aurora-k: 0.26;
+  --grid-line: rgba(129, 162, 255, 0.05);
+  --shell-alpha: 58%;
+  --glass-blur: 26px;
+  --glass-sat: 1.14;
+
+  /* Status colours keep 4.5:1 for the small text they carry. */
+  --green: #4ade80;
+  --green-soft: rgba(74, 222, 128, 0.14);
+  --amber: #fbbf24;
+  --amber-soft: rgba(251, 191, 36, 0.14);
+  --red: #f87171;
+  --red-soft: rgba(248, 113, 113, 0.14);
+  --danger-orange: #fb923c;
+  --danger-orange-soft: color-mix(in srgb, var(--danger-orange) 14%, transparent);
+  --danger-glow: #fed7aa;
+  --blue: #60a5fa;
+  --blue-soft: rgba(96, 165, 250, 0.14);
+
+  --tint-green: #4ade80;
+  --tint-green-soft: rgba(74, 222, 128, 0.14);
+  --tint-green-border: rgba(74, 222, 128, 0.32);
+  --tint-blue: #38bdf8;
+  --tint-blue-soft: rgba(56, 189, 248, 0.14);
+  --tint-blue-border: rgba(56, 189, 248, 0.32);
+  --tint-teal: #2dd4bf;
+  --tint-teal-soft: rgba(45, 212, 191, 0.14);
+  --tint-teal-border: rgba(45, 212, 191, 0.32);
+  --tint-violet: #a78bfa;
+  --tint-violet-soft: rgba(167, 139, 250, 0.14);
+  --tint-violet-border: rgba(167, 139, 250, 0.32);
+  --tint-pink: #f472b6;
+  --tint-pink-soft: rgba(244, 114, 182, 0.14);
+  --tint-pink-border: rgba(244, 114, 182, 0.32);
+  --tint-orange: #fb923c;
+  --tint-orange-soft: rgba(251, 146, 60, 0.14);
+  --tint-orange-border: rgba(251, 146, 60, 0.32);
+  --tint-cyan: #22d3ee;
+  --tint-cyan-soft: rgba(34, 211, 238, 0.14);
+  --tint-cyan-border: rgba(34, 211, 238, 0.32);
+  --tint-lime: #a3e635;
+  --tint-lime-soft: rgba(163, 230, 53, 0.14);
+  --tint-lime-border: rgba(163, 230, 53, 0.32);
+  --tint-indigo: #8b8cf8;
+  --tint-indigo-soft: rgba(139, 140, 248, 0.14);
+  --tint-indigo-border: rgba(139, 140, 248, 0.32);
+  --tint-rose: #fb7185;
+  --tint-rose-soft: rgba(251, 113, 133, 0.14);
+  --tint-rose-border: rgba(251, 113, 133, 0.32);
+
+  --git-modified: #fbbf24;
+  --git-added: #4ade80;
+  --git-deleted: #f87171;
+  --git-renamed: #60a5fa;
+  --git-untracked: #86efac;
+  --git-conflict: #f87171;
+
+  --diff-add-bg: rgba(74, 222, 128, 0.12);
+  --diff-add-gutter: rgba(74, 222, 128, 0.24);
+  --diff-del-bg: rgba(248, 113, 113, 0.11);
+  --diff-del-gutter: rgba(248, 113, 113, 0.22);
+
+  --code-bg: rgba(10, 14, 26, 0.55);
+  --code-chip-bg: rgba(94, 234, 212, 0.10);
+  --code-chip-text: #99f6e4;
+
+  --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.50), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-modal: 0 28px 64px rgba(0, 0, 0, 0.65);
+  --border-float: rgba(148, 170, 255, 0.16);
+
+  --scrollbar: rgba(148, 170, 255, 0.16);
+  --scrollbar-hover: rgba(148, 170, 255, 0.28);
+  --minimap-viewport: rgba(255, 255, 255, 0.08);
+  --selection: rgba(139, 140, 248, 0.26);
+
+  --switch-thumb: var(--glyph-faint);
+  --switch-thumb-disabled: #4a5464;
+
+  --ftype-code: #8fb8e8;
+  --ftype-markup: #d3a271;
+  --ftype-style: #e0a6c2;
+  --ftype-data: #74c7a8;
+  --ftype-script: #9ac387;
+  --ftype-test: #c4bb6f;
+  --ftype-image: #6fc8da;
+  --ftype-secret: #d1838b;
+  --ftype-dim: #71809a;
+}
+
+/* Compatibility names from older feature panes reuse the established scale.
+   They are aliases, not extra colors, font sizes, or corner styles. */
+:root {
+  --danger: var(--red);
+  --orange: var(--amber);
+  --surface-muted: var(--surface-2);
+  --surface-1: var(--surface);
+  --accent-subtle: var(--accent-softer);
+  --bg-subtle: var(--surface-2);
+  --bg-hover: var(--surface-hover);
+  --border-subtle: var(--border);
+  --text-muted: var(--text-3);
+  --text-1: var(--text);
+  --r-12: var(--r-8);
+  --fs-10: var(--fs-11);
+  --fs-15: var(--fs-14);
+  --sp-3: var(--sp-4);
+  --sp-5: var(--sp-6);
+  --sp-18: var(--sp-20);
+  --shadow-sm: var(--shadow-menu);
+  --tint-purple: var(--tint-violet);
+  --tint-purple-soft: var(--tint-violet-soft);
+  --warning-soft: var(--amber-soft);
+}
+
+/* ---------------- Explorer 文件类型 · 三通道严格模式（spec §2 C1 二裁） ----------------
+   组件零改动：<html data-palette="tri"> 即可。12 个类别全部回落中性，只留一个
+   "需注意"通道（--ftype-secret → --amber）。切过去后 12 个图标仍能两两分辨，
+   这是"颜色只是加速器、语义 100% 由剪影承载"的现场证明。
+   选择器特异性 (0,2,0) 与 :root[data-theme="dark"] 相同，靠源顺序取胜 —— 必须留在
+   文件末尾，否则暗色块会把 tri 覆盖回去。 */
+:root[data-palette="tri"] {
+  --ftype-code: var(--text-3);
+  --ftype-markup: var(--text-3);
+  --ftype-style: var(--text-3);
+  --ftype-data: var(--text-3);
+  --ftype-script: var(--text-3);
+  --ftype-test: var(--text-3);
+  --ftype-image: var(--text-3);
+  --ftype-package: var(--text-3);
+  --ftype-doc: var(--text-3);
+  --ftype-config: var(--text-3);
+  --ftype-lock: var(--text-3);
+  --ftype-secret: var(--amber);
+}
+
+/* 系统强制高对比 / 请求更高对比时自动降级。选择器用 :root:root（0,2,0），
+   否则暗色主题值会覆盖。 */
+@media (forced-colors: active) {
+  :root:root:root {
+    --ftype-code: var(--text-3);
+    --ftype-markup: var(--text-3);
+    --ftype-style: var(--text-3);
+    --ftype-data: var(--text-3);
+    --ftype-script: var(--text-3);
+    --ftype-test: var(--text-3);
+    --ftype-image: var(--text-3);
+    --ftype-package: var(--text-3);
+    --ftype-doc: var(--text-3);
+    --ftype-config: var(--text-3);
+    --ftype-lock: var(--text-3);
+    --ftype-secret: var(--amber);
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root:root:root {
+    --ftype-code: var(--text-3);
+    --ftype-markup: var(--text-3);
+    --ftype-style: var(--text-3);
+    --ftype-data: var(--text-3);
+    --ftype-script: var(--text-3);
+    --ftype-test: var(--text-3);
+    --ftype-image: var(--text-3);
+    --ftype-package: var(--text-3);
+    --ftype-doc: var(--text-3);
+    --ftype-config: var(--text-3);
+    --ftype-lock: var(--text-3);
+    --ftype-secret: var(--amber);
+  }
+}

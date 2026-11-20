@@ -1,0 +1,1776 @@
+import { createTimeTravelPort } from "./time-travel-port.js";
+import { ProjectReadServices } from "./project-read-services.js";
+import { evaluationsFor, closeEvaluations } from "./evaluation-workspace.js";
+import { artifactLibraryForProfile } from "./artifact-library.js";
+import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
+import { timeTravelService } from "./time-travel-service.js";
+import { randomUUID } from "node:crypto";
+import type { WorkspaceId, SessionId } from "@juling-harness/client-contract";
+import { desktopText } from "./desktop-language-shared.js";
+
+/**
+ * Desktop Host composition (FRONTEND_INTEGRATION.md §9.2).
+ *
+ * Testable, Electron-free orchestration that brings the Host up in the
+ * exact P1 order:
+ *
+ *   current-user profile/state directory (injected PlatformPort)
+ *     -> Win32AuthorityLock acquisition (before any HostBackend use)
+ *     -> current-user-only private endpoint (Win32PrivateEndpoint)
+ *     -> HostBackend construction + initialize
+ *     -> managed Runtime resolution (injected resolver environment/probe)
+ *     -> optional HarnessRuntimeSessionController, created ONLY after a
+ *        trusted resolution
+ *     -> sender-bound HarnessHostClientFacade (ClientTransport)
+ *
+ * Trusted resolution means a live-verified full-parity runtime
+ * (`managed` or `compatible-system` per the resolver's probe evidence).
+ * Rejected, limited, unavailable or not-ready runtimes never execute: the
+ * composition fails closed to a read-only facade whose bootstrap reports
+ * `runtime.status: "unavailable"` without snapshot keys and never claims a
+ * fake ready state.
+ *
+ * A second owner fails closed: when the injected authority lock reports an
+ * already-live owner, `createDesktopHostComposition` rejects and no second
+ * lock, endpoint, backend or runtime is ever created.
+ *
+ * `reload()` re-binds a fresh client session over the SAME Host, authority
+ * lease, endpoint and Runtime session — a renderer reload never stops the
+ * Runtime. `shutdown()` orders facade client-session close -> Runtime
+ * graceful stop (only when this composition started one) -> endpoint
+ * release -> authority lease release; any failure stops the chain (fail
+ * closed) and never releases a lease this composition does not own.
+ *
+ * Secrets policy: only opaque identities and the ClientTransport cross
+ * this module's public surface. No Bridge token, endpoint, process
+ * handle/PID or executable/session path ever reaches the facade or the
+ * renderer contract.
+ */
+
+import type {
+  ArchId,
+  AuthorityEpoch,
+  AuthorityId,
+  ClientTransport,
+  ConversationTranscriptReadPage,
+  PublicAuthorityIdentity,
+  ResidentsReadModel,
+  PlatformId,
+} from "@juling-harness/client-contract";
+import {
+  createDefaultHostDiagnosticsFactory,
+  HarnessHostClientFacade,
+  redactText,
+  threadIdFor,
+  type HostAgentDefinitionsService,
+  type HostDiagnosticsFactory,
+  type HostExtensibilityService,
+  type HostGitHubService,
+  type HostGitService,
+  type HostMcpService,
+  type HostManifestProvider,
+  type HostModelsService,
+  type HostRuntimeAccess,
+  type HostRuntimeDisconnect,
+  type HostRuntimeHelloView,
+  type HostRuntimeUnavailable,
+  type HostRuntimeInstallProbe,
+  type HostRuntimeInstallService,
+  type HostResidentsService,
+  type HostSemanticCommandService,
+  type HostSessionCatalogProvider,
+  type HostSessionArchiveProvider,
+  type HostSessionTelemetryProbePort,
+  type HostSessionTelemetryStorePort,
+  type HostUsageService,
+  type HostWorkspaceService,
+  type HostWorkspaceFileService,
+  type HostSystemFileService,
+  type HarnessHostClientFacadeOptions,
+} from "@juling-harness/host-client-api";
+import { createOmpAgentDefinitionsService } from "@juling-harness/host-client-api/agent-definitions";
+import { createOmpExtensibilityService } from "@juling-harness/host-client-api/extensibility";
+import { createOmpMcpService } from "@juling-harness/host-client-api/mcp";
+import { createOmpModelsService } from "@juling-harness/host-client-api/models";
+import { createOmpUsageService, defaultLocateOmp } from "@juling-harness/host-client-api/usage";
+import type { PlatformPort, PrivateEndpoint } from "@juling-harness/platform";
+import {
+  HostBackend,
+  type HostBackendOptions,
+  createNodeSessionTelemetryProbe,
+  createNodeSessionPurgeMaintenance,
+  supportsSessionPurgeMaintenance,
+  type SessionPurgeMaintenancePort,
+  createPathLocator,
+  type RuntimePublication,
+  type RuntimeResolution,
+  type RuntimeResolverEnvironment,
+  type HarnessBtwForward,
+  type HarnessComputerForward,
+  type HarnessConversationForward,
+  type HarnessTelemetryForward,
+  type HarnessRuntimeSessionController,
+  type SessionArchiveReaderPort,
+  HarnessSessionArchiveService,
+  HarnessSessionDeleteService,
+  FileSessionLeaseStore,
+  defaultOmpAgentDir,
+  type SessionArchiveReadInput,
+  type SessionPersistedAgentRecord,
+} from "@juling-harness/harness-host";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+
+import { join } from "node:path";
+import type {
+  ApprovalMode,
+  CapabilityManifest,
+  CommandLedgerEntry,
+  OperatorCommandManifest,
+  RuntimePreference,
+  HarnessAgentSnapshot,
+} from "@juling-harness/harness-protocol";
+
+import { DesktopInteractionHost, IsolatedForwarder } from "./interaction-host.js";
+import {
+  createDesktopRuntimeInstallProbe,
+  createDesktopRuntimeInstallService,
+  createManagedArtifactLocator,
+  defaultRuntimeKeysDirectory,
+  loadInstallerTrustedKeys,
+  resolveManagedRuntimeInstallDirectory,
+  seedManagedRuntimeFromArtifact,
+  type DesktopManagedInstallOptions,
+} from "./runtime-install.js";
+import { createDesktopSemanticCommands, createWorkspaceSessionCatalog } from "./session-commands.js";
+import type { DesktopHostComposition, DesktopRuntimeStatus } from "./types.js";
+import { UpdateRestartBlockedError, updateRestartBlockerForSnapshot } from "./update-restart.js";
+import { DesktopRuntimeStartup } from "./runtime-startup.js";
+
+/** Default Runtime resolution preference for the P1 managed slice. */
+const DEFAULT_RUNTIME_PREFERENCE: RuntimePreference = { kind: "managed" };
+
+/** Opaque authority lease; structurally satisfied by Win32AuthorityLock's lease. */
+export interface DesktopAuthorityLease {
+  readonly authorityId: string;
+  readonly epoch: string;
+  release(): Promise<void>;
+}
+
+/** Injected single-owner lock port; structurally satisfied by Win32AuthorityLock. */
+export interface DesktopAuthorityLock {
+  acquire(): Promise<DesktopAuthorityLease>;
+}
+
+/** Opaque private-endpoint lease; structurally satisfied by Win32PrivateEndpoint's lease. */
+export interface DesktopEndpointLease {
+  readonly endpoint: PrivateEndpoint;
+  release(): Promise<void>;
+}
+
+/** Injected current-user-only endpoint port; structurally satisfied by Win32PrivateEndpoint. */
+export interface DesktopPrivateEndpoint {
+  createCurrentUserOnly(profileDirectory: string): Promise<DesktopEndpointLease>;
+}
+
+/** Ready Runtime session bundle produced only after a trusted resolution. */
+export interface DesktopRuntimeSession {
+  /** Main-only private file channel. Never project this path to a client. */
+  mediaDirectory?(): string | undefined;
+  readonly controller: HarnessRuntimeSessionController;
+  /** Safe current hello; `undefined` once the Runtime is lost. */
+  hello(): HostRuntimeHelloView | undefined;
+  /** Subscribe to publication advances (Bridge projection changes). */
+  onPublication(listener: (publication: RuntimePublication) => void): () => void;
+  /** Authenticated hello capability manifest; `undefined` when disconnected or fail-closed. */
+  capabilityManifest(): CapabilityManifest | undefined;
+  /** Hash-verified operator command manifest; `undefined` when disconnected or fail-closed. */
+  commandManifest(): OperatorCommandManifest | undefined;
+}
+
+/** Internal Main-process change payload for the residents read model. */
+export interface DesktopResidentsChange extends ResidentsReadModel {
+  /** Background terminal outcomes use a Main-only side channel. Never attach
+   * a background snapshot/publication to the current client projection. */
+  readonly terminalOutcomes?: ReadonlyArray<CommandLedgerEntry>;
+}
+
+/** Context handed to the runtime session port after a trusted resolution. */
+export interface DesktopRuntimeSessionContext {
+  readonly resolution: RuntimeResolution;
+  readonly endpoint: PrivateEndpoint;
+  readonly profileDirectory: string;
+  /**
+   * Managed Runtime tree used to spawn `omp.exe`. Packaged: `$INSTDIR\runtime`.
+   * Unpackaged / tests: `%APPDATA%\juling-harness\runtimes` (or the temp profile).
+   */
+  readonly runtimeInstallDirectory: string;
+  /** Installer trust material, so the launch path can verify what it resolves. */
+  readonly installer?: HostBackendOptions["installer"];
+  /** Persisted or newly selected workspace; absent means honest read-only. */
+  readonly workspace?: { workspaceId: string; cwd: string };
+}
+
+/**
+ * Injectable Runtime start/stop port. The production implementation
+ * (Main/native composition) spawns the trusted executable, performs the
+ * Bridge bootstrap/handshake and wires the session controller; tests
+ * substitute fakes so no untrusted file is ever executed.
+ */
+/** Main-only launch intent. A prepared workspace is registered by the execution service, never a client path. */
+export type DesktopSessionSwitchIntent =
+  | { kind: "resume"; sessionId: string; model?: string; resumeWorkspace?: { workspaceId: string; cwd: string }; allowRelocation?: boolean }
+  | { kind: "fresh"; noContextFiles?: boolean; model?: string };
+
+export interface DesktopRuntimeSessionPort {
+  sessionFor?(sessionId: string): DesktopRuntimeSession | undefined;
+  /** Await native in-process fork/branch identity adoption and transfer the writer lease. */
+  synchronizeSessionIdentity?(session: DesktopRuntimeSession): Promise<void>;
+  openContextSession?(workspace: { workspaceId: string; cwd: string }, intent: DesktopSessionSwitchIntent): Promise<DesktopRuntimeSession | undefined>;
+  /** True when switching the active view keeps sibling Runtime Workers resident. */
+  readonly supportsConcurrentSessions?: boolean;
+  openEvaluation?(workspace: { workspaceId: string; cwd: string }): Promise<DesktopRuntimeSession | undefined>;
+  evaluationSession?(sessionId: string): DesktopRuntimeSession | undefined;
+  releaseEvaluation?(sessionId: string): Promise<void>;
+  /**
+   * Starts (or connects to) the trusted Runtime and returns a ready
+   * session bundle, or `undefined` when the Runtime is not ready. Called
+   * at most once per composition.
+   */
+  start(context: DesktopRuntimeSessionContext): Promise<DesktopRuntimeSession | undefined>;
+  /** Consult native close hooks without stopping, draining, or closing client sessions. */
+  confirmClose?(): Promise<boolean>;
+  /** Gracefully stops the Runtime if this port started one; no-op otherwise. */
+  stop(): Promise<void>;
+  updateRestartBlocker?(): string | undefined;
+  prepareRestart?(beforeStop?: () => void | Promise<void>): Promise<void>;
+  /** Stop idle workers for an installation, then restore their sessions using
+   * the activated executable. Serialized with all other lifecycle changes. */
+  withRuntimeMaintenance?<T>(operation: () => Promise<T>, expectedVersion?: () => string | undefined,
+    refreshContext?: () => Promise<DesktopRuntimeSessionContext>,
+    recoverPrevious?: () => Promise<string | undefined>): Promise<T>;
+  /**
+   * Optional workspace rebind: select a Worker for the given workspace and,
+   * unless `launchIfMissing` is false, spawn one when absent. Returns its
+   * session bundle (`undefined` for a deliberate read-only bind or when the
+   * Runtime is unavailable). Workers of other workspaces stay resident. The
+   * composition rebuilds the facade's runtime access from the returned bundle.
+   * Never changes the `start` contract: startup still happens at most once.
+   */
+  rebind?(
+    workspace: { workspaceId: string; cwd: string },
+    options?: { readonly launchIfMissing?: boolean },
+  ): Promise<DesktopRuntimeSession | undefined>;
+  /**
+   * True when a live Worker already holds this workspace, i.e. a rebind to it
+   * is a binding switch rather than a Runtime restart. Ports without a
+   * resident pool omit this and every rebind counts as a restart.
+   */
+  hasResidentForWorkspace?(workspaceId: string): boolean;
+  /** Current authority-level resident projection (safe, path-free facts). */
+  listResidents?(): ResidentsReadModel;
+  /**
+   * Subscribe to resident projection changes. The returned disposer is
+   * required so a composition reload/close cannot retain Host listeners.
+   */
+  attachResidentsSink?(listener: (change: DesktopResidentsChange) => void): () => void;
+  /**
+   * Stop the current Runtime and launch it against another session file
+   * (`resume`) or a fresh process (`fresh`). Increments the Runtime epoch.
+   * On launch failure the port restores the previous session when possible.
+   */
+  switchSession?(intent: DesktopSessionSwitchIntent): Promise<DesktopRuntimeSession | undefined>;
+  /**
+   * Apply the tool approval mode across resident Runtimes (plan §5.3): the
+   * active Runtime persists the mode to the OMP global configuration, every
+   * sibling resident Runtime receives a non-persistent override. Returns
+   * per-session statistics; failures surface as `syncStatus: "partial"`
+   * and are re-applied on the next activate/rebind.
+   */
+  applyApprovalMode?(mode: ApprovalMode): Promise<{
+    mode: ApprovalMode;
+    syncStatus: "complete" | "partial";
+    appliedSessions: number;
+    failedSessions: number;
+  }>;
+  /** True when a Runtime Worker currently holds this session file. */
+  isResident?(sessionId: string): boolean;
+  /**
+   * Abort a streaming turn if needed, stop that Worker, and launch a
+   * replacement when it was the active view. Background residents are
+   * stopped without changing the active binding.
+   */
+  evacuateResident?(sessionId: string): Promise<{
+    readonly found: boolean;
+    readonly active?: DesktopRuntimeSession;
+  }>;
+  /**
+   * Last skip/fail reason when `start`/`rebind` returned `undefined` or
+   * threw. Cleared after a ready session. Pre-redacted; never a path.
+   */
+  lastUnavailable?(): HostRuntimeUnavailable | undefined;
+  /**
+   * Last observed drop after a ready hello. Cleared after a ready session.
+   */
+  lastDisconnect?(): HostRuntimeDisconnect | undefined;
+  /**
+   * Start or restart under the current workspace. No-op when already
+   * connected unless `force` is true. Used by diagnostics `runtime.ensure`
+   * and session recovery.
+   */
+  ensure?(input?: { force?: boolean }): Promise<DesktopRuntimeSession | undefined>;
+  /**
+   * Composition binds here so an automatic relaunch can replace the live
+   * session holder without a user command.
+   */
+  attachSessionSink?(listener: (session: DesktopRuntimeSession | undefined) => void): void;
+  /**
+   * Composition binds here so selecting a Worker of another project moves the
+   * Host's active workspace with it: cwd-derived reads (session catalog,
+   * archive, models / MCP scope) must agree with the bound Session.
+   */
+  attachWorkspaceSink?(listener: (workspace: { workspaceId: string; cwd: string }) => void): () => void;
+}
+
+/** Facade seam providers; every optional slot fails closed when absent. */
+export interface DesktopFacadeSeams {
+  readonly capabilityManifest?: HostManifestProvider<CapabilityManifest>;
+  readonly commandManifest?: HostManifestProvider<OperatorCommandManifest>;
+  readonly catalog?: HostSessionCatalogProvider;
+  /** Optional authority-level resident Runtime projection. */
+  readonly residents?: HostResidentsService;
+  readonly archive?: HostSessionArchiveProvider;
+  /** Overrides the persisted "last observed" telemetry store (tests). */
+  readonly telemetryStore?: HostSessionTelemetryStorePort;
+  /** Overrides the one-shot archived-session telemetry probe (tests). */
+  readonly telemetryProbe?: HostSessionTelemetryProbePort;
+  /** Optional Host log for coarse probe diagnostics (no paths or session ids). */
+  readonly hostLog?: { write(level: "info" | "warn" | "error", event: string, detail?: string): void };
+  readonly diagnostics?: HostDiagnosticsFactory;
+  readonly install?: HostRuntimeInstallService;
+  readonly installProbe?: HostRuntimeInstallProbe;
+  readonly commands?: HostSemanticCommandService;
+  readonly models?: HostModelsService;
+  readonly extensibility?: HostExtensibilityService;
+  readonly mcp?: HostMcpService;
+  readonly agentDefinitions?: HostAgentDefinitionsService;
+  readonly getWorkspaceCwd?: () => string | undefined;
+  /** Main chrome follows only workspace bindings accepted by this composition. */
+  readonly onRuntimeWorkspaceChanged?: (workspace: { workspaceId: string; cwd: string }) => void;
+  readonly workspaces?: HostWorkspaceService;
+  readonly resolveImportWorkspace?: (workspaceId: string) => Promise<string | undefined>;
+  readonly registerImportedWorkspace?: (cwd: string) => Promise<string>;
+
+  readonly workspaceFiles?: HostWorkspaceFileService;
+  readonly systemFiles?: HostSystemFileService;
+  readonly git?: HostGitService;
+  readonly github?: HostGitHubService;
+  readonly usage?: HostUsageService;
+  readonly openUrl?: (url: string) => Promise<void>;
+  /** Main-injected Explorer open for Host-owned skill directories. */
+  readonly revealDirectory?: (absDir: string) => Promise<void>;
+  /** Active workspace for Runtime start; never falls back to process.cwd(). */
+  readonly getActiveWorkspace?: () => { workspaceId: string; cwd: string } | undefined;
+  /** Stops Host-owned Git/gh child processes during final app shutdown. */
+  readonly disposeHostOperations?: () => void;
+}
+
+/** Inputs for {@link createDesktopHostComposition}; every port is explicit. */
+export interface DesktopCompositionOptions {
+  /** Platform port; `appDataDirectory()` is the profile/state directory. */
+  readonly platform: PlatformPort;
+  /** Authority lock acquired before HostBackend is created or used. */
+  readonly authorityLock: DesktopAuthorityLock;
+  /** Current-user-only private endpoint creator. */
+  readonly privateEndpoint: DesktopPrivateEndpoint;
+  /** Optional Runtime start/stop port; absent means read-only is the only outcome. */
+  readonly runtimeSession?: DesktopRuntimeSessionPort;
+  /** Resolver environment injected into HostBackend (probe included); the managed lookup stays HostBackend-owned. */
+  readonly resolver?: Omit<RuntimeResolverEnvironment, "managedLookup">;
+  /** Runtime resolution preference; defaults to `{ kind: "managed" }`. */
+  readonly preference?: RuntimePreference;
+  /** Production desktop opt-in; other callers still await the same startup task. */
+  readonly deferredRuntime?: boolean;
+  /** Client-visible arch; defaults from the running process. */
+  readonly arch?: ArchId;
+  /** Installer trusted keys; required for `runtime.install` signature verification. */
+  readonly installer?: HostBackendOptions["installer"];
+  /**
+   * When set, composition wires a real `runtime.install` service that
+   * copies a local signed artifact into the managed Runtime tree
+   * (`installDirectory`, or `%APPDATA%\juling-harness\runtimes`).
+   * Absent means the command stays fail-closed (`not wired`).
+   */
+  readonly managedInstall?: DesktopManagedInstallOptions;
+  /** Facade seam providers; absent slots fail closed. */
+  readonly facade?: DesktopFacadeSeams;
+}
+
+/**
+ * The authority lease's epoch is an opaque string; the client contract
+ * needs a numeric brand that is stable for one authority generation and
+ * different across generations. FNV-1a over the opaque epoch gives a
+ * deterministic positive integer with both properties.
+ */
+function authorityEpochFromOpaque(opaque: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < opaque.length; index += 1) {
+    hash ^= opaque.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return ((hash >>> 0) % 2_147_483_647) + 1;
+}
+
+function authorityIdentityFromLease(lease: DesktopAuthorityLease): PublicAuthorityIdentity {
+  return {
+    authorityId: lease.authorityId as AuthorityId,
+    authorityEpoch: authorityEpochFromOpaque(lease.epoch) as AuthorityEpoch,
+  };
+}
+
+function unavailableFromError(error: unknown): HostRuntimeUnavailable {
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  const reason = redactText(message);
+  if (/handshake timed out/iu.test(message)) return { code: "handshake-timeout", reason };
+  if (/exited before ready/iu.test(message)) return { code: "exited-before-ready", reason };
+  if (/ENOENT/u.test(message)) return { code: "spawn-failed", reason };
+  return { code: "launch-failed", reason };
+}
+
+function classificationUnavailable(resolution: RuntimeResolution): HostRuntimeUnavailable {
+  if (resolution.classification === "limited-system") {
+    return {
+      code: "resolution-limited",
+      reason: redactText(resolution.rejectionReason ?? "limited runtime was not started"),
+    };
+  }
+  return {
+    code: "resolution-rejected",
+    reason: redactText(resolution.rejectionReason ?? "runtime was not accepted"),
+  };
+}
+
+function rememberUnavailable(
+  holder: { current: HostRuntimeUnavailable | undefined },
+  session: DesktopRuntimeSession | undefined,
+  port: DesktopRuntimeSessionPort | undefined,
+  fallback?: HostRuntimeUnavailable,
+): void {
+  if (session !== undefined) {
+    holder.current = undefined;
+    return;
+  }
+  holder.current = port?.lastUnavailable?.() ?? fallback ?? holder.current;
+}
+
+function rememberDisconnect(
+  holder: { current: HostRuntimeDisconnect | undefined },
+  port: DesktopRuntimeSessionPort | undefined,
+  fallback?: HostRuntimeDisconnect,
+): void {
+  holder.current = port?.lastDisconnect?.() ?? fallback ?? holder.current;
+}
+
+function clearDisconnect(holder: { current: HostRuntimeDisconnect | undefined }): void {
+  holder.current = undefined;
+}
+
+interface FacadeContext {
+  readonly projectReads: ProjectReadServices;
+  /** All conversation facades share the Host-owned durable evaluation service. */
+  readonly evaluationOwner: object;
+  /** Private, profile-bound maintenance shared by every conversation facade. */
+  readonly sessionPurge: SessionPurgeMaintenancePort;
+  /** One usage adapter per Host: it caches the resolved dashboard endpoint. */
+  usage?: HostUsageService;
+  readonly authority: PublicAuthorityIdentity;
+  readonly platform: PlatformId;
+  readonly arch: ArchId;
+  readonly backend: HostBackend;
+  readonly seams: DesktopFacadeSeams;
+  /** Live session-bundle holder; the facade's runtime access reads it. */
+  readonly sessionRef: { current: DesktopRuntimeSession | undefined };
+  readonly startup: DesktopRuntimeStartup;
+  readonly runtimeTouched: { current: boolean };
+  readonly connectionChanges: IsolatedForwarder<void>;
+  readonly selectedWorkspace: { current: { workspaceId: string; cwd: string } | undefined };
+  /** Last skip/fail reason while no Runtime hello exists. */
+  readonly lastUnavailable: { current: HostRuntimeUnavailable | undefined };
+  /** Last drop reason after a Runtime hello was observed. */
+  readonly lastDisconnect: { current: HostRuntimeDisconnect | undefined };
+  /** Single publication channel; Facade subscribe and session attach share it. */
+  readonly publications: IsolatedForwarder<RuntimePublication>;
+  /** Authority-level resident projection and change fan-out. */
+  readonly residents: IsolatedForwarder<DesktopResidentsChange>;
+  /** Background terminal ledger outcomes; never publishes snapshots. */
+  readonly residentTerminalOutcomes: IsolatedForwarder<ReadonlyArray<CommandLedgerEntry>>;
+  readonly conversationEvents: IsolatedForwarder<HarnessConversationForward>;
+  readonly telemetryEvents: IsolatedForwarder<HarnessTelemetryForward>;
+  readonly btwEvents: IsolatedForwarder<HarnessBtwForward>;
+  readonly computerEvents: IsolatedForwarder<HarnessComputerForward>;
+  readonly conversationResync: IsolatedForwarder<string>;
+  readonly interaction: DesktopInteractionHost;
+  readonly bindSession: { current: (session: DesktopRuntimeSession | undefined) => void };
+  readonly runtimeSession: DesktopRuntimeSessionPort | undefined;
+  /** Active workspace cwd for project-scoped disk adapters. */
+  readonly workspaceCwd: { current: string | undefined };
+  readonly profileDirectory: string;
+  readonly runtimeInstallDirectory: string;
+  readonly endpoint: PrivateEndpoint;
+  readonly managedInstall?: DesktopManagedInstallOptions;
+  readonly hasTrustedKey: boolean;
+  /**
+   * Trust material for the managed installer, forwarded to the launch path so
+   * the `HostBackend` it builds verifies the installed manifest with the same
+   * keys the composition installer uses. Without it that backend would resolve
+   * an unverifiable installation.
+   */
+  readonly installerOptions?: HostBackendOptions["installer"];
+}
+
+async function ensureInstalledRuntime(
+  context: FacadeContext,
+  input?: { force?: boolean },
+): Promise<DesktopRuntimeSession | undefined> {
+  return context.startup.ensure(
+    () => ensureInstalledRuntimeNow(context, input),
+    () => context.sessionRef.current?.hello() === undefined ? undefined : context.sessionRef.current,
+    input?.force,
+  );
+}
+
+async function ensureInstalledRuntimeNow(
+  context: FacadeContext,
+  input?: { force?: boolean },
+): Promise<DesktopRuntimeSession | undefined> {
+  const port = context.runtimeSession;
+  if (port?.ensure !== undefined) {
+    context.runtimeTouched.current = true;
+    try {
+      const next = await port.ensure(input);
+      if (!context.startup.canPublish) return undefined;
+      rememberUnavailable(
+        context.lastUnavailable,
+        next,
+        port,
+        unavailableFromError(new Error("Runtime did not become ready")),
+      );
+      if (next !== undefined) {
+        clearDisconnect(context.lastDisconnect);
+        context.bindSession.current(next);
+        return next;
+      }
+      rememberDisconnect(context.lastDisconnect, port);
+      if (context.sessionRef.current !== undefined || port.lastUnavailable?.()?.code === "no-workspace") {
+        return undefined;
+      }
+    } catch (error) {
+      rememberUnavailable(context.lastUnavailable, undefined, port, unavailableFromError(error));
+      rememberDisconnect(context.lastDisconnect, port);
+      throw error;
+    }
+  }
+  return startInstalledRuntime(context);
+}
+
+async function installedRuntimeContext(context: FacadeContext): Promise<DesktopRuntimeSessionContext> {
+  const resolution: RuntimeResolution = await context.backend.resolve({ kind: "managed" });
+  context.seams.hostLog?.write(
+    resolution.classification === "managed" ? "info" : "warn",
+    "runtime.resolve",
+    `classification=${resolution.classification} acceptance=${resolution.reusedAcceptance ? "reused" : "live"}${resolution.rejectionReason === undefined ? "" : ` reason=${resolution.rejectionReason}`}`,
+  );
+  if (resolution.classification !== "managed") {
+    rememberUnavailable(context.lastUnavailable, undefined, undefined, classificationUnavailable(resolution));
+    throw new Error(resolution.rejectionReason ?? "Installed Runtime was not accepted as managed");
+  }
+  const workspace = context.selectedWorkspace.current ?? context.seams.getActiveWorkspace?.();
+  return {
+    resolution,
+    endpoint: context.endpoint,
+    profileDirectory: context.profileDirectory,
+    runtimeInstallDirectory: context.runtimeInstallDirectory,
+    ...(context.installerOptions === undefined ? {} : { installer: context.installerOptions }),
+    ...(workspace === undefined ? {} : { workspace }),
+  };
+}
+
+async function startInstalledRuntime(context: FacadeContext): Promise<DesktopRuntimeSession | undefined> {
+  const launchContext = await installedRuntimeContext(context);
+  if (!context.startup.canPublish) return undefined;
+  const port = context.runtimeSession;
+  if (port === undefined) {
+    rememberUnavailable(context.lastUnavailable, undefined, undefined, {
+      code: "not-wired",
+      reason: "runtime session port is not wired",
+    });
+    return undefined;
+  }
+  const workspace = context.selectedWorkspace.current ?? context.seams.getActiveWorkspace?.();
+  if (context.sessionRef.current !== undefined && port.rebind !== undefined && workspace !== undefined) {
+    const rebound = await port.rebind(workspace);
+    if (!context.startup.canPublish) return undefined;
+    rememberUnavailable(
+      context.lastUnavailable,
+      rebound,
+      port,
+      unavailableFromError(new Error("Runtime did not become ready")),
+    );
+    if (rebound !== undefined) {
+      context.bindSession.current(rebound);
+      return rebound;
+    }
+  }
+  context.runtimeTouched.current = true;
+  const next = await port.start(launchContext);
+  if (!context.startup.canPublish) return undefined;
+  rememberUnavailable(
+    context.lastUnavailable,
+    next,
+    port,
+    workspace === undefined
+      ? { code: "no-workspace", reason: "no workspace is selected" }
+      : unavailableFromError(new Error("Runtime did not become ready")),
+  );
+  if (next !== undefined) {
+    context.bindSession.current(next);
+  }
+  return next;
+}
+
+function toPersistedHarnessAgent(record: SessionPersistedAgentRecord): HarnessAgentSnapshot {
+  return {
+    agentId: record.agentId as HarnessAgentSnapshot["agentId"],
+    generation: 1 as HarnessAgentSnapshot["generation"],
+    ...(record.parentAgentId === undefined
+      ? {}
+      : { parentAgentId: record.parentAgentId as HarnessAgentSnapshot["parentAgentId"] }),
+    kind: "sub",
+    displayName: record.displayName,
+    status: record.status,
+    ...(record.assignment === undefined ? {} : { assignment: record.assignment }),
+    ...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }),
+    updatedAt: record.updatedAt,
+    hasLiveSession: false,
+    hasTranscript: record.hasTranscript,
+    unreadCount: 0,
+    activeJobIds: [],
+    ...(record.usage === undefined ? {} : { usage: { ...record.usage } }),
+    ...(record.modelRole === undefined ? {} : { modelRole: record.modelRole }),
+    ...(record.resolvedModel === undefined ? {} : { resolvedModel: record.resolvedModel }),
+    ...(record.isolated === undefined ? {} : { isolated: record.isolated }),
+    ...(record.canRevive === undefined ? {} : { canRevive: record.canRevive }),
+  };
+}
+
+function managedRuntimeInstallService(context: FacadeContext): HostRuntimeInstallService {
+  if (context.managedInstall === undefined) {
+    return async () => { throw new Error("no runtime install service is wired; runtime.install is not available"); };
+  }
+  const managed = context.managedInstall;
+  const maintenance = context.runtimeSession?.withRuntimeMaintenance;
+  const install = createDesktopRuntimeInstallService({
+    backend: context.backend,
+    platform: `${context.platform}-${context.arch}`,
+    hasTrustedKey: context.hasTrustedKey,
+    ...(managed.pendingArtifact === undefined ? {} : { pendingArtifact: managed.pendingArtifact }),
+    locateArtifact: createManagedArtifactLocator(managed),
+    ...(managed.activateOptions === undefined ? {} : { activateOptions: managed.activateOptions }),
+    ...(maintenance === undefined ? {} : { installOptions: { allowReferencedRepair: true } }),
+    afterActivate: managed.afterActivate ?? (maintenance === undefined
+      ? async () => {
+          const next = await startInstalledRuntime(context);
+          if (next === undefined && context.seams.getActiveWorkspace?.() !== undefined) {
+            throw new Error("Runtime did not become ready after installation");
+          }
+        }
+      : async () => undefined),
+  });
+  if (maintenance === undefined) return install;
+  return async (channel) => {
+    let version: string | undefined;
+    let previousVersion: string | undefined;
+    const result = await maintenance(async () => {
+      previousVersion = (await context.backend.installer.current())?.runtimeVersion;
+      const result = await install(channel);
+      if (result.status === "failed") throw new Error(result.message ?? "Runtime installation failed");
+      version = result.version;
+      return result;
+    }, () => version, () => installedRuntimeContext(context), async () => {
+      if (previousVersion === undefined || previousVersion === version) throw new Error("No distinct previous Runtime is available for recovery");
+      await context.backend.activate(previousVersion, managed.activateOptions);
+      return previousVersion;
+    });
+    // A first installation may start from a port that never received its
+    // launch context because no managed executable existed at bootstrap.
+    if (context.sessionRef.current?.hello() === undefined && context.seams.getActiveWorkspace?.() !== undefined) {
+      const next = await startInstalledRuntime(context);
+      if (next?.hello()?.runtimeVersion !== version) throw new Error("Installed Runtime did not become ready with the expected version");
+    }
+    return result;
+  };
+}
+
+/** Keep the shared adapters' closure chain outside buildFacade: retaining its
+ * lexical scope would also retain a closed view's sessionRef and event owners. */
+function projectAdapterFactories(backend: HostBackend, openUrl: DesktopFacadeSeams["openUrl"], revealDirectory: DesktopFacadeSeams["revealDirectory"]) {
+  return {
+    models: (cwd: string | undefined) => createOmpModelsService({
+      locateOmp: async () => (await backend.installer.currentManifest())?.entrypointPath ?? (await defaultLocateOmp()),
+      getCwd: () => cwd, ...(openUrl ? { openUrl } : {}),
+    }),
+    skills: (cwd: string | undefined) => createOmpExtensibilityService({ getCwd: () => cwd, ...(revealDirectory ? { revealDirectory } : {}) }),
+    mcp: (cwd: string | undefined) => createOmpMcpService({ getCwd: () => cwd }),
+    agents: (cwd: string | undefined) => createOmpAgentDefinitionsService({ getCwd: () => cwd }),
+  };
+}
+
+function buildFacade(context: FacadeContext): HarnessHostClientFacade {
+  const seams = context.seams;
+  const projectAdapters = projectAdapterFactories(context.backend, seams.openUrl, seams.revealDirectory);
+  const sessionRef = context.sessionRef;
+  const catalog = seams.catalog ?? createWorkspaceSessionCatalog(() => context.workspaceCwd.current);
+  const residents: HostResidentsService = seams.residents ?? {
+    list: () =>
+      context.runtimeSession?.listResidents?.() ?? {
+        residents: [],
+        generatedAt: new Date().toISOString(),
+      },
+    onChanged: (listener) => context.residents.subscribe(listener),
+    onTerminalOutcomes: (listener) => context.residentTerminalOutcomes.subscribe(listener),
+  };
+  const currentArchiveReader = (): SessionArchiveReaderPort => {
+    const cwd = context.workspaceCwd.current;
+    if (cwd === undefined) throw new Error("Persistent transcript requires an active workspace");
+    return context.projectReads.archive(cwd);
+  };
+  let archiveServiceCwd: string | undefined;
+  let archiveService: HarnessSessionArchiveService | undefined;
+  const currentArchiveService = (): HarnessSessionArchiveService => {
+    const cwd = context.workspaceCwd.current;
+    if (cwd === undefined) throw new Error("Session archive requires an active workspace");
+    if (archiveService === undefined || archiveServiceCwd !== cwd) {
+      archiveServiceCwd = cwd;
+      // The default crash-writer grace stays on: a dormant session written
+      // moments ago may come from a crashed writer whose tail must not be
+      // frozen into the cold archive. Sessions the desktop itself just
+      // evacuated skip it explicitly via skipWriteGrace.
+      archiveService = new HarnessSessionArchiveService({
+        allowedCwd: cwd,
+        isResident: (sessionId) =>
+          context.runtimeSession?.isResident?.(sessionId) === true
+          || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
+      });
+    }
+    return archiveService;
+  };
+  let deleteServiceCwd: string | undefined;
+  let deleteService: HarnessSessionDeleteService | undefined;
+  const currentDeleteService = (): HarnessSessionDeleteService => {
+    const cwd = context.workspaceCwd.current;
+    if (cwd === undefined) throw new Error("Session deletion requires an active workspace");
+    if (deleteService === undefined || deleteServiceCwd !== cwd) {
+      deleteServiceCwd = cwd;
+      deleteService = new HarnessSessionDeleteService({
+        allowedCwd: cwd,
+        purgeRows: input => context.sessionPurge.run(input),
+        timeTravel: timeTravelService(context.profileDirectory),
+        isResident: (sessionId) =>
+          context.runtimeSession?.isResident?.(sessionId) === true
+          || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
+      });
+    }
+    return deleteService;
+  };
+  // Durable single-writer lease store mirrors the one created in runtime-session.ts.
+  const sessionLeaseCleanup = new FileSessionLeaseStore({
+    directory: join(context.profileDirectory, "broker", "session-leases"),
+  });
+  const archive = seams.archive ?? {
+    prefetch: async (sessionId: string) => {
+      if (context.runtimeSession?.isResident?.(sessionId)) return undefined;
+      return await currentArchiveReader().prefetch(sessionId) as ConversationTranscriptReadPage | undefined;
+    },
+    readPage: async (input: {
+      readonly sessionId: string;
+      readonly agentId?: string;
+      readonly cursor?: string;
+      readonly limit?: number;
+    }, signal?: AbortSignal) => {
+      const page = await currentArchiveReader().readPage(input as unknown as SessionArchiveReadInput, signal);
+      return page as unknown as ConversationTranscriptReadPage;
+    },
+    listPersistedAgents: async (sessionId: string) =>
+      (await currentArchiveReader().listPersistedAgents(sessionId)).map(toPersistedHarnessAgent),
+    readRevision: async (sessionId: string) => await currentArchiveReader().readRevision(sessionId),
+    readCompaction: async (sessionId: string) => await currentArchiveReader().readCompaction(sessionId),
+    createProbeCopy: async (sessionId: string, destinationDirectory: string) =>
+      await currentArchiveReader().createProbeCopy(sessionId, destinationDirectory),
+  } satisfies HostSessionArchiveProvider;
+  // Archived-session telemetry: persisted "last observed" records plus the
+  // one-shot OMP probe. The probe scratch dir lives under the Host profile.
+  const telemetryStore = seams.telemetryStore ?? {
+    record: (id, telemetry) => { const cwd = context.workspaceCwd.current; if (cwd) context.projectReads.store(cwd, context.profileDirectory).record(id, telemetry); },
+    read: async (id, revision) => { const cwd = context.workspaceCwd.current; return cwd ? context.projectReads.store(cwd, context.profileDirectory).read(id, revision) : undefined; },
+    flush: async () => { const cwd = context.workspaceCwd.current; if (cwd) await context.projectReads.store(cwd, context.profileDirectory).flush(); },
+    remove: async id => { const cwd = context.workspaceCwd.current; if (cwd) await context.projectReads.store(cwd, context.profileDirectory).remove(id); },
+    dispose: () => {},
+  } satisfies HostSessionTelemetryStorePort;
+  const probeExecutable = async (): Promise<string | undefined> => {
+    const installed = await context.backend.installer.currentManifest().catch(() => undefined);
+    if (installed !== undefined && installed.entrypointPath.length > 0) return installed.entrypointPath;
+    return await createPathLocator().locate(context.platform, context.arch);
+  };
+  const telemetryProbe =
+    seams.telemetryProbe ??
+    createNodeSessionTelemetryProbe({
+      executablePath: probeExecutable,
+      ...(seams.hostLog === undefined
+        ? {}
+        : {
+            onDiagnostic: (info) => {
+              seams.hostLog?.write(
+                info.result === "ok" ? "info" : "warn",
+                "telemetry.probe",
+                JSON.stringify(info),
+              );
+            },
+          }),
+    });
+  const telemetryProbeWorkspace = {
+    create: async (): Promise<string> => {
+      await mkdir(join(context.profileDirectory, "tmp"), { recursive: true });
+      return await mkdtemp(join(context.profileDirectory, "tmp", "telemetry-probe-"));
+    },
+    remove: async (path: string): Promise<void> => {
+      await rm(path, { recursive: true, force: true }).catch(() => {});
+    },
+  };
+  const runtimeCommandService =
+    seams.commands ??
+    createDesktopSemanticCommands({
+      mediaFiles: runtimeMediaFilesForLibrary(artifactLibraryForProfile(context.profileDirectory)),
+      mediaWorkspaceId: () => context.seams.getActiveWorkspace?.()?.workspaceId,
+      ...(seams.resolveImportWorkspace ? { resolveImportWorkspace: seams.resolveImportWorkspace } : {}),
+      ...(seams.registerImportedWorkspace ? { registerImportedWorkspace: seams.registerImportedWorkspace } : {}),
+      sessionRef,
+      catalog,
+      resolveResidentSessionId: (threadId) => {
+        const residents = context.runtimeSession?.listResidents?.().residents;
+        if (residents !== undefined) {
+          const match = residents.find((r) => threadIdFor(r.sessionId) === threadId);
+          if (match !== undefined) return match.sessionId;
+        }
+        return undefined;
+      },
+      archive: currentArchiveService,
+      deleteService: currentDeleteService,
+      finishManagedArtifacts: async (sessionId, cascade) => {
+        const library = artifactLibraryForProfile(context.profileDirectory);
+        try { await runtimeMediaFilesForLibrary(library).finishSession(join(context.profileDirectory, "bridge", "media-v1"), sessionId, cascade); }
+        finally { await library.finishSession(sessionId, cascade); }
+      },
+      telemetryStore: () => telemetryStore,
+      bindings: context.backend.bindings,
+      leaseStore: sessionLeaseCleanup,
+      agentDir: () => defaultOmpAgentDir(),
+      ...(context.runtimeSession?.synchronizeSessionIdentity === undefined ? {} : {
+        synchronizeSessionIdentity: session => context.runtimeSession!.synchronizeSessionIdentity!(session),
+      }),
+      ...(context.runtimeSession?.switchSession === undefined
+        ? {}
+        : { switchSession: (intent) => {
+            // A switch can spawn a Runtime before any session is bound; mark it
+            // so shutdown still stops a Runtime that never reaches bindSession.
+            context.runtimeTouched.current = true;
+            const generation = context.startup.generation;
+            return context.startup.run(async () => {
+              if (generation !== context.startup.generation) throw new Error("Workspace changed before session switch");
+              const session = await context.runtimeSession!.switchSession!(intent);
+              if (generation !== context.startup.generation || !context.startup.canPublish) throw new Error("Workspace changed during session switch");
+              return session;
+            });
+          } }),
+      ...(context.runtimeSession?.applyApprovalMode === undefined
+        ? {}
+        : { applyApprovalMode: (mode) => context.runtimeSession!.applyApprovalMode!(mode) }),
+      ...(context.runtimeSession?.evacuateResident === undefined
+        ? {}
+        : { evacuateResident: (sessionId) => {
+            // Evacuation talks to a live resident; it can be the only runtime
+            // touch in a workspace that is about to be replaced.
+            context.runtimeTouched.current = true;
+            return context.runtimeSession!.evacuateResident!(sessionId);
+          } }),
+      supportsConcurrentSessions: context.runtimeSession?.supportsConcurrentSessions === true,
+      bindSession: (session) => context.bindSession.current(session),
+      interaction: context.interaction,
+      ensureRuntime: () => ensureInstalledRuntime(context),
+      runtimeMissing: () => {
+        const unavailable = context.lastUnavailable.current;
+        const disconnect = context.lastDisconnect.current ?? context.runtimeSession?.lastDisconnect?.();
+        return {
+          ...(unavailable === undefined ? {} : { unavailable }),
+          ...(disconnect === undefined ? {} : { disconnect }),
+        };
+      },
+    });
+  const installRuntime = seams.install ?? managedRuntimeInstallService(context);
+  const timeTravelPort = createTimeTravelPort({
+    service: timeTravelService(context.profileDirectory),
+    workspace: () => {
+      const cwd = context.workspaceCwd.current;
+      if (!cwd) throw new Error("Time Travel requires a workspace");
+      return cwd;
+    },
+    reader: currentArchiveReader,
+    assertIdle: () => {
+      const activeWorkspaceId = context.selectedWorkspace.current?.workspaceId;
+      const snapshot = sessionRef.current?.controller.publication()?.snapshot;
+      if (snapshot?.isStreaming || snapshot?.isCompacting || snapshot?.jobs.some(job => job.status === "running" || job.status === "queued") || snapshot?.agents.some(agent => ["starting", "running", "reviving"].includes(agent.status)) || context.runtimeSession?.listResidents?.().residents.some(row => row.workspaceId === activeWorkspaceId && row.phase !== "idle")) throw new Error("Wait for the workspace's running sessions and jobs to finish before restoring");
+    },
+    prepareSession: async sessionId => {
+      if (sessionRef.current?.controller.publication()?.snapshot?.sessionId !== sessionId) await runtimeCommandService.resume({ threadId: threadIdFor(sessionId) });
+      const snapshot = sessionRef.current?.controller.publication()?.snapshot;
+      if (!snapshot || snapshot.sessionId !== sessionId || snapshot.isStreaming || snapshot.isCompacting) throw new Error("The selected session is not ready to restore");
+      if (!runtimeCommandService.invoke) throw new Error("Session tree restoration is unavailable");
+      const tree = await sessionRef.current!.controller.invoke({ type: "harness.request", requestId: randomUUID() as import("@juling-harness/harness-protocol").RequestId, runtimeEpoch: snapshot.runtimeEpoch, operation: { kind: "session.tree.get" } });
+      if (tree.status !== "completed") throw new Error("Unable to read the current session branch");
+      return tree.result as { leafId: string | null; supportsExactRestore?: boolean };
+    },
+    navigate: async leafId => await runtimeCommandService.invoke!({ kind: "session.tree.navigate", targetId: leafId ?? "root", exactLeaf: true, restoreRoot: leafId === null }, randomUUID() as import("@juling-harness/client-contract").CommandRequestId) as { cancelled?: boolean },
+  });
+  const options: HarnessHostClientFacadeOptions = {
+    authority: context.authority,
+    platform: context.platform,
+    arch: context.arch,
+    backend: context.backend,
+    capabilityManifest: seams.capabilityManifest ?? (() => sessionRef.current?.capabilityManifest()),
+    commandManifest: seams.commandManifest ?? (() => sessionRef.current?.commandManifest()),
+    catalog,
+    residents,
+    archive,
+    timeTravel: timeTravelPort,
+    telemetryStore,
+    telemetryProbe,
+    telemetryProbeWorkspace,
+    projectReads: context.projectReads.metadata,
+    archiveTelemetry: context.projectReads.telemetry,
+    workspaceCwd: () => context.workspaceCwd.current,
+    diagnostics: seams.diagnostics ?? createDefaultHostDiagnosticsFactory(),
+    install: (channel) => context.startup.run(async () => {
+      context.runtimeTouched.current = true;
+      return installRuntime(channel);
+    }),
+    ...(seams.installProbe !== undefined
+      ? { installProbe: seams.installProbe }
+      : context.managedInstall === undefined
+        ? {}
+        : {
+            installProbe: createDesktopRuntimeInstallProbe({
+              backend: context.backend,
+              platform: `${context.platform}-${context.arch}`,
+              locateArtifact: createManagedArtifactLocator(context.managedInstall),
+            }),
+          }),
+    commands: runtimeCommandService,
+    artifacts: artifactLibraryForProfile(context.profileDirectory),
+    evaluations: evaluationsFor(context.evaluationOwner, {
+      revealDirectory: seams.revealDirectory,
+      profileDirectory: context.profileDirectory,
+      runtimes: context.runtimeSession,
+      artifacts: artifactLibraryForProfile(context.profileDirectory),
+      ensureRuntime: async () => { await ensureInstalledRuntime(context); },
+      workspace: async id => {
+        const resolved = await seams.resolveImportWorkspace?.(id);
+        if (resolved) return resolved;
+        const active = seams.getActiveWorkspace?.();
+        return active?.workspaceId === id ? active.cwd : undefined;
+      },
+    }),
+    models:
+      seams.models ??
+      context.projectReads.scoped("models", () => context.workspaceCwd.current, projectAdapters.models),
+    extensibility:
+      seams.extensibility ??
+      context.projectReads.scoped("skills", () => context.workspaceCwd.current, projectAdapters.skills),
+    mcp:
+      seams.mcp ??
+      context.projectReads.scoped("mcp", () => context.workspaceCwd.current, projectAdapters.mcp),
+    agentDefinitions:
+      seams.agentDefinitions ??
+      context.projectReads.scoped("agents", () => context.workspaceCwd.current, projectAdapters.agents),
+    ...(seams.workspaces === undefined ? {} : { workspaces: seams.workspaces }),
+    ...(seams.workspaceFiles === undefined ? {} : { workspaceFiles: seams.workspaceFiles }),
+    ...(seams.systemFiles === undefined ? {} : { systemFiles: seams.systemFiles }),
+    ...(seams.git === undefined ? {} : { git: seams.git }),
+    ...(seams.github === undefined ? {} : { github: seams.github }),
+    usage: seams.usage ?? (context.usage ??= createOmpUsageService({
+      ...(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
+      // The managed Runtime ships its own `omp`; a machine without OMP on PATH
+      // can still start the statistics dashboard. PATH lookup stays the fallback.
+      locateOmp: async () => {
+        const manifest = await context.backend.installer.currentManifest();
+        return manifest?.entrypointPath ?? (await defaultLocateOmp());
+      },
+    })),
+    // Live accessors follow workspace/runtime rebind. Conversation and
+    // interaction events are not buffered; reload never replays old deltas.
+    runtime: {
+      currentSession: () => sessionRef.current?.controller,
+      hello: () => sessionRef.current?.hello(),
+      startupState: () => context.startup.pending ? "connecting" : undefined,
+      onConnectionChanged: (listener) => context.connectionChanges.subscribe(listener),
+      unavailable: () => context.lastUnavailable.current,
+      disconnect: () => context.lastDisconnect.current ?? context.runtimeSession?.lastDisconnect?.(),
+      ensure: async (input) => {
+        await ensureInstalledRuntime(context, input);
+      },
+      snapshot: () => sessionRef.current?.controller.publication()?.snapshot,
+      messagesCursor: () => sessionRef.current?.controller.messagesCursor?.(),
+      onPublication: (listener) => context.publications.subscribe(listener),
+      onConversationEvent: (listener) => context.conversationEvents.subscribe(listener),
+      onConversationResync: (listener) => context.conversationResync.subscribe(listener),
+      onTelemetryEvent: (listener) => context.telemetryEvents.subscribe(listener),
+      onBtwEvent: (listener) => context.btwEvents.subscribe(listener),
+      onComputerEvent: (listener) => context.computerEvents.subscribe(listener),
+      onInteractionEvent: (listener) => context.interaction.subscribe(listener),
+    } satisfies HostRuntimeAccess,
+  };
+  return new HarnessHostClientFacade(options);
+}
+
+function assertCompositionOptions(options: DesktopCompositionOptions): void {
+  if (options.platform === null || typeof options.platform !== "object" || typeof options.platform.appDataDirectory !== "function") {
+    throw new TypeError("desktop composition platform port is required");
+  }
+  if (options.authorityLock === null || typeof options.authorityLock !== "object" || typeof options.authorityLock.acquire !== "function") {
+    throw new TypeError("desktop composition authority lock is required");
+  }
+  if (
+    options.privateEndpoint === null ||
+    typeof options.privateEndpoint !== "object" ||
+    typeof options.privateEndpoint.createCurrentUserOnly !== "function"
+  ) {
+    throw new TypeError("desktop composition private endpoint is required");
+  }
+  const session = options.runtimeSession;
+  if (session !== undefined && (typeof session.start !== "function" || typeof session.stop !== "function")) {
+    throw new TypeError("desktop composition runtime session port must provide start and stop");
+  }
+  const arch = options.arch;
+  if (arch !== undefined && arch !== "x64" && arch !== "arm64") {
+    throw new TypeError("desktop composition arch must be 'x64' or 'arm64'");
+  }
+  const preference = options.preference;
+  if (
+    preference !== undefined &&
+    (preference === null || typeof preference !== "object" || !("kind" in preference) || typeof preference.kind !== "string")
+  ) {
+    throw new TypeError("desktop composition runtime preference is invalid");
+  }
+}
+
+/** A view owns a projection and workspace, never the shared worker pool. */
+async function openSessionContext(root: FacadeContext, scope: import("@juling-harness/client-contract").ClientContextScope): Promise<ClientTransport> {
+  await root.startup.ready();
+  root.startup.assertOpen();
+  const pool = root.runtimeSession;
+  if (!pool?.openContextSession || !pool.sessionFor) throw new Error("This Host needs an update to open concurrent conversations.");
+  const resolveWorkspace = async (workspaceId: string) => {
+    const cwd = await root.seams.resolveImportWorkspace?.(workspaceId)
+      ?? (root.selectedWorkspace.current?.workspaceId === workspaceId ? root.selectedWorkspace.current.cwd : undefined);
+    if (!cwd) throw new Error("Unknown workspace id");
+    return { workspaceId, cwd };
+  };
+  const workspace = { current: await resolveWorkspace(scope.workspaceId) };
+  const sessionRef: FacadeContext["sessionRef"] = { current: undefined };
+  const connectionChanges = new IsolatedForwarder<void>();
+  const startup = new DesktopRuntimeStartup(() => connectionChanges.publish(undefined));
+  const interaction = new DesktopInteractionHost(sessionRef);
+  let wanted = scope.sessionId as string | undefined;
+  let subscriptions: Array<() => void> = [];
+  const bind = (session: DesktopRuntimeSession | undefined) => {
+    if (session === sessionRef.current) return;
+    subscriptions.splice(0).forEach(off => off());
+    sessionRef.current = session;
+    if (session) wanted = session.controller.publication()?.snapshot.sessionId ?? wanted;
+    interaction.attach(session?.controller);
+    if (session) {
+      subscriptions.push(session.onPublication(value => {
+        // Fork/branch reuses this Worker. Recovery must follow its new identity,
+        // not the session the view originally opened.
+        wanted = value.snapshot.sessionId;
+        context.publications.publish(value);
+      }));
+      const controller = session.controller;
+      if (controller.onConversationEvent) subscriptions.push(controller.onConversationEvent(value => context.conversationEvents.publish(value)));
+      if (controller.onConversationResync) subscriptions.push(controller.onConversationResync(value => context.conversationResync.publish(value)));
+      if (controller.onTelemetryEvent) subscriptions.push(controller.onTelemetryEvent(value => context.telemetryEvents.publish(value)));
+      if (controller.onBtwEvent) subscriptions.push(controller.onBtwEvent(value => context.btwEvents.publish(value)));
+      if (controller.onComputerEvent) subscriptions.push(controller.onComputerEvent(value => context.computerEvents.publish(value)));
+      const publication = controller.publication();
+      if (publication) context.publications.publish(publication);
+    }
+    connectionChanges.publish(undefined);
+  };
+  const open = async (intent: Parameters<NonNullable<DesktopRuntimeSessionPort["openContextSession"]>>[1]) => {
+    root.runtimeTouched.current = true;
+    try {
+      const session = await pool.openContextSession!(workspace.current, intent);
+      if (!session) throw new Error(pool.lastUnavailable?.()?.reason ?? "Runtime did not become ready");
+      if (intent.kind === "resume" && intent.resumeWorkspace) {
+        workspace.current = intent.resumeWorkspace;
+        context.workspaceCwd.current = intent.resumeWorkspace.cwd;
+      }
+      context.lastUnavailable.current = undefined;
+      clearDisconnect(context.lastDisconnect);
+      bind(session);
+      return session;
+    } catch (error) {
+      context.lastUnavailable.current = pool.lastUnavailable?.() ?? unavailableFromError(error);
+      connectionChanges.publish(undefined);
+      throw error;
+    }
+  };
+  const list = async () => {
+    const model = await root.seams.workspaces!.list();
+    return { ...model, activeWorkspaceId: workspace.current.workspaceId as WorkspaceId,
+      workspaces: model.workspaces.map(row => ({ ...row, active: row.workspaceId === workspace.current.workspaceId })) };
+  };
+  const context: FacadeContext = {
+    ...root, sessionRef, startup, connectionChanges, interaction,
+    selectedWorkspace: workspace, workspaceCwd: { current: workspace.current.cwd },
+    lastUnavailable: { current: undefined }, lastDisconnect: { current: undefined },
+    publications: new IsolatedForwarder<RuntimePublication>(),
+    conversationEvents: new IsolatedForwarder<HarnessConversationForward>(),
+    conversationResync: new IsolatedForwarder<string>(),
+    telemetryEvents: new IsolatedForwarder<HarnessTelemetryForward>(),
+    btwEvents: new IsolatedForwarder<HarnessBtwForward>(),
+    computerEvents: new IsolatedForwarder<HarnessComputerForward>(),
+    bindSession: { current: bind },
+    runtimeSession: { ...pool,
+      switchSession: open,
+      ensure: () => open(wanted ? { kind: "resume", sessionId: wanted } : { kind: "fresh" }),
+    },
+    seams: { ...root.seams,
+      getActiveWorkspace: () => workspace.current,
+      getWorkspaceCwd: () => workspace.current.cwd,
+      catalog: createWorkspaceSessionCatalog(() => workspace.current.cwd, async id => (await resolveWorkspace(id)).cwd),
+      ...(root.seams.workspaces ? { workspaces: {
+        list,
+        ...(root.seams.workspaces.forgetUnavailable ? { forgetUnavailable: () => root.seams.workspaces!.forgetUnavailable!() } : {}),
+        open: async ({ workspaceId }) => {
+          if (workspaceId !== workspace.current.workspaceId) {
+            workspace.current = await resolveWorkspace(workspaceId);
+            context.workspaceCwd.current = workspace.current.cwd;
+            wanted = undefined;
+            bind(undefined);
+          }
+          return list();
+        },
+        pick: async input => {
+          const model = await root.seams.workspaces!.pick(input);
+          if (model.activeWorkspaceId) {
+            workspace.current = await resolveWorkspace(model.activeWorkspaceId);
+            context.workspaceCwd.current = workspace.current.cwd;
+            wanted = undefined; bind(undefined);
+          }
+          return list();
+        },
+        ...(root.seams.workspaces.openPath ? { openPath: async (input: { readonly path: string }) => {
+          const model = await root.seams.workspaces!.openPath!(input);
+          if (model.activeWorkspaceId) {
+            workspace.current = await resolveWorkspace(model.activeWorkspaceId);
+            context.workspaceCwd.current = workspace.current.cwd;
+            wanted = undefined; bind(undefined);
+          }
+          return list();
+        } } : {}),
+      } } : {}),
+    },
+  };
+  const facade = buildFacade(context);
+  if (wanted) bind(pool.sessionFor(wanted));
+  const offResidents = pool.attachResidentsSink?.(() => { if (wanted && !startup.closing) bind(pool.sessionFor!(wanted)); });
+  return {
+    async bootstrap() {
+      if (root.seams.workspaces) await facade.query({ queryName: "projects.list", input: {} });
+      const snapshot = await facade.bootstrap();
+      return { ...snapshot, selected: { ...snapshot.selected, workspaceId: workspace.current.workspaceId as WorkspaceId,
+        ...(wanted ? { sessionId: wanted as SessionId, threadId: threadIdFor(wanted) } : {}) } };
+    },
+    query: request => facade.query(request), command: request => facade.command(request),
+    subscribe: (scope, listener) => facade.subscribe(scope, listener),
+    async close() { await startup.close(); offResidents?.(); subscriptions.splice(0).forEach(off => off()); interaction.attach(undefined); await facade.close(); },
+  };
+}
+
+class DesktopHostCompositionImpl implements DesktopHostComposition {
+  readonly #contexts = new Set<ClientTransport>();
+  #enableContexts(): void {
+    Object.assign(this.#facade, { openContext: async (scope: import("@juling-harness/client-contract").ClientContextScope) => {
+      const transport = await openSessionContext(this.#facadeContext, scope);
+      this.#contexts.add(transport);
+      const close = transport.close.bind(transport);
+      transport.close = async () => { this.#contexts.delete(transport); await close(); };
+      return transport;
+    } });
+  }
+  #facade: HarnessHostClientFacade;
+  #status: DesktopRuntimeStatus;
+  #facadeContext: FacadeContext;
+  readonly #lease: DesktopAuthorityLease;
+  readonly #endpointLease: DesktopEndpointLease;
+  readonly #runtimeSession: DesktopRuntimeSessionPort | undefined;
+  readonly #unsubscribeResidents: (() => void) | undefined;
+  readonly #unsubscribeWorkspace: (() => void) | undefined;
+  #sessionStarted: boolean;
+  readonly #sessionRef: { current: DesktopRuntimeSession | undefined };
+  #unsubscribeCurrentPublication: (() => void) | undefined;
+  #unsubscribeConversation: (() => void) | undefined;
+  #unsubscribeConversationResync: (() => void) | undefined;
+  #unsubscribeTelemetry: (() => void) | undefined;
+  #unsubscribeBtw: (() => void) | undefined;
+  #unsubscribeComputer: (() => void) | undefined;
+  #closed = false;
+  #shutdownStarted = false;
+
+  constructor(options: {
+    readonly facade: HarnessHostClientFacade;
+    readonly status: DesktopRuntimeStatus;
+    readonly facadeContext: FacadeContext;
+    readonly lease: DesktopAuthorityLease;
+    readonly endpointLease: DesktopEndpointLease;
+    readonly runtimeSession: DesktopRuntimeSessionPort | undefined;
+    readonly sessionStarted: boolean;
+  }) {
+    this.#facade = options.facade;
+    this.#status = options.status;
+    this.#facadeContext = options.facadeContext;
+    this.#enableContexts();
+    this.#lease = options.lease;
+    this.#endpointLease = options.endpointLease;
+    this.#runtimeSession = options.runtimeSession;
+    this.#unsubscribeResidents = this.#runtimeSession?.attachResidentsSink?.((change) => {
+      const { terminalOutcomes, ...residents } = change;
+      this.#facadeContext.residents.publish(residents);
+      if (terminalOutcomes !== undefined && terminalOutcomes.length > 0) {
+        this.#facadeContext.residentTerminalOutcomes.publish(terminalOutcomes);
+      }
+    });
+    this.#sessionStarted = options.sessionStarted;
+    this.#sessionRef = options.facadeContext.sessionRef;
+    this.#facadeContext.bindSession.current = (session) => {
+      if (!this.#facadeContext.startup.canPublish || this.#shutdownStarted) return;
+      this.#sessionRef.current = session;
+      this.#sessionStarted = this.#sessionStarted || session !== undefined;
+      this.#status = session === undefined ? "read-only" : "ready";
+      rememberUnavailable(this.#facadeContext.lastUnavailable, session, this.#runtimeSession);
+      if (session !== undefined) {
+        clearDisconnect(this.#facadeContext.lastDisconnect);
+      } else {
+        rememberDisconnect(this.#facadeContext.lastDisconnect, this.#runtimeSession);
+      }
+      this.#attachSession(session, true);
+      this.#facadeContext.connectionChanges.publish(undefined);
+    };
+    this.#runtimeSession?.attachSessionSink?.((session) => {
+      this.#facadeContext.bindSession.current(session);
+    });
+    this.#unsubscribeWorkspace = this.#runtimeSession?.attachWorkspaceSink?.((workspace) => {
+      if (!this.#facadeContext.startup.canPublish || this.#shutdownStarted) return;
+      this.#facadeContext.workspaceCwd.current = workspace.cwd;
+      this.#facadeContext.selectedWorkspace.current = workspace;
+      this.#facadeContext.seams.onRuntimeWorkspaceChanged?.(workspace);
+    });
+    const residents = this.#runtimeSession?.listResidents?.();
+    if (residents !== undefined) {
+      this.#facadeContext.residents.publish(residents);
+    }
+    this.#attachSession(this.#sessionRef.current);
+  }
+
+  get facade(): HarnessHostClientFacade {
+    return this.#facade;
+  }
+
+  get transport(): ClientTransport {
+    return this.#facade;
+  }
+
+  get status(): DesktopRuntimeStatus {
+    return this.#status;
+  }
+
+  whenRuntimeReady(): Promise<void> {
+    return this.#facadeContext.startup.ready();
+  }
+
+  /** Same owned bootstrap for deferred desktop and synchronous remote/test callers. */
+  async initializeRuntime(options: DesktopCompositionOptions): Promise<void> {
+    const context = this.#facadeContext;
+    const { backend, seams, startup } = context;
+    const generation = startup.generation;
+    const workspace = context.selectedWorkspace.current;
+    let stageStarted = performance.now();
+    try {
+      let seedFailure: string | undefined;
+      if (options.managedInstall?.seedOnStart === true) {
+        try {
+          const seeded = await seedManagedRuntimeFromArtifact({
+            backend,
+            platform: `${context.platform}-${context.arch}`,
+            hasTrustedKey: context.hasTrustedKey,
+            locateArtifact: createManagedArtifactLocator(options.managedInstall),
+            ...(options.managedInstall.activateOptions === undefined ? {} : { activateOptions: options.managedInstall.activateOptions }),
+          });
+          if (seeded === "seeded") seams.hostLog?.write("info", "runtime.seed", "seeded managed runtime from shipped artifact");
+        } catch (error) {
+          seedFailure = error instanceof Error ? error.message : String(error);
+          seams.hostLog?.write("warn", "runtime.seed.fail", errorDetailForLog(error));
+        }
+        startupStage("seed", stageStarted, seams);
+      }
+      if (startup.closing) return;
+      stageStarted = performance.now();
+      const resolved = await backend.resolve(options.preference ?? DEFAULT_RUNTIME_PREFERENCE);
+      const resolution = seedFailure !== undefined && resolved.classification === "rejected"
+        ? { ...resolved, rejectionReason: seedFailure }
+        : resolved;
+      startupStage("resolve", stageStarted, seams);
+      seams.hostLog?.write(
+        resolution.classification === "managed" || resolution.classification === "compatible-system" ? "info" : "warn",
+        "runtime.resolve",
+        `classification=${resolution.classification} acceptance=${resolution.reusedAcceptance ? "reused" : "live"}${resolution.rejectionReason === undefined ? "" : ` reason=${resolution.rejectionReason}`}`,
+      );
+      if (startup.closing) return;
+      const port = this.#runtimeSession;
+      if (resolution.classification !== "managed" && resolution.classification !== "compatible-system") {
+        context.lastUnavailable.current = classificationUnavailable(resolution);
+        return;
+      }
+      if (port === undefined) {
+        context.lastUnavailable.current = { code: "not-wired", reason: "runtime session port is not wired" };
+        return;
+      }
+      stageStarted = performance.now();
+      context.runtimeTouched.current = true;
+      let session = await port.start({
+        resolution,
+        endpoint: context.endpoint,
+        profileDirectory: context.profileDirectory,
+        runtimeInstallDirectory: context.runtimeInstallDirectory,
+        ...(context.installerOptions === undefined ? {} : { installer: context.installerOptions }),
+        ...(workspace === undefined ? {} : { workspace }),
+      });
+      if (startup.closing || generation !== startup.generation) return;
+      // Preserve the single retry for cold Defender/Bun startup races.
+      if (session === undefined && workspace !== undefined && port.ensure !== undefined &&
+        !["no-workspace", "workspace-unusable", "not-installed", "resolution-rejected"].includes(port.lastUnavailable?.()?.code ?? "")) {
+        seams.hostLog?.write("warn", "runtime.start.retry", "retrying transient Runtime startup failure");
+        session = await port.ensure();
+      }
+      if (startup.closing || generation !== startup.generation) return;
+      rememberUnavailable(context.lastUnavailable, session, port, workspace === undefined
+        ? { code: "no-workspace", reason: "no workspace is selected" }
+        : unavailableFromError(new Error("Runtime did not become ready")));
+      context.bindSession.current(session);
+      startupStage("launch", stageStarted, seams);
+    } catch (error) {
+      seams.hostLog?.write("error", "runtime.start.fail", errorDetailForLog(error));
+      if (context.runtimeTouched.current && this.#runtimeSession !== undefined) {
+        await bestEffort(() => this.#runtimeSession!.stop());
+      }
+      if (startup.canPublish) {
+        context.lastUnavailable.current = this.#runtimeSession?.lastUnavailable?.() ?? unavailableFromError(error);
+        context.bindSession.current(undefined);
+      }
+    }
+  }
+
+  async confirmClose(): Promise<boolean> {
+    if (this.#closed || this.#shutdownStarted) return true;
+    return await (this.#runtimeSession?.confirmClose?.() ?? true);
+  }
+
+  /**
+   * Residents read model is authoritative when available (same convention
+   * as the renderer thread badges); fall back to the current session
+   * snapshot when the port has no broker view.
+   */
+  isBusy(): boolean {
+    if (this.#facade.runtimeInstallInProgress) return true;
+    const residents = this.#runtimeSession?.listResidents?.().residents;
+    if (residents !== undefined) {
+      return residents.some((row) => row.phase === "running" || row.phase === "compacting");
+    }
+    const snapshot = this.#sessionRef.current?.controller.publication()?.snapshot;
+    return snapshot?.isStreaming === true || snapshot?.isCompacting === true;
+  }
+
+  async rollbackRuntime(): Promise<void> {
+    await this.#facadeContext.startup.run(async () => {
+      if (this.#closed || this.#shutdownStarted || this.isBusy()) throw new Error("Finish active sessions before rolling back Runtime");
+      const context = this.#facadeContext;
+      const current = await context.backend.installer.current();
+      if (current?.previousRuntimeVersion === undefined) throw new Error("No previous Runtime is available for rollback");
+      await context.backend.activate(current.previousRuntimeVersion, context.managedInstall?.activateOptions);
+    });
+  }
+
+  async pruneRuntimes(): Promise<void> {
+    await this.#facadeContext.startup.run(async () => {
+      if (this.#closed || this.#shutdownStarted || this.isBusy()) throw new Error("Finish active sessions before cleaning Runtime versions");
+      await this.#facadeContext.backend.installer.prune({ retainStable: 2 });
+    });
+  }
+  updateRestartBlocker(): string | undefined {
+    if (this.#closed || this.#shutdownStarted) return desktopText("应用正在关闭，请稍后重试", "Application is closing; try again shortly");
+    if (this.#facadeContext.startup.pending) return desktopText("Runtime 正在准备，请完成后重启更新", "Runtime is starting up; wait until it finishes before restarting to update");
+    if (this.#facade.runtimeInstallInProgress) return desktopText("Runtime 更新尚未完成，请完成后重启更新", "Runtime update is still in progress; wait until it finishes before restarting to update");
+    if (this.#facade.hasPendingCommands) return desktopText("仍有命令未完成，请完成后重启更新", "Commands are still running; wait until they finish before restarting to update");
+    if (this.#runtimeSession?.updateRestartBlocker) return this.#runtimeSession.updateRestartBlocker();
+    const residents = this.#runtimeSession?.listResidents?.().residents;
+    if (residents?.some(row => row.phase === "running" || row.phase === "compacting")) return desktopText("任务仍在运行，请完成后重启更新", "Tasks are still running; wait until they finish before restarting to update");
+    if (residents?.some(row => row.phase === "waiting")) return desktopText("请先处理待完成的交互，再重启更新", "Respond to pending interactions before restarting to update");
+    if (residents?.some(row => row.pendingMessages > 0)) return desktopText("仍有排队消息，请处理后重启更新", "Queued messages are still pending; handle them before restarting to update");
+    const session = this.#sessionRef.current;
+    return session?.hello() ? updateRestartBlockerForSnapshot(session.controller.publication()?.snapshot) : undefined;
+  }
+
+  async prepareUpdateRestart(onShutdownStarted?: () => void): Promise<void> {
+    const blocker = this.updateRestartBlocker();
+    if (blocker) throw new UpdateRestartBlockedError(blocker);
+    const beforeStop = async (): Promise<void> => {
+      // Saving the restore intent yields: a command may have arrived meanwhile.
+      // close() synchronously closes its command gate before its first await.
+      const latestBlocker = this.updateRestartBlocker();
+      if (latestBlocker) throw new UpdateRestartBlockedError(latestBlocker);
+      onShutdownStarted?.();
+      await this.#facade.close();
+    };
+    if (this.#runtimeSession?.prepareRestart) await this.#runtimeSession.prepareRestart(beforeStop);
+    else await beforeStop();
+  }
+
+  /**
+   * Point the single publication channel at the current bundle and replay
+   * its latest publication so the facade's runtime-changed sync fires
+   * promptly. Old session listeners are cancelled first.
+   */
+  #attachSession(session: DesktopRuntimeSession | undefined, replayConversation = false): void {
+    this.#unsubscribeCurrentPublication?.();
+    this.#unsubscribeCurrentPublication = undefined;
+    this.#unsubscribeConversation?.();
+    this.#unsubscribeConversation = undefined;
+    this.#unsubscribeConversationResync?.();
+    this.#unsubscribeConversationResync = undefined;
+    this.#unsubscribeTelemetry?.();
+    this.#unsubscribeTelemetry = undefined;
+    this.#unsubscribeBtw?.();
+    this.#unsubscribeBtw = undefined;
+    this.#unsubscribeComputer?.();
+    this.#unsubscribeComputer = undefined;
+    this.#facadeContext.interaction.attach(session?.controller);
+    if (session === undefined) {
+      return;
+    }
+    this.#unsubscribeCurrentPublication = session.onPublication((publication) => {
+      this.#facadeContext.publications.publish(publication);
+    });
+    const controller = session.controller;
+    if (typeof controller.onConversationEvent === "function") {
+      this.#unsubscribeConversation = controller.onConversationEvent((event) => {
+        this.#facadeContext.conversationEvents.publish(event);
+      });
+    }
+    if (typeof controller.onConversationResync === "function") {
+      this.#unsubscribeConversationResync = controller.onConversationResync((reason) => {
+        this.#facadeContext.conversationResync.publish(reason);
+      });
+    }
+    if (typeof controller.onTelemetryEvent === "function") {
+      this.#unsubscribeTelemetry = controller.onTelemetryEvent((event) => {
+        this.#facadeContext.telemetryEvents.publish(event);
+      });
+    }
+    if (typeof controller.onBtwEvent === "function") {
+      this.#unsubscribeBtw = controller.onBtwEvent((event) => {
+        this.#facadeContext.btwEvents.publish(event);
+      });
+    }
+    if (typeof controller.onComputerEvent === "function") {
+      this.#unsubscribeComputer = controller.onComputerEvent(event => this.#facadeContext.computerEvents.publish(event));
+    }
+    this.#replayCurrentPublication();
+    const selectedSessionId = controller.publication()?.snapshot.sessionId;
+    if (replayConversation && selectedSessionId !== undefined) {
+      controller.replayConversationEvents(selectedSessionId, (event) => {
+        this.#facadeContext.conversationEvents.publish(event);
+      });
+    }
+  }
+
+  #replayCurrentPublication(): void {
+    const current = this.#sessionRef.current?.controller.publication();
+    if (current !== undefined) {
+      this.#facadeContext.publications.publish(current);
+    }
+  }
+
+  /**
+   * Re-binds a fresh client session over the same Host, authority lease,
+   * endpoint and Runtime session. The previous facade's client session is
+   * closed (dropping its bus subscriptions and publication hook); Host and
+   * Runtime stay alive and the same composition object is returned.
+   */
+  async reload(): Promise<DesktopHostComposition> {
+    if (this.#closed || this.#shutdownStarted) {
+      throw new Error("desktop host composition is closed");
+    }
+    // Keep the installation gate and its receipt registry alive while the
+    // Renderer reboots. Replacing the facade here would reopen write access.
+    if (this.#facade.runtimeInstallInProgress) return this;
+    await this.#facade.close();
+    this.#facade = buildFacade(this.#facadeContext);
+    this.#enableContexts();
+    this.#replayCurrentPublication();
+    return this;
+  }
+
+  /**
+   * Bind the view to another workspace: delegates to the port's optional
+   * `rebind`, which selects a Worker already resident for that workspace and,
+   * when requested, spawns one. It then re-points the facade's runtime access (hello / snapshot /
+   * onPublication) at the returned bundle through the live holder — the facade
+   * object the renderer transport is bound to stays the same, so in-flight
+   * receipts keep flowing. Workers of other workspaces are left running.
+   *
+   * When the port reports a live resident for the target workspace this is a
+   * binding switch, not a Runtime restart: the fallback cold start is skipped
+   * so a transient selection failure cannot silently respawn the process.
+   * An `undefined` bundle (Runtime unavailable or a deliberate read-only
+   * workspace selection) still re-points the holder so the facade never keeps
+   * serving a controller from another workspace. Without a
+   * rebind-capable port this is a no-op.
+   */
+  async rebindWorkspace(
+    workspace: { workspaceId: string; cwd: string },
+    options?: { readonly launchIfMissing?: boolean },
+  ): Promise<void> {
+    if (this.#closed || this.#shutdownStarted) {
+      throw new Error("desktop host composition is closed");
+    }
+    const context = this.#facadeContext;
+    const generation = context.startup.changeWorkspace();
+    context.selectedWorkspace.current = workspace;
+    context.workspaceCwd.current = workspace.cwd;
+    const port = this.#runtimeSession;
+    if (port?.rebind === undefined) return;
+    // Fence the old controller immediately, even while bootstrap is probing/launching.
+    this.#sessionRef.current = undefined;
+    this.#status = "read-only";
+    this.#attachSession(undefined);
+    await context.startup.run(async () => {
+      if (generation !== context.startup.generation) return;
+      const launchIfMissing = options?.launchIfMissing !== false;
+      const hadResident = port.hasResidentForWorkspace?.(workspace.workspaceId) === true;
+      context.runtimeTouched.current = true;
+      let next = await port.rebind!(workspace, { launchIfMissing });
+      if (!context.startup.canPublish) return;
+      if (next === undefined && !hadResident && launchIfMissing) next = await startInstalledRuntime(context);
+      if (!context.startup.canPublish) return;
+      rememberUnavailable(context.lastUnavailable, next, port,
+        launchIfMissing ? unavailableFromError(new Error("Runtime did not become ready")) : undefined);
+      context.bindSession.current(next);
+    });
+  }
+
+  /**
+   * Graceful close sequence, invoked only on app quit: facade client-session
+   * close, Runtime graceful stop (when this composition started one),
+   * endpoint release, authority lease release. Any failure stops the chain
+   * (fail closed) so no lease is released while its resources may still be
+   * in use. Idempotent: subsequent calls are no-ops.
+   */
+  async shutdown(): Promise<void> {
+    if (this.#shutdownStarted) {
+      return;
+    }
+    this.#shutdownStarted = true;
+    const startupSettled = this.#facadeContext.startup.close();
+    this.#facadeContext.sessionPurge.dispose();
+    await Promise.all([...this.#contexts].map(context => context.close()));
+    await this.#facade.close();
+    await startupSettled;
+    await closeEvaluations(this.#facadeContext.evaluationOwner);
+    await this.#facadeContext.projectReads.dispose();
+    this.#attachSession(undefined);
+    // Unlike reload(), shutdown is terminal: detach the Runtime-facing sinks
+    // so the composition cannot retain listeners after its facade is gone.
+    this.#unsubscribeResidents?.();
+    this.#unsubscribeWorkspace?.();
+    this.#facadeContext.seams.disposeHostOperations?.();
+    if ((this.#sessionStarted || this.#facadeContext.runtimeTouched.current) && this.#runtimeSession !== undefined) {
+      await this.#runtimeSession.stop();
+    }
+    await this.#endpointLease.release();
+    await this.#lease.release();
+    this.#closed = true;
+  }
+}
+
+/**
+ * Brings the Host composition up in the P1 order (module doc). Rejects
+ * without side effects on lock failure (second owner fails closed); returns
+ * a read-only composition when the Runtime is unavailable, untrusted or not
+ * ready.
+ */
+export async function createDesktopHostComposition(options: DesktopCompositionOptions): Promise<DesktopHostComposition> {
+  assertCompositionOptions(options);
+  const startedAt = performance.now();
+  const seams = options.facade ?? {};
+  const arch = options.arch ?? (process.arch === "arm64" ? "arm64" : "x64");
+  const platform = options.platform;
+
+  // 1. Current-user profile/state directory, via the injected PlatformPort.
+  const profileDirectory = await platform.appDataDirectory();
+
+  // 2. Authority lock, acquired BEFORE any HostBackend creation/use.
+  const lease = await options.authorityLock.acquire();
+
+  let endpointLease: DesktopEndpointLease | undefined;
+  try {
+    // 3. Current-user-only private endpoint.
+    endpointLease = await options.privateEndpoint.createCurrentUserOnly(profileDirectory);
+    try {
+      const loadedInstallerOptions =
+        options.installer ??
+        (options.managedInstall === undefined
+          ? undefined
+          : await loadInstallerTrustedKeys(
+              options.managedInstall.trustedKeysDirectory === undefined
+                ? defaultRuntimeKeysDirectory()
+                : [options.managedInstall.trustedKeysDirectory, defaultRuntimeKeysDirectory()],
+              { environment: options.managedInstall.environmentTrustedKeys !== false },
+            ));
+      const prepareStaging = options.installer === undefined ? options.managedInstall?.prepareStaging : undefined;
+      const installerOptions =
+        loadedInstallerOptions === undefined || prepareStaging === undefined
+          ? loadedInstallerOptions
+          : { ...loadedInstallerOptions, prepareStaging };
+      const runtimeInstallDirectory = resolveManagedRuntimeInstallDirectory({
+        stateDirectory: profileDirectory,
+        ...(options.managedInstall?.installDirectory === undefined
+          ? {}
+          : { installDirectory: options.managedInstall.installDirectory }),
+      });
+      // 4. HostBackend initialization.
+      const backend = new HostBackend({
+        stateDirectory: profileDirectory,
+        runtimeInstallDirectory,
+        ...(options.resolver === undefined ? {} : { resolver: options.resolver }),
+        ...(installerOptions === undefined ? {} : { installer: installerOptions }),
+      });
+      await backend.initialize();
+
+      const runtimeSession = options.runtimeSession;
+      const activeWorkspace = seams.getActiveWorkspace?.();
+      const sessionRef: FacadeContext["sessionRef"] = { current: undefined };
+      const connectionChanges = new IsolatedForwarder<void>();
+      const startup = new DesktopRuntimeStartup(() => connectionChanges.publish(undefined));
+      const publications = new IsolatedForwarder<RuntimePublication>();
+      const residents = new IsolatedForwarder<DesktopResidentsChange>();
+      const residentTerminalOutcomes = new IsolatedForwarder<ReadonlyArray<CommandLedgerEntry>>();
+      const interaction = new DesktopInteractionHost(sessionRef);
+      const facadeContext: FacadeContext = {
+        projectReads: new ProjectReadServices(),
+        evaluationOwner: {},
+        sessionPurge: createNodeSessionPurgeMaintenance({
+          workingDirectory: profileDirectory,
+          executablePath: async () => {
+            const installed = await backend.installer.currentManifest();
+            return installed && supportsSessionPurgeMaintenance(installed.manifest) ? installed.entrypointPath : undefined;
+          },
+          onDiagnostic: info => seams.hostLog?.write(info.status === "complete" ? "info" : "warn", "session.purge", JSON.stringify(info)),
+        }),
+        authority: authorityIdentityFromLease(lease),
+        platform: platform.platform,
+        arch,
+        backend,
+        seams,
+        sessionRef,
+        startup,
+        runtimeTouched: { current: false },
+        connectionChanges,
+        selectedWorkspace: { current: activeWorkspace },
+        lastUnavailable: { current: undefined },
+        lastDisconnect: { current: runtimeSession?.lastDisconnect?.() },
+        publications,
+        residents,
+        residentTerminalOutcomes,
+        conversationEvents: new IsolatedForwarder<HarnessConversationForward>(),
+        telemetryEvents: new IsolatedForwarder<HarnessTelemetryForward>(),
+        btwEvents: new IsolatedForwarder<HarnessBtwForward>(),
+        computerEvents: new IsolatedForwarder<HarnessComputerForward>(),
+        conversationResync: new IsolatedForwarder<string>(),
+        interaction,
+        bindSession: { current: (next) => {
+          sessionRef.current = next;
+        } },
+        runtimeSession,
+        workspaceCwd: { current: activeWorkspace?.cwd ?? seams.getWorkspaceCwd?.() },
+        profileDirectory,
+        runtimeInstallDirectory,
+        endpoint: endpointLease.endpoint,
+        hasTrustedKey: installerOptions?.trustedKeys !== undefined && Object.keys(installerOptions.trustedKeys).length > 0,
+        ...(installerOptions === undefined ? {} : { installerOptions }),
+        ...(options.managedInstall === undefined ? {} : { managedInstall: options.managedInstall }),
+      };
+      const composition = new DesktopHostCompositionImpl({
+        facade: buildFacade(facadeContext),
+        status: "read-only",
+        facadeContext,
+        lease,
+        endpointLease,
+        runtimeSession,
+        sessionStarted: false,
+      });
+      startupStage("host", startedAt, seams);
+      startup.start(() => composition.initializeRuntime(options));
+      if (options.deferredRuntime !== true) await startup.ready();
+      return composition;
+    } catch (error) {
+      // Construction failure happened before Runtime startup ownership began.
+      // Release the endpoint reservation without masking the original error.
+      const endpoint = endpointLease;
+      if (endpoint !== undefined) {
+        await bestEffort(() => endpoint.release());
+      }
+      throw error;
+    }
+  } catch (error) {
+    await bestEffort(() => lease.release());
+    throw error;
+  }
+}
+
+async function bestEffort(run: () => Promise<void>): Promise<void> {
+  try {
+    await run();
+  } catch {
+    // Cleanup failures never mask the original failure; the resource stays
+    // held and the next owner fails closed instead of racing.
+  }
+}
+
+function startupStage(stage: string, startedAt: number, seams: DesktopFacadeSeams): void {
+  seams.hostLog?.write("info", "desktop.startup", `stage=${stage} elapsedMs=${Math.round((performance.now() - startedAt) * 100) / 100}`);
+}
+
+function errorDetailForLog(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+  return String(error);
+}

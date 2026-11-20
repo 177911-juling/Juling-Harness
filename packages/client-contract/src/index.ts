@@ -1,0 +1,214 @@
+/**
+ * @juling-harness/client-contract
+ *
+ * Authoritative P0 product client contract (FRONTEND_INTEGRATION.md §§8, 11,
+ * 13 P0). Transport-neutral: the same `HarnessClient` surface is implemented
+ * by Desktop IPC and local Web adapters, and by in-process semantic adapters
+ * during P0.
+ *
+ * The contract carries only public facts — opaque identities, epochs,
+ * versions and pre-redacted text. It never contains Bridge tokens, private
+ * endpoints, PIDs, process handles or session/workspace paths.
+ */
+
+import type {
+  CapabilityManifest,
+  OperatorStateSnapshot,
+} from "@juling-harness/harness-protocol";
+
+import type { OpaqueCursor } from "./conversation.js";
+import type {
+  EnvironmentId,
+  EventCursor,
+  IdempotencyKey,
+  SessionId,
+  StateVersion,
+  ThreadId,
+  WorkspaceId,
+} from "./ids.js";
+import type {
+  PublicAuthorityIdentity,
+  ResidentsReadModel,
+  RuntimeConnection,
+  SurfaceCapabilities,
+} from "./read-models.js";
+import type {
+  ClientCommandAccepted,
+  ClientCommandRequest,
+  ClientQueryRequest,
+  ClientQueryResponse,
+  CommandInput,
+  CommandName,
+  QueryInput,
+  QueryName,
+  QueryResult,
+} from "./operations.js";
+import type {
+  ClientEvent,
+  ClientInteraction,
+  CommandHandle,
+  SubscriptionScope,
+  Unsubscribe,
+} from "./lifecycle.js";
+
+/** Version of this client contract; bumped on incompatible contract changes. */
+export const CLIENT_CONTRACT_VERSION = 2 as const;
+export type { WorkspaceFileTarget, WorkspaceFileInfo, WorkspaceFileText, WorkspaceFileChunkInput, WorkspaceFileChunk, WorkspaceFileWrite, WorkspaceFileSaveResult, FileEncoding } from "./files.js";
+export type { SystemFileTarget, SystemFileInfo, SystemFileText, SystemFileChunkInput, SystemFileWrite, SystemFileSaveResult, SystemQuickKind, SystemPlaces, SystemEntry, SystemListInput, SystemDirectory, SystemFileMutationResult } from "./system-files.js";
+export type { ArtifactKind, ArtifactRecord, ArtifactListInput, ArtifactPage, ArtifactStorageState, HarnessTaskStepState, JobActionsView, JobActionsRun, JobActionsJob, JobActionsStep, JobActionsFailedLog } from "@juling-harness/harness-protocol";
+export type { InteractionForm, InteractionFormField, InteractionFormSection, InteractionFormBlock, FormSpan, FormTextField, FormChoiceField, FormAnswerValue, FormAnswerData, FormOptionNote, FormSubmitValue } from "@juling-harness/harness-protocol";
+
+export { MODEL_KINDS, BUILTIN_MODEL_ROLES, parseModelKind, modelAcceptsRole, type ModelKind } from "./model-kinds.js";
+
+/** Opaque selections carried by the bootstrap; never resolved to paths. */
+export interface ClientSelection {
+  readonly environmentId?: EnvironmentId;
+  readonly threadId?: ThreadId;
+  readonly sessionId?: SessionId;
+  readonly workspaceId?: WorkspaceId;
+}
+
+/**
+ * Bootstrap output (FRONTEND_INTEGRATION.md §8.1): public authority/runtime
+ * identity, connection classification, manifests, opaque selections, the
+ * initial read model snapshot and the resume cursor. Excludes all secrets.
+ */
+export interface ClientBootstrap {
+  readonly contractVersion: typeof CLIENT_CONTRACT_VERSION;
+  readonly authority: PublicAuthorityIdentity;
+  readonly runtime: RuntimeConnection;
+  readonly surface: SurfaceCapabilities;
+  readonly capabilityManifest: CapabilityManifest;
+  /** Hash of the operator command manifest; the full manifest comes by query. */
+  readonly commandManifestHash: string;
+  readonly selected: ClientSelection;
+  /** Present when a Runtime snapshot is available; omitted in read-only bootstrap. */
+  readonly snapshot?: OperatorStateSnapshot;
+  /** Snapshot version; equals `snapshot.stateVersion`. */
+  readonly stateVersion?: StateVersion;
+  /** Subscription resume point; events after this cursor are in order. */
+  readonly cursor?: EventCursor;
+  /**
+   * Opaque transcript head hint only. Never a page of messages. Renderer
+   * and Client must still query `session.transcript.read` for bodies.
+   */
+  readonly messagesCursor?: OpaqueCursor;
+  /**
+   * Recoverable pending interaction from the current Runtime snapshot.
+   * Present only when the Runtime is waiting on a GUI-owned interaction;
+   * TUI-owned interactions are never exposed as submittable cards.
+   */
+  readonly pendingInteraction?: ClientInteraction;
+  /** Authority-level resident Runtime broker overview, when available. */
+  readonly residents?: ResidentsReadModel;
+}
+
+/** Shared bootstrap fields before an optional Runtime snapshot is attached. */
+export type ClientBootstrapBase = Omit<ClientBootstrap, "snapshot" | "stateVersion" | "cursor">;
+
+export interface CommandOptions {
+  /** Same key + same command must map to the same semantic input. */
+  readonly idempotencyKey?: IdempotencyKey;
+}
+
+/**
+ * Transport adapter boundary. P0 adapters are in-process/in-memory semantic
+ * adapters; Desktop IPC and HTTP/WebSocket adapters implement the same
+ * interface in P1/P2. Envelopes are the semantic request/response shapes.
+ */
+export interface ClientTransport {
+  readonly supportsContexts?: boolean;
+  /** An independent projection over the same Host and resident Runtime pool. */
+  openContext?(scope: ClientContextScope): Promise<ClientTransport>;
+  bootstrap(): Promise<ClientBootstrap>;
+  query<TName extends QueryName>(
+    request: ClientQueryRequest<TName>,
+  ): Promise<ClientQueryResponse<TName>>;
+  command<TName extends CommandName>(
+    request: ClientCommandRequest<TName>,
+  ): Promise<ClientCommandAccepted<TName>>;
+  subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe;
+  close(): Promise<void>;
+}
+
+/**
+ * The product client surface shared by Desktop and Web (FRONTEND_INTEGRATION.md §8).
+ * Queries resolve exact read models; commands return a `local_pending` handle
+ * and progress through the accepted/receipt lifecycle as ClientEvents arrive.
+ */
+export interface HarnessClient {
+  readonly supportsContexts?: boolean;
+  openContext?(scope: ClientContextScope): Promise<HarnessClient>;
+  bootstrap(): Promise<ClientBootstrap>;
+  query<TName extends QueryName>(name: TName, input: QueryInput<TName>): Promise<QueryResult<TName>>;
+  command<TName extends CommandName>(
+    name: TName,
+    input: CommandInput<TName>,
+    options?: CommandOptions,
+  ): Promise<CommandHandle<TName>>;
+  subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe;
+  close(): Promise<void>;
+}
+
+/** Opaque workspace/session identities; execution targets belong to the transport. */
+export interface ClientContextScope {
+  readonly workspaceId: WorkspaceId;
+  readonly sessionId?: SessionId;
+}
+
+// Session thinking selectors are protocol facts; re-exported so transport
+// adapters can validate them without depending on harness-protocol directly.
+export { SESSION_THINKING_LEVELS, SESSION_THINKING_SELECTORS } from "@juling-harness/harness-protocol";
+export type {
+  SessionModelState,
+  SessionThinkingLevel,
+  SessionThinkingSelector,
+} from "@juling-harness/harness-protocol";
+
+// Runtime settings are a closed public whitelist; re-export the protocol
+// facts so transports and Host adapters cannot fall back to arbitrary keys.
+export {
+  HARNESS_RUNTIME_CODE_MODES,
+  HARNESS_RUNTIME_COMPACTION_METHODS,
+  HARNESS_RUNTIME_SETTING_KEYS,
+  HARNESS_RUNTIME_UNEXPECTED_STOP_MODELS,
+  HARNESS_RUNTIME_UNEXPECTED_STOP_MODES,
+} from "@juling-harness/harness-protocol";
+export type {
+  HarnessCompactionSpeculation,
+  HarnessPlanSaveAndQuitResult,
+  HarnessRuntimeCodeMode,
+  HarnessRuntimeCompactionMethod,
+  HarnessRuntimeSettingKey,
+  HarnessRuntimeSettingSetInput,
+  HarnessRuntimeSettingSetOperation,
+  HarnessRuntimeSettingValue,
+  HarnessRuntimeSettingsGetResult,
+  HarnessRuntimeSettingsSetResult,
+  HarnessRuntimeSettingsSnapshot,
+  HarnessRuntimeSettingsActivation,
+  HarnessRuntimeUnexpectedStopMode,
+  HarnessRuntimeUnexpectedStopModel,
+} from "@juling-harness/harness-protocol";
+
+// BTW snapshot facts are protocol-owned; re-exported so surfaces and transport
+// adapters can type the side-channel without depending on harness-protocol.
+export type { BtwError, BtwErrorCode, BtwSnapshot, BtwStatus } from "@juling-harness/harness-protocol";
+
+export * from "./ids.js";
+export * from "./read-models.js";
+export * from "./operations.js";
+export * from "./lifecycle.js";
+export * from "./model-thinking.js";
+export * from "./model-pricing.js";
+export * from "./provider-yaml-draft.js";
+export * from "./conversation.js";
+export * from "./git.js";
+
+export type { ContextViewIndex, ContextViewResultMap, ContextViewOperation, ContextCategoryId, ContextEntrySummary } from "@juling-harness/harness-protocol";
+export type { ComputerTarget, ComputerFrame, ComputerAction, ComputerControlState, ComputerWorkspaceSnapshot, ComputerActivityPage, ComputerObservationLease, ComputerStructureNode, ComputerStructureSnapshot, ComputerWorkspaceQuery, ComputerWorkspaceCommand, ComputerWorkspaceOperation, ComputerWorkspaceResultMap, ComputerWorkspaceChange } from "@juling-harness/harness-protocol";
+export type { UpgradeOperation, UpgradeResultMap, BtwTopicSummary, BtwHistoryTurn, ForeignSessionSummary, ForeignSource, RuntimeAuthProvider, ModelMentionInfo } from "@juling-harness/harness-protocol";
+export * from "./model-adaptation.js";
+
+export * from "./github.js";
+export * from "./time-travel.js";

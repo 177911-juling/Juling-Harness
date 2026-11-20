@@ -1,0 +1,226 @@
+import type {
+  CommandId,
+  InteractionId,
+  RemoteInteractionRequest,
+  RemoteInteractionRequiredEvent,
+  RemoteInteractionResponse,
+  HarnessInteractionResolvedEvent,
+  HarnessOperation,
+} from "@juling-harness/harness-protocol";
+import { CommandArbiter, HarnessHostError, type InteractionSurface } from "./command-arbiter.js";
+import { HostConfirmationRegistry } from "./host-confirmation.js";
+
+/**
+ * Transport acknowledgement for a dispatched HarnessOperation. A resolved invoke
+ * with status "accepted" or "completed" is the explicit signal that the Runtime
+ * acknowledged the respond or transfer; only then does the host interaction
+ * complete. A rejection or any unexpected status fails closed without
+ * completing the host interaction.
+ */
+export type RemoteInteractionInvokeResult = { status: "accepted" | "completed" };
+
+export type RemoteInteractionInvoke = (operation: HarnessOperation) => Promise<RemoteInteractionInvokeResult>;
+
+export type RemoteInteractionDecision = "submit" | "cancel";
+
+export interface RemoteInteractionRespondInput {
+  interactionId: InteractionId;
+  commandId: CommandId;
+  /** Generation captured by the GUI caller; omitted only for trusted TUI calls. */
+  generation?: number;
+  decision: RemoteInteractionDecision;
+  value?: unknown;
+  owner: InteractionSurface;
+  /** One-shot token; required for destructive confirm and approval submits. */
+  confirmationToken?: string;
+  /** Token binding (plan §3.4): lease generation and Runtime epoch. */
+  binding?: { leaseGeneration?: number; runtimeEpoch?: number };
+}
+
+export interface PendingRemoteInteraction {
+  interactionId: InteractionId;
+  commandId: CommandId;
+  title: string;
+  owner: InteractionSurface;
+  generation: number;
+  request: RemoteInteractionRequest;
+}
+
+function isHighRisk(request: RemoteInteractionRequest): boolean {
+  return request.kind === "approval" || (request.kind === "confirm" && request.destructive === true);
+}
+
+export class RemoteInteractionAdapter {
+  #pending: PendingRemoteInteraction | undefined;
+  #inFlight = false;
+
+  constructor(
+    private readonly arbiter: CommandArbiter,
+    private readonly confirmations: HostConfirmationRegistry,
+    private readonly invoke: RemoteInteractionInvoke,
+  ) {}
+
+  /**
+   * Adopt a validated Runtime-issued interaction event. Registers the exact
+   * interaction identity and generation with the arbiter and retains a single
+   * path-free pending request. The adapter never auto-transfers, including on
+   * TERMINAL_REQUIRED; transferToTui() is the only transfer path.
+   */
+  adopt(event: RemoteInteractionRequiredEvent): PendingRemoteInteraction {
+    const ownership = this.arbiter.adoptInteraction(
+      event.request.interactionId,
+      event.request.commandId,
+      event.owner,
+      event.leaseGeneration,
+    );
+    const pending: PendingRemoteInteraction = {
+      interactionId: ownership.interactionId,
+      commandId: ownership.commandId,
+      title: event.request.title,
+      owner: ownership.owner,
+      generation: ownership.generation,
+      request: event.request,
+    };
+    this.#pending = pending;
+    return this.#clonePending(pending);
+  }
+
+  /** Drop the pending interaction locally. Does not dispatch a Runtime respond. */
+  clear(): void {
+    this.#pending = undefined;
+    this.#inFlight = false;
+    this.arbiter.abandonAllInteractions();
+  }
+
+  /**
+   * Runtime-side resolution (`interaction.resolved`): when the event matches
+   * the adopted interaction id + generation, complete the arbiter ownership
+   * and drop the local pending. Stale generations and unknown ids are
+   * ignored (idempotent). Returns true when the local pending was cleared.
+   */
+  resolve(event: HarnessInteractionResolvedEvent): boolean {
+    const pending = this.#pending;
+    if (
+      pending === undefined ||
+      pending.interactionId !== event.interactionId ||
+      pending.generation !== event.leaseGeneration
+    ) {
+      return false;
+    }
+    this.arbiter.completeInteraction(event.interactionId, event.commandId, pending.owner, pending.generation);
+    this.#pending = undefined;
+    return true;
+  }
+
+  /** Defensive clone of the pending interaction, or undefined while idle. */
+  pending(): PendingRemoteInteraction | undefined {
+    return this.#pending === undefined ? undefined : this.#clonePending(this.#pending);
+  }
+
+  /**
+   * Respond to the pending interaction. Ownership and generation are asserted
+   * against the arbiter; destructive confirm and approval submits require a
+   * one-shot confirmation token bound to the exact respond operation and owner.
+   * The host interaction completes only after invoke acknowledges the response;
+   * every failure path leaves the interaction pending (fail closed).
+   */
+  async respond(input: RemoteInteractionRespondInput): Promise<void> {
+    const pending = this.#pending;
+    if (pending === undefined) {
+      throw new HarnessHostError("INTERACTION_STALE", "No interaction is pending");
+    }
+    if (this.#inFlight) {
+      throw new HarnessHostError("COMMAND_BLOCKED", "An interaction operation is already in flight");
+    }
+    if (input.owner === "gui" && input.generation === undefined) {
+      throw new HarnessHostError("INTERACTION_STALE", "GUI interaction generation is required");
+    }
+    if (input.generation !== undefined && input.generation !== pending.generation) {
+      throw new HarnessHostError("INTERACTION_STALE", "Interaction generation is stale");
+    }
+    const operation: RemoteInteractionResponse = {
+      kind: "interaction.respond",
+      interactionId: input.interactionId,
+      commandId: input.commandId,
+      decision: input.decision,
+      ...(input.value === undefined ? {} : { value: input.value }),
+    };
+    const ownership = this.arbiter.assertInteraction(
+      input.interactionId,
+      input.commandId,
+      input.owner,
+      pending.generation,
+    );
+    this.#inFlight = true;
+    try {
+      if (input.decision === "submit" && isHighRisk(pending.request)) {
+        if (input.confirmationToken === undefined) {
+          throw new HarnessHostError("INVALID_ARGUMENT", "Confirmation token is required for this interaction response");
+        }
+        this.confirmations.consume(input.confirmationToken, operation, input.owner, input.binding);
+      }
+      // Generation is already bound by the confirmation token. Keep it out of
+      // that payload hash, but carry it to the Runtime for late-response fencing.
+      await this.#acknowledged({ ...operation, ...(input.generation === undefined ? {} : { leaseGeneration: input.generation }) });
+      // Runtime interaction.resolved may have already completed the arbiter
+      // between the acknowledgement and this continuation. Completion is
+      // therefore deliberately idempotent from the adapter's perspective.
+      if (this.#pending?.interactionId === input.interactionId && this.#pending.generation === ownership.generation) {
+        this.arbiter.completeInteraction(input.interactionId, input.commandId, input.owner, ownership.generation);
+        this.#pending = undefined;
+      }
+    } finally {
+      this.#inFlight = false;
+    }
+  }
+
+  /**
+   * Explicitly transfer the pending interaction to the TUI. Requires current
+   * gui ownership; the transfer operation is dispatched before the arbiter and
+   * pending owner/generation advance. Any failure leaves ownership unchanged.
+   */
+  async transferToTui(): Promise<PendingRemoteInteraction> {
+    const pending = this.#pending;
+    if (pending === undefined) {
+      throw new HarnessHostError("INTERACTION_STALE", "No interaction is pending");
+    }
+    if (this.#inFlight) {
+      throw new HarnessHostError("COMMAND_BLOCKED", "An interaction operation is already in flight");
+    }
+    const ownership = this.arbiter.assertInteraction(
+      pending.interactionId,
+      pending.commandId,
+      "gui",
+      pending.generation,
+    );
+    this.#inFlight = true;
+    try {
+      await this.#acknowledged({
+        kind: "tui.transfer",
+        commandId: pending.commandId,
+        interactionId: pending.interactionId,
+      });
+      const transferred = this.arbiter.transferInteraction(pending.interactionId, "gui", "tui");
+      const updated: PendingRemoteInteraction = {
+        ...pending,
+        owner: transferred.owner,
+        generation: transferred.generation,
+      };
+      this.#pending = updated;
+      return this.#clonePending(updated);
+    } finally {
+      this.#inFlight = false;
+    }
+  }
+
+  async #acknowledged(operation: HarnessOperation): Promise<void> {
+    const result = await this.invoke(operation);
+    if (result.status !== "accepted" && result.status !== "completed") {
+      throw new HarnessHostError("INTERNAL_ERROR", "Interaction operation was not acknowledged");
+    }
+  }
+
+  #clonePending(pending: PendingRemoteInteraction): PendingRemoteInteraction {
+    return structuredClone(pending);
+  }
+}

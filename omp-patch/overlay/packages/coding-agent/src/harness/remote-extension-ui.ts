@@ -1,0 +1,502 @@
+import * as crypto from "node:crypto";
+import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ToolCallContext } from "@oh-my-pi/pi-agent-core";
+import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import { presentHtmlForm } from "./services/form-presentation";
+import { validateAskAnswerPayload } from "./ask-attachments-protocol";
+import { runtimeText } from "./locale";
+import type {
+	AutocompleteProviderFactory,
+	ExtensionAskDialogQuestion,
+	ExtensionAskDialogResult,
+	ExtensionAskDialogResultItem,
+	ExtensionApprovalAnswer,
+	ExtensionApprovalGrant,
+	ExtensionApprovalPrompt,
+	ExtensionFormDialogOptions,
+	ExtensionFormDialogResult,
+	ExtensionUIContext,
+	ExtensionUIDialogOptions,
+	ExtensionUISelectItem,
+	ExtensionUiComponentFactory,
+	ExtensionWidgetContent,
+	ExtensionWidgetOptions,
+	TerminalInputHandler,
+} from "../extensibility/extensions/types";
+import { getExtensionUISelectOptionLabel } from "../extensibility/extensions/types";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
+import type { ThemeJson } from "@oh-my-pi/pi-tui/theme/schema";
+import type { Theme } from "@oh-my-pi/pi-tui/theme/theme";
+import type { ToolUiFactory } from "../tools/context";
+import { ignoreSettle } from "../thread/services/support";
+import { HarnessInteractionError, type HarnessInteractionGateway } from "./services/interaction-port";
+
+/**
+ * Option identity used by the Harness Remote UI for the Ask "Other (type
+ * your own)" entry; the Renderer maps it back to the custom-input editor.
+ */
+export const REMOTE_CUSTOM_INPUT_ID = "custom-input";
+const OPTION_ID_PREFIX = "option:";
+
+function toolCallCommandId(toolCall: ToolCallContext | undefined, sessionId?: string): string {
+	const prefix = `harness-tool:${sessionId ? `${sessionId}:` : ""}`;
+	if (toolCall === undefined) return `${prefix}${crypto.randomUUID()}`;
+	const current = toolCall.toolCalls[toolCall.index];
+	return `${prefix}${current?.id ?? "unknown"}`;
+}
+
+export type HarnessUiGateway = Pick<
+	HarnessInteractionGateway,
+	"select" | "ask" | "form" | "confirm" | "input" | "approve" | "editor" | "cancelCommand" | "notify"
+> & { readonly generation?: number };
+
+function isOtherOption(option: ExtensionUISelectItem): boolean {
+	return typeof option === "string" ? option === "Other (type your own)" : option.label === "Other (type your own)";
+}
+
+function mapSelectValue(value: string | string[] | undefined, options: ExtensionUISelectItem[]): string | undefined {
+	if (value === undefined) return undefined;
+	const ids = typeof value === "string" ? [value] : value;
+	if (ids.length === 0) return undefined;
+	if (ids.length > 1) {
+		throw new HarnessInteractionError(
+			"INVALID_ARGUMENT",
+			"Select interaction returned multiple values for a single-choice prompt",
+		);
+	}
+	const id = ids[0]!;
+	if (id === REMOTE_CUSTOM_INPUT_ID) return "Other (type your own)";
+	if (id.startsWith(OPTION_ID_PREFIX)) {
+		const index = Number(id.slice(OPTION_ID_PREFIX.length));
+		if (Number.isSafeInteger(index) && index >= 0 && index < options.length) {
+			return getExtensionUISelectOptionLabel(options[index]!);
+		}
+		// An out-of-range option reference is a protocol fault, not an answer;
+		// echoing it back as free text would surface "option:99" to the tool.
+		throw new HarnessInteractionError("INVALID_ARGUMENT", "Select interaction returned an unknown option id");
+	}
+	// Harness Ask card submits the typed custom answer as plain text.
+	if (id.trim().length > 0) return id;
+	throw new HarnessInteractionError("INVALID_ARGUMENT", "Select interaction returned an unknown option id");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function mapAskDialogValue(
+	value: unknown,
+	questions: ExtensionAskDialogQuestion[],
+	acceptImages = false,
+): ExtensionAskDialogResult {
+	validateAskAnswerPayload(value);
+	if (!acceptImages && value.results.some(row => row.customInputImages?.length || row.noteImages?.length))
+		throw new HarnessInteractionError("INVALID_ARGUMENT", "This interaction does not accept images");
+	if (!isRecord(value) || !Array.isArray(value.results) || value.results.length !== questions.length) {
+		throw new HarnessInteractionError(
+			"INVALID_ARGUMENT",
+			"Ask interaction returned a result count that does not match the requested questions",
+		);
+	}
+	const mapped: ExtensionAskDialogResultItem[] = [];
+	for (let index = 0; index < questions.length; index++) {
+		const question = questions[index]!;
+		const raw = value.results[index];
+		if (!isRecord(raw) || raw.id !== question.id) {
+			throw new HarnessInteractionError(
+				"INVALID_ARGUMENT",
+				"Ask interaction returned results that do not match the requested question order",
+			);
+		}
+		if (!Array.isArray(raw.selectedOptions) || raw.selectedOptions.some(entry => typeof entry !== "string")) {
+			throw new HarnessInteractionError("INVALID_ARGUMENT", "Ask interaction returned invalid selected options");
+		}
+		const labels = question.options.map(option => option.label);
+		for (const selected of raw.selectedOptions) {
+			if (!labels.includes(selected)) {
+				throw new HarnessInteractionError("INVALID_ARGUMENT", "Ask interaction returned an unknown option");
+			}
+		}
+		const customInput = raw.customInput;
+		if (customInput !== undefined && (typeof customInput !== "string" || customInput.trim().length === 0)) {
+			throw new HarnessInteractionError("INVALID_ARGUMENT", "Ask interaction returned an invalid custom input");
+		}
+		if (
+			raw.noteOption !== undefined &&
+			(customInput !== undefined || !raw.selectedOptions.includes(raw.noteOption))
+		) {
+			throw new HarnessInteractionError("INVALID_ARGUMENT", "The note must belong to a selected option");
+		}
+		mapped.push({
+			id: question.id,
+			question: question.question,
+			options: labels,
+			multi: question.multi === true,
+			selectedOptions: raw.selectedOptions as string[],
+			...(typeof customInput === "string" ? { customInput } : {}),
+			...(typeof raw.note === "string" ? { note: raw.note } : {}),
+			...(typeof raw.noteOption === "string" ? { noteOption: raw.noteOption } : {}),
+			...(raw.customInputImages ? { customInputImages: raw.customInputImages as ImageContent[] } : {}),
+			...(raw.noteImages ? { noteImages: raw.noteImages as ImageContent[] } : {}),
+		});
+	}
+	return { kind: "submit", results: mapped };
+}
+
+/**
+ * Remote Extension UI adapter for the Harness headless Runtime. Every
+ * blocking dialog (select / confirm / input / editor / askDialog) becomes a
+ * Remote interaction card on the Bridge. Non-blocking UI capabilities
+ * (notify, status, widgets, custom components, terminal input, theme/title
+ * manipulation) are safe no-ops or explicit "not supported" failures — they
+ * never touch the Bridge.
+ */
+export class HarnessRemoteExtensionUiContext implements ExtensionUIContext {
+	// Stock React rendering keeps the original transcript; TUI component redraws have no effect.
+	rerenderMessage(_timestamp: number): void {}
+	refreshTranscript(_ids: readonly string[]): void {}
+	getLinkClicksAvailable(): boolean {
+		return true;
+	}
+	#fallbackTheme: Theme | undefined;
+	readonly #gatewayGeneration: number | undefined;
+
+	constructor(
+		private readonly gateway: HarnessUiGateway,
+		private readonly commandId: string,
+	) {
+		this.#gatewayGeneration = gateway.generation;
+	}
+
+	#assertCurrent(): void {
+		if (this.#gatewayGeneration !== undefined && this.gateway.generation !== this.#gatewayGeneration) {
+			throw new HarnessInteractionError("INTERACTION_STALE", "The dialog's Runtime generation changed");
+		}
+	}
+
+	async select(
+		title: string,
+		options: ExtensionUISelectItem[],
+		dialogOptions?: ExtensionUIDialogOptions,
+	): Promise<string | undefined> {
+		const remoteOptions = options.map((option, index) => ({
+			id: isOtherOption(option) ? REMOTE_CUSTOM_INPUT_ID : `${OPTION_ID_PREFIX}${index}`,
+			label: getExtensionUISelectOptionLabel(option),
+			...(typeof option === "object" && option.description !== undefined ? { description: option.description } : {}),
+		}));
+		const value = await this.#runWithCancel(
+			() =>
+				this.gateway.select({
+					commandId: this.commandId,
+					title,
+					options: remoteOptions,
+					...(dialogOptions?.initialIndex === undefined ? {} : { initialIndex: dialogOptions.initialIndex }),
+					...(dialogOptions?.selectionMarker === undefined
+						? {}
+						: { selectionMarker: dialogOptions.selectionMarker }),
+					...(dialogOptions?.checkedIndices === undefined ? {} : { checkedIndices: dialogOptions.checkedIndices }),
+					...(dialogOptions?.markableCount === undefined ? {} : { markableCount: dialogOptions.markableCount }),
+				}),
+			dialogOptions,
+		);
+		return mapSelectValue(value, options);
+	}
+
+	askDialog = async (
+		questions: ExtensionAskDialogQuestion[],
+		dialogOptions?: ExtensionUIDialogOptions,
+	): Promise<ExtensionAskDialogResult | undefined> => {
+		const remoteQuestions = questions.map(question => ({
+			id: question.id,
+			question: question.question,
+			...(question.header?.trim() ? { header: question.header.trim() } : {}),
+			options: question.options.map((option, index) => ({
+				id: `${OPTION_ID_PREFIX}${index}`,
+				label: option.label,
+				...(option.description !== undefined ? { description: option.description } : {}),
+				...(option.preview !== undefined ? { preview: option.preview } : {}),
+			})),
+			...(question.multi !== undefined ? { multiple: question.multi } : {}),
+			...(question.recommended !== undefined ? { recommended: question.recommended } : {}),
+		}));
+		const value = await this.#runWithCancel(
+			() =>
+				this.gateway.ask({
+					commandId: this.commandId,
+					title: runtimeText("Agent 提问", "Agent Question"),
+					questions: remoteQuestions,
+					acceptImages: dialogOptions?.acceptImages === true,
+				}),
+			dialogOptions,
+		);
+		if (value === undefined) return undefined;
+		return mapAskDialogValue(value, questions, dialogOptions?.acceptImages === true);
+	};
+
+	formDialog = async (
+		html: string,
+		dialogOptions?: ExtensionFormDialogOptions,
+	): Promise<ExtensionFormDialogResult | undefined> => {
+		this.#assertCurrent();
+		dialogOptions?.signal?.throwIfAborted();
+		const form = dialogOptions?.parsedForm ?? parseHtmlForm(html);
+		const presentation = await presentHtmlForm(form, {
+			cwd: dialogOptions?.cwd ?? process.cwd(),
+			...(dialogOptions?.signal === undefined ? {} : { signal: dialogOptions.signal }),
+		});
+		dialogOptions?.signal?.throwIfAborted();
+		// No Runtime deadline: the stable Renderer form session resets the native inactivity timer on input.
+		const answered = await this.#runWithCancel(
+			() =>
+				this.gateway.form({
+					commandId: this.commandId,
+					title: runtimeText("Agent 提问", "Agent Question"),
+					form: presentation,
+					...(dialogOptions?.timeout === undefined ? {} : { timeoutMs: dialogOptions.timeout }),
+				}),
+			dialogOptions,
+		);
+		if (answered?.timedOut) dialogOptions?.onTimeout?.();
+		return answered;
+	};
+
+	async confirm(title: string, message: string, dialogOptions?: ExtensionUIDialogOptions): Promise<boolean> {
+		return await this.#runWithCancel(
+			() => this.gateway.confirm({ commandId: this.commandId, title, message }),
+			dialogOptions,
+		);
+	}
+
+	async input(
+		title: string,
+		placeholder?: string,
+		dialogOptions?: ExtensionUIDialogOptions,
+	): Promise<string | undefined> {
+		return await this.#runWithCancel(
+			() =>
+				this.gateway.input({
+					commandId: this.commandId,
+					title,
+					...(placeholder === undefined ? {} : { placeholder }),
+					...(dialogOptions?.secret === true ? { secret: true } : {}),
+				}),
+			dialogOptions,
+		);
+	}
+
+	async approveTool(
+		input: {
+			toolName: string;
+			toolCallId: string;
+			title: string;
+			reason?: string;
+			details: unknown;
+			approvalMode: "always-ask" | "always-ask-cached" | "write" | "yolo";
+			session?: string;
+			grants?: readonly ExtensionApprovalGrant[];
+		},
+		options?: ExtensionUIDialogOptions,
+	): Promise<ExtensionApprovalAnswer> {
+		return await this.#runWithCancel(
+			() =>
+				this.gateway.approve({
+					commandId: this.commandId,
+					title: input.title,
+					approvalType: input.toolName,
+					details: input.details,
+					...(input.session === undefined ? {} : { session: input.session }),
+					...(input.grants === undefined ? {} : { grants: input.grants }),
+				}),
+			options,
+		);
+	}
+
+	/** Built-in tool approvals: the prompt text is all upstream passes, so the card shows it as the summary. */
+	async approve(
+		prompt: ExtensionApprovalPrompt,
+		options?: ExtensionUIDialogOptions,
+	): Promise<ExtensionApprovalAnswer> {
+		const [title = "Approve tool call?"] = prompt.full.split("\n", 1);
+		return await this.#runWithCancel(
+			() =>
+				this.gateway.approve({
+					commandId: this.commandId,
+					title,
+					approvalType: "tool",
+					details: { summary: prompt.full, compact: prompt.compact },
+					...(prompt.session === undefined ? {} : { session: prompt.session }),
+					...(prompt.grants === undefined ? {} : { grants: prompt.grants }),
+				}),
+			options,
+		);
+	}
+
+	async editor(
+		title: string,
+		prefill?: string,
+		dialogOptions?: ExtensionUIDialogOptions,
+		editorOptions?: { promptStyle?: boolean },
+	): Promise<string | undefined> {
+		return await this.#runWithCancel(
+			() =>
+				this.gateway.editor({
+					commandId: this.commandId,
+					title,
+					...(prefill === undefined ? {} : { content: prefill }),
+					...(editorOptions?.promptStyle === undefined ? {} : { promptStyle: editorOptions.promptStyle }),
+				}),
+			dialogOptions,
+		);
+	}
+
+	notify(message: string, type?: "info" | "warning" | "error"): void {
+		ignoreSettle(this.gateway.notify(message, type));
+	}
+
+	onTerminalInput(_handler: TerminalInputHandler): () => void {
+		return () => {};
+	}
+
+	setStatus(_key: string, _text: string | undefined): void {
+		// Non-blocking UI is a safe no-op on the Remote surface.
+	}
+
+	setWorkingMessage(_message?: string): void {
+		// Non-blocking UI is a safe no-op on the Remote surface.
+	}
+
+	setWidget(_key: string, _content: ExtensionWidgetContent, _options?: ExtensionWidgetOptions): void {
+		// Widgets are not supported on the Remote surface.
+	}
+
+	setFooter(_factory: ExtensionUiComponentFactory | undefined): void {
+		// Custom footer components are not supported on the Remote surface.
+	}
+
+	setHeader(_factory: ExtensionUiComponentFactory | undefined): void {
+		// Custom header components are not supported on the Remote surface.
+	}
+
+	setTitle(_title: string): void {
+		// Title control is not supported on the Remote surface.
+	}
+
+	custom<T>(): Promise<T> {
+		throw new Error("custom UI is not supported by the Harness remote UI");
+	}
+
+	setEditorText(_text: string): void {
+		// Editor injection is not supported on the Remote surface.
+	}
+
+	pasteToEditor(_text: string): void {
+		// Editor injection is not supported on the Remote surface.
+	}
+
+	getEditorText(): string {
+		return "";
+	}
+
+	addAutocompleteProvider(_factory: AutocompleteProviderFactory): void {
+		// Autocomplete composition is not supported on the Remote surface.
+	}
+
+	setEditorComponent(): void {
+		// Custom editor components are not supported on the Remote surface.
+	}
+
+	getEditorComponent(): undefined {
+		return undefined;
+	}
+
+	get theme(): Theme {
+		// The module-level `theme` singleton is only assigned after TUI theme
+		// initialization; headless Harness contexts fall back to a static
+		// default so Ask helpers (e.g. the "Done selecting" label) never
+		// dereference an uninitialized global.
+		if (this.#fallbackTheme === undefined) {
+			const firstDefault = Object.values(getBuiltinThemes())[0];
+			this.#fallbackTheme = createTheme(firstDefault as ThemeJson);
+		}
+		return this.#fallbackTheme;
+	}
+
+	getAllThemes(): Promise<{ name: string; path: string | undefined }[]> {
+		return Promise.resolve([]);
+	}
+
+	getTheme(_name: string): Promise<Theme | undefined> {
+		return Promise.resolve(undefined);
+	}
+
+	setTheme(_theme: string | Theme): Promise<{ success: boolean; error?: string }> {
+		return Promise.resolve({ success: false, error: "Theme switching is not supported by the Harness remote UI" });
+	}
+
+	getToolsExpanded(): boolean {
+		return false;
+	}
+
+	setToolsExpanded(_expanded: boolean): void {
+		// Tool expansion is not supported on the Remote surface.
+	}
+
+	/**
+	 * Abort / timeout handling: cancel the Remote interaction and surface an
+	 * AbortError so the Ask fallback converges and no card is left behind.
+	 */
+	async #runWithCancel<T>(run: () => Promise<T>, dialogOptions?: ExtensionUIDialogOptions): Promise<T> {
+		this.#assertCurrent();
+		const signal = dialogOptions?.signal;
+		if (signal === undefined) {
+			const value = await run();
+			this.#assertCurrent();
+			return value;
+		}
+		const abortOutcome = (): "aborted" | "expired" => {
+			const reason = signal.reason;
+			return reason instanceof DOMException && reason.name === "TimeoutError" ? "expired" : "aborted";
+		};
+		if (signal.aborted) {
+			const outcome = abortOutcome();
+			this.#cancel(outcome === "expired" ? "Interaction expired" : "Interaction aborted", outcome);
+			throw new DOMException("Aborted", "AbortError");
+		}
+		let cancelled = false;
+		const onAbort = () => {
+			cancelled = true;
+			const outcome = abortOutcome();
+			this.#cancel(outcome === "expired" ? "Interaction expired" : "Interaction aborted", outcome);
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+		try {
+			const value = await run();
+			if (cancelled || signal.aborted) throw new DOMException("Aborted", "AbortError");
+			this.#assertCurrent();
+			return value;
+		} catch (error) {
+			if (cancelled) throw new DOMException("Aborted", "AbortError");
+			throw error;
+		} finally {
+			signal.removeEventListener("abort", onAbort);
+		}
+	}
+
+	#cancel(reason: string, outcome: "aborted" | "expired" = "aborted"): void {
+		try {
+			this.#assertCurrent();
+			this.gateway.cancelCommand(this.commandId, reason, outcome);
+		} catch {
+			// Interaction already resolved or closed; nothing to cancel.
+		}
+	}
+}
+
+/**
+ * Tool UI factory for the Harness headless Runtime (plan §2.4): each tool
+ * call gets a Remote UI context bound to an internal `harness-tool:<id>`
+ * commandId reused across that call's questions.
+ */
+export function createHarnessRemoteUiFactory(gateway: HarnessUiGateway): ToolUiFactory {
+	return (toolCall, sessionId) => new HarnessRemoteExtensionUiContext(gateway, toolCallCommandId(toolCall, sessionId));
+}

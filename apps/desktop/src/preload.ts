@@ -1,0 +1,151 @@
+/**
+ * Secure preload bridge (FRONTEND_INTEGRATION.md §9.1).
+ *
+ * Runs in a sandboxed renderer (contextIsolation + sandbox, no Node
+ * integration) and exposes exactly one frozen object under
+ * `window.julingHarness` (see {@link DESKTOP_BRIDGE_GLOBAL}):
+ * `JulingHarnessDesktopApi` with the fixed named methods bootstrap / query /
+ * command / subscribe / close. Window chrome helpers (`julingHarnessChrome`,
+ * `julingHarnessTerminal`) are separate frozen objects on named channels —
+ * they are not Host transport.
+ *
+ * Hard guarantees:
+ * - `ipcRenderer` is never exposed: it lives only inside this module's
+ *   closure and the bridge adapter below.
+ * - No generic `invoke(channel, payload)`: every call resolves to a fixed
+ *   constant from `DESKTOP_IPC_CHANNELS` or a chrome channel constant.
+ * - No arbitrary event forwarding: `ipcRenderer.on` binds only the fixed
+ *   Host event channel and the terminal data/exit channels; unsubscribe
+ *   removes the exact listener reference.
+ * - No Node API or Host secret (token/endpoint/Runtime PID) leaks.
+ */
+
+import { contextBridge, ipcRenderer, webUtils } from "electron";
+
+import {
+  createDesktopIpcBridge,
+  DESKTOP_BRIDGE_GLOBAL,
+  type DesktopIpcBridge,
+} from "./ipc-validation.js";
+import {
+  TERMINAL_IPC_CHANNELS,
+  type JulingHarnessTerminalApi,
+  type TerminalDataEvent,
+  type TerminalExitEvent,
+} from "./terminal-shared.js";
+import { REMOTE_CHANNELS, type RemoteApi } from "./remote/shared.js";
+import { createJulingHarnessChromeApi, subscribeChannel } from "./chrome-api.js";
+import { createPerfProfileApi } from "./perf-profile-shared.js";
+
+/**
+ * Electron `ipcRenderer.on` calls `(IpcRendererEvent, payload)`. The Host
+ * bridge must see only the payload — cloning the IPC event throws
+ * "envelope contains a non-JSON value". Wrap like the terminal channels
+ * and keep a WeakMap so `removeListener` still matches by identity.
+ */
+const hostEventWrappers = new WeakMap<
+  (event: unknown, ...args: readonly unknown[]) => void,
+  (event: unknown, ...args: readonly unknown[]) => void
+>();
+
+const sender: DesktopIpcBridge = {
+  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+  on: (channel, listener) => {
+    const wrapped = (_event: unknown, payload: unknown): void => {
+      listener(payload);
+    };
+    hostEventWrappers.set(listener, wrapped);
+    ipcRenderer.on(channel, wrapped);
+  },
+  removeListener: (channel, listener) => {
+    const wrapped = hostEventWrappers.get(listener) ?? listener;
+    hostEventWrappers.delete(listener);
+    ipcRenderer.removeListener(channel, wrapped);
+  },
+};
+
+const api = createDesktopIpcBridge(sender);
+
+contextBridge.exposeInMainWorld(DESKTOP_BRIDGE_GLOBAL, api);
+const remoteApi: RemoteApi = {
+  list: () => ipcRenderer.invoke(REMOTE_CHANNELS.list),
+  save: profile => ipcRenderer.invoke(REMOTE_CHANNELS.save, profile),
+  remove: id => ipcRenderer.invoke(REMOTE_CHANNELS.remove, id),
+  connect: (id, credentials) => ipcRenderer.invoke(REMOTE_CHANNELS.connect, id, credentials),
+  approveDeployment: id => ipcRenderer.invoke(REMOTE_CHANNELS.approve, id),
+  retryNetwork: id => ipcRenderer.invoke(REMOTE_CHANNELS.retryNetwork, id),
+  installRuntime: id => ipcRenderer.invoke(REMOTE_CHANNELS.installRuntime, id),
+  disconnect: id => ipcRenderer.invoke(REMOTE_CHANNELS.disconnect, id),
+  select: id => ipcRenderer.invoke(REMOTE_CHANNELS.select, id),
+  openContext: (id, scope) => ipcRenderer.invoke(REMOTE_CHANNELS.openContext, id, scope),
+  closeContext: (id, contextId) => ipcRenderer.invoke(REMOTE_CHANNELS.closeContext, id, contextId),
+  bootstrap: (id, contextId) => ipcRenderer.invoke(REMOTE_CHANNELS.bootstrap, id, contextId),
+  query: (id, request, contextId) => ipcRenderer.invoke(REMOTE_CHANNELS.query, id, request, contextId),
+  command: async (id, request, contextId) => {
+    const result = await ipcRenderer.invoke(REMOTE_CHANNELS.command, id, request, contextId);
+    if (!result.ok) throw result.error;
+    return result.accepted;
+  },
+  directories: (id, path) => ipcRenderer.invoke(REMOTE_CHANNELS.directories, id, path),
+  register: (id, path) => ipcRenderer.invoke(REMOTE_CHANNELS.register, id, path),
+  onEvent: listener => subscribeChannel(ipcRenderer, REMOTE_CHANNELS.event, listener),
+  onChanged: listener => subscribeChannel(ipcRenderer, REMOTE_CHANNELS.changed, listener),
+};
+contextBridge.exposeInMainWorld("julingHarnessRemote", Object.freeze(remoteApi));
+contextBridge.exposeInMainWorld("julingHarnessChrome", createJulingHarnessChromeApi(ipcRenderer, webUtils));
+// P0-6: read-only GPU/low-spec profile. `cached` is read synchronously at
+// preload time (sendSync) so the Renderer can pick its first-paint policy
+// without waiting for an IPC round-trip; there is no write method.
+contextBridge.exposeInMainWorld(
+  "julingHarnessPerf",
+  createPerfProfileApi({
+    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+    sendSync: (channel) => ipcRenderer.sendSync(channel),
+    on: (channel, listener) => {
+      ipcRenderer.on(channel, listener);
+    },
+    removeListener: (channel, listener) => {
+      ipcRenderer.removeListener(channel, listener);
+    },
+  }),
+);
+
+import { TMUX_IPC_CHANNELS, type TmuxTopology } from "./tmux/tmux-shared.js";
+
+const terminalApi: JulingHarnessTerminalApi = {
+  tmuxSessions(input) { return ipcRenderer.invoke(TMUX_IPC_CHANNELS.sessions, input); },
+  tmuxAttach(input) { return ipcRenderer.invoke(TMUX_IPC_CHANNELS.attach, input); },
+  tmuxCommand(input) { return ipcRenderer.invoke(TMUX_IPC_CHANNELS.command, input); },
+  tmuxDetach(connectionId) { return ipcRenderer.invoke(TMUX_IPC_CHANNELS.detach, { connectionId }); },
+  onTmux(listener) { return subscribeChannel<TmuxTopology>(ipcRenderer, TMUX_IPC_CHANNELS.topology, listener); },
+  recordingStart(input) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStart, input); },
+  recordingStop(id) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStop, { id }); },
+  recordingStatus(id) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStatus, { id }); },
+  create(size) {
+    return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.create, size ?? {}) as ReturnType<
+      JulingHarnessTerminalApi["create"]
+    >;
+  },
+  write(id, data) {
+    return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.write, { id, data }) as Promise<void>;
+  },
+  resize(id, cols, rows) {
+    return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.resize, { id, cols, rows }) as Promise<void>;
+  },
+  dispose(id) {
+    return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.dispose, { id }) as Promise<void>;
+  },
+  onData(listener) {
+    return subscribeChannel<TerminalDataEvent>(ipcRenderer, TERMINAL_IPC_CHANNELS.data, listener);
+  },
+  onExit(listener) {
+    return subscribeChannel<TerminalExitEvent>(ipcRenderer, TERMINAL_IPC_CHANNELS.exit, listener);
+  },
+  ack(id, bytes) {
+    // Fire-and-forget: an ACK is a credit, not a state change. A window that
+    // closed mid-write must not produce an unhandled rejection.
+    void ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.ack, { id, bytes }).catch(() => undefined);
+  },
+};
+
+contextBridge.exposeInMainWorld("julingHarnessTerminal", Object.freeze(terminalApi));

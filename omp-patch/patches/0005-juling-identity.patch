@@ -1,0 +1,1222 @@
+diff --git a/packages/coding-agent/scripts/build-binary.ts b/packages/coding-agent/scripts/build-binary.ts
+index 57c54cb6f1..a04ecd60ed 100644
+--- a/packages/coding-agent/scripts/build-binary.ts
++++ b/packages/coding-agent/scripts/build-binary.ts
+@@ -57,7 +57,7 @@ async function main(): Promise<void> {
+ 		process.platform === "darwin" &&
+ 		(!crossBuild || crossBuild.platform === "darwin") &&
+ 		Bun.env.BUN_NO_CODESIGN_MACHO_BINARY !== "1";
+-	const outName = crossBuild ? `omp-${crossBuild.id}` : "omp";
++	const outName = crossBuild ? `juling-${crossBuild.id}` : "juling";
+ 	const outputPath = path.join(packageDir, "dist", outName);
+ 	// Generate inside the try so the finally always restores the empty checked-in
+ 	// placeholders (stats client archive, docs index) even on failure.
+diff --git a/packages/coding-agent/src/cli/agents-cli.ts b/packages/coding-agent/src/cli/agents-cli.ts
+index 3fb839429e..1ead4784d3 100644
+--- a/packages/coding-agent/src/cli/agents-cli.ts
++++ b/packages/coding-agent/src/cli/agents-cli.ts
+@@ -6,6 +6,7 @@
+ import * as fs from "node:fs/promises";
+ import * as path from "node:path";
+ import { getAgentDir, getProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
++import { CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import chalk from "@oh-my-pi/pi-utils/chalk";
+ import { YAML } from "bun";
+ import { theme } from "@oh-my-pi/pi-tui/theme";
+@@ -46,7 +47,7 @@ function resolveTargetDir(flags: AgentsCommandArgs["flags"]): string {
+ 	}
+ 
+ 	if (flags.project) {
+-		return path.resolve(getProjectDir(), ".omp", "agents");
++		return path.resolve(getProjectDir(), CONFIG_DIR_NAME, "agents");
+ 	}
+ 
+ 	return path.join(getAgentDir(), "agents");
+diff --git a/packages/coding-agent/src/cli/auth-broker-cli.ts b/packages/coding-agent/src/cli/auth-broker-cli.ts
+index 14e381bcaa..1ff8faf18a 100644
+--- a/packages/coding-agent/src/cli/auth-broker-cli.ts
++++ b/packages/coding-agent/src/cli/auth-broker-cli.ts
+@@ -197,7 +197,9 @@ async function runToken(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
+ 
+ async function runLogin(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
+ 	if (flags.via && !flags.provider) {
+-		throw new Error("Usage: omp auth-broker login <provider> --via=user@host (provider required for remote login)");
++		throw new Error(
++			`Usage: ${APP_NAME} auth-broker login <provider> --via=user@host (provider required for remote login)`,
++		);
+ 	}
+ 	applyUnpausedProviders(await resolveEffectiveSettings());
+ 	const providers = getOAuthProviders();
+@@ -410,7 +412,7 @@ async function loadImportPlan(
+ 		if (!provider) {
+ 			skipped.push({
+ 				file,
+-				reason: `cannot determine omp provider from type=${json.type ?? "?"} (pass --provider to override)`,
++				reason: `cannot determine ${APP_NAME} provider from type=${json.type ?? "?"} (pass --provider to override)`,
+ 			});
+ 			continue;
+ 		}
+@@ -456,7 +458,9 @@ function describeImportEntry(entry: ImportPlanEntry): string {
+ async function runImport(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
+ 	const target = flags.source;
+ 	if (!target) {
+-		throw new Error("Usage: omp auth-broker import <file|dir> [--provider=<id>] [--include-disabled] [--dry-run]");
++		throw new Error(
++			`Usage: ${APP_NAME} auth-broker import <file|dir> [--provider=<id>] [--include-disabled] [--dry-run]`,
++		);
+ 	}
+ 	const resolvedTarget = path.resolve(target.startsWith("~") ? target.replace(/^~/, os.homedir()) : target);
+ 	const { entries, skipped } = await loadImportPlan(resolvedTarget, flags.provider, flags.includeDisabled === true);
+@@ -587,7 +591,7 @@ async function runMigrate(flags: AuthBrokerCommandArgs["flags"]): Promise<void>
+ 	}
+ 	if (flags.fromLocal !== true) {
+ 		throw new Error(
+-			"`omp auth-broker migrate` requires an explicit source. Pass `--from-local` to migrate from the local SQLite store and env vars.",
++			`\`${APP_NAME} auth-broker migrate\` requires an explicit source. Pass \`--from-local\` to migrate from the local SQLite store and env vars.`,
+ 		);
+ 	}
+ 
+diff --git a/packages/coding-agent/src/cli/auth-gateway-cli.ts b/packages/coding-agent/src/cli/auth-gateway-cli.ts
+index 78374cde2e..30e08fc903 100644
+--- a/packages/coding-agent/src/cli/auth-gateway-cli.ts
++++ b/packages/coding-agent/src/cli/auth-gateway-cli.ts
+@@ -44,6 +44,7 @@ import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
+ import { type GeneratedProvider, getBundledModels, getEffectiveTokenCost } from "@oh-my-pi/pi-catalog/models";
+ import { modelKind } from "@oh-my-pi/pi-catalog/types";
+ import { getConfigRootDir, logger, VERSION } from "@oh-my-pi/pi-utils";
++import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import chalk from "@oh-my-pi/pi-utils/chalk";
+ import { ModelRegistry } from "../config/model-registry";
+ import { cfgDisabledProviders, cfgModelProviderOrder } from "../config/model-settings";
+@@ -354,7 +355,7 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
+ 	const brokerConfig = await resolveAuthBrokerConfig();
+ 	if (!brokerConfig) {
+ 		throw new Error(
+-			"`omp auth-gateway serve` requires OMP_AUTH_BROKER_URL (or `auth.broker.url`/`auth.broker.token` in config.yml). The gateway is itself a broker client.",
++			`\`${APP_NAME} auth-gateway serve\` requires OMP_AUTH_BROKER_URL (or \`auth.broker.url\`/\`auth.broker.token\` in config.yml). The gateway is itself a broker client.`,
+ 		);
+ 	}
+ 	if (flags.clients !== undefined && flags.noAuth) {
+@@ -608,7 +609,7 @@ async function runStatus(flags: AuthGatewayCommandArgs["flags"]): Promise<void>
+ 			);
+ 			if (!tokenPresent) {
+ 				process.stdout.write(
+-					"Run `omp auth-gateway token` or `omp auth-gateway serve` to create a bearer token.\n",
++					`Run \`${APP_NAME} auth-gateway token\` or \`${APP_NAME} auth-gateway serve\` to create a bearer token.\n`,
+ 				);
+ 			}
+ 		}
+@@ -852,7 +853,7 @@ async function runCheck(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
+ 	const brokerConfig = await resolveAuthBrokerConfig();
+ 	if (!brokerConfig) {
+ 		throw new Error(
+-			"`omp auth-gateway check` requires OMP_AUTH_BROKER_URL (or `auth.broker.url`/`auth.broker.token` in config.yml). It probes the same credentials the gateway would serve.",
++			`\`${APP_NAME} auth-gateway check\` requires OMP_AUTH_BROKER_URL (or \`auth.broker.url\`/\`auth.broker.token\` in config.yml). It probes the same credentials the gateway would serve.`,
+ 		);
+ 	}
+ 
+diff --git a/packages/coding-agent/src/cli/browser-relay-cli.ts b/packages/coding-agent/src/cli/browser-relay-cli.ts
+index a570a36840..4bada39c34 100644
+--- a/packages/coding-agent/src/cli/browser-relay-cli.ts
++++ b/packages/coding-agent/src/cli/browser-relay-cli.ts
+@@ -4,7 +4,7 @@
+  * intentional user-facing output.
+  */
+ import * as path from "node:path";
+-import { VERSION } from "@oh-my-pi/pi-utils/dirs";
++import { APP_NAME, VERSION } from "@oh-my-pi/pi-utils/dirs";
+ import { probeRelayServer } from "../tools/browser/relay/daemon";
+ import { defaultRelayExtensionDir, writeRelayExtension } from "../tools/browser/relay/extension-files";
+ import { DEFAULT_RELAY_URL } from "../tools/browser/relay/kind";
+@@ -43,12 +43,13 @@ async function runInstall(dirOverride: string | undefined): Promise<void> {
+ 	console.log("Finish setup in Chrome:");
+ 	console.log("  1. Open chrome://extensions and enable Developer mode.");
+ 	console.log(`  2. Click "Load unpacked" and select: ${dir}`);
+-	console.log("  3. Enable the mode:  omp config set browser.relay true");
++	console.log(`  3. Enable the mode:  ${APP_NAME} config set browser.relay true`);
+ 	console.log("");
+-	console.log("omp starts the relay automatically when the browser prelude needs it;");
+-	console.log("run `omp browser-relay` yourself only for --token or --no-group.");
++	console.log(`${APP_NAME} starts the relay automatically when the browser prelude needs it;`);
++	console.log(`run \`${APP_NAME} browser-relay\` yourself only for --token or --no-group.`);
+ 	console.log("The extension badge shows 'on' once it reaches a relay.");
+-	if (!dirOverride) console.log("Newer omp versions update the extension in this folder and reload it on their own.");
++	if (!dirOverride)
++		console.log(`Newer ${APP_NAME} versions update the extension in this folder and reload it on their own.`);
+ 	console.log(
+ 		"Old connection-refused entries in chrome://extensions > Errors may persist after reconnect; use Clear all.",
+ 	);
+@@ -68,22 +69,22 @@ async function runServe(args: BrowserRelayCommandArgs): Promise<void> {
+ 		// broker (or by hand): losing the bind to a live relay is success.
+ 		if (err instanceof Error && "code" in err && err.code === "EADDRINUSE") {
+ 			if (await probeRelayServer(`http://127.0.0.1:${args.port}`)) {
+-				console.log(`omp browser relay already running on http://127.0.0.1:${args.port}; nothing to do.`);
++				console.log(`${APP_NAME} browser relay already running on http://127.0.0.1:${args.port}; nothing to do.`);
+ 				return;
+ 			}
+-			console.error(`Port ${args.port} is in use by something that is not an omp browser relay.`);
++			console.error(`Port ${args.port} is in use by something that is not an ${APP_NAME} browser relay.`);
+ 			process.exit(1);
+ 		}
+ 		throw err;
+ 	}
+ 
+-	console.log(`omp browser relay listening on http://127.0.0.1:${args.port}`);
++	console.log(`${APP_NAME} browser relay listening on http://127.0.0.1:${args.port}`);
+ 	console.log(`  extension endpoint  ws://127.0.0.1:${args.port}/ext${args.token ? "?token=***" : ""}`);
+ 	if (args.port === DEFAULT_RELAY_PORT) {
+-		console.log("  enable with         omp config set browser.relay true");
++		console.log(`  enable with         ${APP_NAME} config set browser.relay true`);
+ 	} else {
+ 		console.log(
+-			`  enable with         omp config set browser.relay true && omp config set browser.relayUrl http://127.0.0.1:${args.port}`,
++			`  enable with         ${APP_NAME} config set browser.relay true && ${APP_NAME} config set browser.relayUrl http://127.0.0.1:${args.port}`,
+ 		);
+ 	}
+ 	console.log("Waiting for the OMP Browser Relay extension to connect (omp browser-relay install)...");
+@@ -92,7 +93,7 @@ async function runServe(args: BrowserRelayCommandArgs): Promise<void> {
+ 	const readiness = setInterval(() => {
+ 		if (relay.bridge.ready && !announced) {
+ 			announced = true;
+-			console.log("Extension connected. The omp browser prelude can now drive your tabs.");
++			console.log(`Extension connected. The ${APP_NAME} browser prelude can now drive your tabs.`);
+ 		} else if (!relay.bridge.ready && announced) {
+ 			announced = false;
+ 			console.log("Extension disconnected; waiting for it to reconnect...");
+diff --git a/packages/coding-agent/src/cli/claude-trace-cli.ts b/packages/coding-agent/src/cli/claude-trace-cli.ts
+index 5afad12067..5785f7b7f6 100644
+--- a/packages/coding-agent/src/cli/claude-trace-cli.ts
++++ b/packages/coding-agent/src/cli/claude-trace-cli.ts
+@@ -10,6 +10,7 @@ import * as path from "node:path";
+ import * as tls from "node:tls";
+ import * as zlib from "node:zlib";
+ import { PtySession } from "@oh-my-pi/pi-natives";
++import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import xterm from "@oh-my-pi/pi-utils/vterm";
+ 
+ const DEFAULT_PROXY_HOST = "127.0.0.1";
+@@ -763,7 +764,7 @@ export async function runClaudeMessagesCapture(args: ClaudeTraceCommandArgs = {}
+ 			try {
+ 				session.write(`${message}\r`);
+ 			} catch (error) {
+-				ptyOutput += `\n[omp input write failed: ${errorMessage(error)}]\n`;
++				ptyOutput += `\n[${APP_NAME} input write failed: ${errorMessage(error)}]\n`;
+ 			}
+ 		})();
+ 		const captureRace = proxy.waitForCapture(timeoutMs).then(
+diff --git a/packages/coding-agent/src/cli/collab-cli.ts b/packages/coding-agent/src/cli/collab-cli.ts
+index 0479aea483..5e78027318 100644
+--- a/packages/coding-agent/src/cli/collab-cli.ts
++++ b/packages/coding-agent/src/cli/collab-cli.ts
+@@ -4,6 +4,7 @@
+  * only when a caller requests a link.
+  */
+ import { formatAge } from "@oh-my-pi/pi-utils";
++import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import chalk from "@oh-my-pi/pi-utils/chalk";
+ import {
+ 	COLLAB_REGISTRY_VERSION,
+@@ -83,7 +84,7 @@ export async function runCollabListCommand(
+ 		print(`${host.instanceId}  ${session}  ${chalk.dim(cwd)}`);
+ 		print(`  ${chalk.dim(details.join(" · "))}`);
+ 	}
+-	print(chalk.dim("Get a link: omp collab link <instanceId|pid> [--view]"));
++	print(chalk.dim(`Get a link: ${APP_NAME} collab link <instanceId|pid> [--view]`));
+ }
+ 
+ export async function runCollabLinkCommand(
+diff --git a/packages/coding-agent/src/cli/command-help.ts b/packages/coding-agent/src/cli/command-help.ts
+index 4e0d2fd7dc..74d74be5c8 100644
+--- a/packages/coding-agent/src/cli/command-help.ts
++++ b/packages/coding-agent/src/cli/command-help.ts
+@@ -1,7 +1,8 @@
++import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import type { CommandMetadata } from "@oh-my-pi/pi-utils/cli";
+ 
+ export const acpHelp = {
+-	description: "Run omp as an ACP (Agent Client Protocol) server over stdio",
++	description: `Run ${APP_NAME} as an ACP (Agent Client Protocol) server over stdio`,
+ } satisfies CommandMetadata;
+ 
+ export const agentsHelp = { description: "Manage bundled task agents" } satisfies CommandMetadata;
+@@ -16,7 +17,7 @@ export const authHelp = {
+ } satisfies CommandMetadata;
+ 
+ export const authBrokerHelp = {
+-	description: "Manage the omp auth-broker (credential vault)",
++	description: `Manage the ${APP_NAME} auth-broker (credential vault)`,
+ } satisfies CommandMetadata;
+ 
+ export const authGatewayHelp = {
+@@ -131,8 +132,7 @@ export const sayHelp = {
+ export const searchHelp = { description: "Test web search providers" } satisfies CommandMetadata;
+ 
+ export const sessionHelp = {
+-	description:
+-		"Hand a session to another machine (pack, unpack, moved) or check which sessions a running omp owns (lease)",
++	description: `Hand a session to another machine (pack, unpack, moved) or check which sessions a running ${APP_NAME} owns (lease)`,
+ } satisfies CommandMetadata;
+ 
+ export const shareHelp = {
+@@ -174,7 +174,7 @@ export const sshHelp = { description: "Manage SSH host configurations" } satisfi
+ export const statsHelp = { description: "View usage statistics" } satisfies CommandMetadata;
+ 
+ export const streamHelp = {
+-	description: "Broadcast local omp session screens and chat to your public live channel",
++	description: `Broadcast local ${APP_NAME} session screens and chat to your public live channel`,
+ } satisfies CommandMetadata;
+ 
+ export const tinyModelsHelp = {
+diff --git a/packages/coding-agent/src/cli/commands/init-xdg.ts b/packages/coding-agent/src/cli/commands/init-xdg.ts
+index ca5346ff16..88eab71acd 100644
+--- a/packages/coding-agent/src/cli/commands/init-xdg.ts
++++ b/packages/coding-agent/src/cli/commands/init-xdg.ts
+@@ -1,8 +1,7 @@
+ import * as fs from "node:fs/promises";
+ import * as os from "node:os";
+ import * as path from "node:path";
+-
+-const APP_NAME = "omp";
++import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+ 
+ export async function initXdg(): Promise<void> {
+ 	if (process.platform !== "linux" && process.platform !== "darwin") {
+diff --git a/packages/coding-agent/src/cli/help-extra.ts b/packages/coding-agent/src/cli/help-extra.ts
+index 16eef2b37b..107b80acd5 100644
+--- a/packages/coding-agent/src/cli/help-extra.ts
++++ b/packages/coding-agent/src/cli/help-extra.ts
+@@ -1,4 +1,5 @@
+ import "@oh-my-pi/pi-utils/env";
++import { APP_NAME } from "@oh-my-pi/pi-utils";
+ import chalk from "@oh-my-pi/pi-utils/chalk";
+ import { CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import { BUILTIN_TOOL_HELP, type BuiltinToolHelp } from "../tools/builtin-names";
+@@ -82,7 +83,7 @@ export function getExtraHelpText(): string {
+ 
+   ${chalk.dim("# Configuration")}
+   OMP_PROFILE                 - Named profile for isolated agent state (same as --profile)
+-  Use \`omp --profile <name> --alias <command>\` to create a shell shortcut for a profile
++  Use \`${APP_NAME} --profile <name> --alias <command>\` to create a shell shortcut for a profile
+   PI_CODING_AGENT_DIR        - Session storage directory (default: ~/${CONFIG_DIR_NAME}/agent)
+   PI_PACKAGE_DIR             - Override package directory (for Nix/Guix store paths)
+   PI_SMOL_MODEL              - Override smol/fast model (see --smol)
+@@ -105,6 +106,6 @@ ${chalk.bold("Plugin Options:")}
+   --plugin-dir <path>        Load plugin from directory (repeatable)
+ 
+ ${chalk.bold("Useful Commands:")}
+-  omp agents unpack           - Export bundled subagents to ~/.omp/agent/agents (default)
+-  omp agents unpack --project - Export bundled subagents to ./.omp/agents`;
++  ${APP_NAME} agents unpack           - Export bundled subagents to ~/${CONFIG_DIR_NAME}/agent/agents (default)
++  ${APP_NAME} agents unpack --project - Export bundled subagents to ./${CONFIG_DIR_NAME}/agents`;
+ }
+diff --git a/packages/coding-agent/src/commands/models.ts b/packages/coding-agent/src/commands/models.ts
+index 23fcf1ba98..59cc6f12be 100644
+--- a/packages/coding-agent/src/commands/models.ts
++++ b/packages/coding-agent/src/commands/models.ts
+@@ -4,6 +4,7 @@
+ 
+ import { MODEL_KINDS, type ModelKind } from "@oh-my-pi/pi-catalog/types";
+ import { APP_NAME } from "@oh-my-pi/pi-utils";
++import { CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+ import { modelsHelp as commandHelp } from "../cli/command-help";
+ import { resolveModelsArgs, runModelsCommand } from "../cli/models-cli";
+@@ -49,7 +50,7 @@ export default class Models extends Command {
+ 		`# List models of every catalog kind\n  ${APP_NAME} models --kind all`,
+ 		`# List one provider's models (any provider name works)\n  ${APP_NAME} models openai-codex`,
+ 		`# Find models by substring\n  ${APP_NAME} models find minimax`,
+-		`# Force a fresh catalog fetch (replaces rm -rf ~/.omp/models.db)\n  ${APP_NAME} models refresh`,
++		`# Force a fresh catalog fetch (replaces rm -rf ~/${CONFIG_DIR_NAME}/models.db)\n  ${APP_NAME} models refresh`,
+ 		`# Machine-readable output\n  ${APP_NAME} models --json`,
+ 	];
+ 
+diff --git a/packages/coding-agent/src/config.ts b/packages/coding-agent/src/config.ts
+index 39ec6c3a2f..b38ef89707 100644
+--- a/packages/coding-agent/src/config.ts
++++ b/packages/coding-agent/src/config.ts
+@@ -1,7 +1,7 @@
+ import * as fs from "node:fs";
+ import * as os from "node:os";
+ import * as path from "node:path";
+-import { CONFIG_DIR_NAME, getAgentDir, getProjectDir } from "@oh-my-pi/pi-utils";
++import { CONFIG_DIR_NAME, getAgentDir, getProjectDir, LEGACY_CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils";
+ import { isUserSourceEnabled } from "./capability";
+ import { resolveClaudePaths } from "./config/claude-paths";
+ import { expandTilde } from "./tools/path-utils";
+@@ -10,12 +10,14 @@ export * from "./config/config-file";
+ 
+ /**
+  * Config sources, highest priority first. `userBase` overrides the default
+- * `~/<dir>` user-level location: omp's own user dir follows `getAgentDir()`
+- * (profile, `PI_CONFIG_DIR`, and `PI_CODING_AGENT_DIR` aware), Claude's follows
+- * its active config directory.
++ * `~/<dir>` user-level location: juling's own user dir follows `getAgentDir()`
++ * (profile, `JULING_CONFIG_DIR`, and `JULING_CODING_AGENT_DIR` aware), while its
++ * pre-rebrand `.omp` dir is a read-only compatibility source ranked directly
++ * below the canonical one. Claude's follows its active config directory.
+  */
+ const priorityList: Array<{ dir: string; userBase?: () => string }> = [
+ 	{ dir: CONFIG_DIR_NAME, userBase: getAgentDir },
++	{ dir: LEGACY_CONFIG_DIR_NAME, userBase: () => path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, "agent") },
+ 	{ dir: ".claude", userBase: () => resolveClaudePaths().configDir },
+ 	{ dir: ".codex" },
+ 	{ dir: ".gemini" },
+@@ -84,8 +86,9 @@ export function getChangelogPath(): string | undefined {
+ // =============================================================================
+ 
+ /**
+- * User-level: the omp agent dir (~/.omp/agent), Claude's active config directory, ~/.codex, ~/.gemini
+- * Project-level: .omp, .claude, .codex, .gemini
++ * User-level: the juling agent dir (~/.juling/agent), the read-only legacy
++ * ~/.omp/agent dir, Claude's active config directory, ~/.codex, ~/.gemini
++ * Project-level: .juling, .omp, .claude, .codex, .gemini
+  */
+ const USER_CONFIG_BASES = priorityList.map(({ dir, userBase }) => ({
+ 	base: userBase ?? (() => path.join(os.homedir(), dir)),
+@@ -99,14 +102,14 @@ const PROJECT_CONFIG_BASES = priorityList.map(({ dir }) => ({
+ 
+ export interface ConfigDirEntry {
+ 	path: string;
+-	source: string; // e.g., ".omp", ".claude"
++	source: string; // e.g., ".juling", ".omp", ".claude"
+ 	level: "user" | "project";
+ }
+ 
+ export interface GetConfigDirsOptions {
+-	/** Include user-level directories (~/.omp/agent/...). Default: true */
++	/** Include user-level directories (~/.juling/agent/...). Default: true */
+ 	user?: boolean;
+-	/** Include project-level directories (.omp/...). Default: true */
++	/** Include project-level directories (.juling/...). Default: true */
+ 	project?: boolean;
+ 	/** Current working directory for project paths. Default: getProjectDir() */
+ 	cwd?: string;
+@@ -124,7 +127,7 @@ export interface GetConfigDirsOptions {
+  * @example
+  * // Get all command directories
+  * getConfigDirs("commands")
+- * // → [{ path: "~/.omp/agent/commands", source: ".omp", level: "user" }, ...]
++ * // → [{ path: "~/.juling/agent/commands", source: ".juling", level: "user" }, ...]
+  *
+  * @example
+  * // Get only existing project skill directories
+@@ -136,11 +139,22 @@ export function getConfigDirs(subpath: string, options: GetConfigDirsOptions = {
+ 
+ 	// User-level directories (highest priority)
+ 	if (user) {
++		const seen = new Set<string>();
+ 		for (const { base, name } of USER_CONFIG_BASES) {
+-			if (name !== CONFIG_DIR_NAME && !isUserSourceEnabled(name.replace(/^\./, ""))) {
++			// The canonical source needs no opt-in, and neither does the legacy
++			// `.omp` root: it is our own pre-rebrand data, readable whenever present.
++			if (
++				name !== CONFIG_DIR_NAME &&
++				name !== LEGACY_CONFIG_DIR_NAME &&
++				!isUserSourceEnabled(name.replace(/^\./, ""))
++			) {
+ 				continue;
+ 			}
+ 			const resolvedPath = path.resolve(base(), subpath);
++			// A `JULING_CONFIG_DIR`/`PI_CONFIG_DIR` override can point the canonical
++			// source at `.omp`, collapsing both entries onto one directory.
++			if (seen.has(resolvedPath)) continue;
++			seen.add(resolvedPath);
+ 			if (!existingOnly || fs.existsSync(resolvedPath)) {
+ 				results.push({ path: resolvedPath, source: name, level: "user" });
+ 			}
+@@ -217,7 +231,7 @@ export function findConfigFileWithMeta(
+ 
+ /**
+  * Find all nearest config directories by walking up from cwd.
+- * Returns one entry per config base (.omp, .claude) - the nearest one found.
++ * Returns one entry per config base (.juling, .omp, .claude, .codex, .gemini) - the nearest one found.
+  * Results are in priority order (highest first).
+  */
+ export function findAllNearestProjectConfigDirs(subpath: string, cwd: string = getProjectDir()): ConfigDirEntry[] {
+diff --git a/packages/coding-agent/src/discovery/builtin.ts b/packages/coding-agent/src/discovery/builtin.ts
+index d4b72e47f6..380e24820e 100644
+--- a/packages/coding-agent/src/discovery/builtin.ts
++++ b/packages/coding-agent/src/discovery/builtin.ts
+@@ -40,11 +40,13 @@ import {
+ } from "./helpers";
+ 
+ const PROVIDER_ID = "native";
+-const DISPLAY_NAME = "OMP";
+-const DESCRIPTION = "Native OMP configuration from ~/.omp and .omp/";
++const DISPLAY_NAME = "Juling";
++const DESCRIPTION = "Native Juling configuration from ~/.juling and .juling/";
+ const PRIORITY = 100;
+ 
+ const PATHS = SOURCE_PATHS.native;
++const LEGACY_PATHS = SOURCE_PATHS.nativeLegacy;
++const PROJECT_DIR_NAMES = [PATHS.projectDir, LEGACY_PATHS.projectDir] as const;
+ 
+ async function ifNonEmptyDir(...seg: string[]): Promise<string | null> {
+ 	let dir = path.join(...seg);
+@@ -58,14 +60,23 @@ async function ifNonEmptyDir(...seg: string[]): Promise<string | null> {
+ 	return null;
+ }
+ 
++/** First non-empty directory among the canonical project dir and its read-only legacy alias. */
++async function firstNonEmptyDir(base: string, names: readonly string[]): Promise<string | null> {
++	for (const name of names) {
++		const dir = await ifNonEmptyDir(base, name);
++		if (dir) return dir;
++	}
++	return null;
++}
++
+ async function getConfigDirs(ctx: LoadContext): Promise<Array<{ dir: string; level: "user" | "project" }>> {
+ 	const result: Array<{ dir: string; level: "user" | "project" }> = [];
+ 
+-	const projectDir =
++	const nearestProjectDir =
+ 		normalizePathForComparison(ctx.cwd) === normalizePathForComparison(ctx.home)
+ 			? null
+-			: await ifNonEmptyDir(ctx.cwd, PATHS.projectDir);
+-	if (projectDir) result.push({ dir: projectDir, level: "project" });
++			: await firstNonEmptyDir(ctx.cwd, PROJECT_DIR_NAMES);
++	if (nearestProjectDir) result.push({ dir: nearestProjectDir, level: "project" });
+ 	// Native user config is profile-scoped: getAgentDir() points at the active
+ 	// profile's agent dir (~/.omp/profiles/<name>/agent), like sessions and MCP.
+ 	// A load that carries its own agentDir (an SDK session created with one) reads that dir.
+@@ -102,7 +113,13 @@ export async function* getProjectAncestorDirs(ctx: LoadContext): AsyncGenerator<
+ 	const home = normalizePathForComparison(ctx.home);
+ 	for (const ancestor of getAncestorDirs(ctx.cwd, ctx.repoRoot ?? ctx.home)) {
+ 		if (normalizePathForComparison(ancestor.dir) === home || isUserConfigRoot(ancestor.dir)) continue;
+-		if (!ctx.repoRoot && (await isForeignUserConfigRoot(ancestor.dir, PATHS.projectDir))) continue;
++		if (
++			!ctx.repoRoot &&
++			((await isForeignUserConfigRoot(ancestor.dir, PATHS.projectDir)) ||
++				(await isForeignUserConfigRoot(ancestor.dir, LEGACY_PATHS.projectDir)))
++		) {
++			continue;
++		}
+ 		yield ancestor;
+ 	}
+ }
+@@ -115,7 +132,7 @@ export async function* getProjectAncestorDirs(ctx: LoadContext): AsyncGenerator<
+  */
+ async function findNearestProjectConfigDir(ctx: LoadContext): Promise<{ dir: string; depth: number } | null> {
+ 	for await (const ancestor of getProjectAncestorDirs(ctx)) {
+-		const configDir = await ifNonEmptyDir(ancestor.dir, PATHS.projectDir);
++		const configDir = await firstNonEmptyDir(ancestor.dir, PROJECT_DIR_NAMES);
+ 		if (configDir) return { dir: configDir, depth: ancestor.depth };
+ 	}
+ 	return null;
+@@ -237,6 +254,8 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>>
+ 	const paths = [
+ 		{ path: path.join(ctx.cwd, PATHS.projectDir, "mcp.json"), level: "project" as const },
+ 		{ path: path.join(ctx.cwd, PATHS.projectDir, ".mcp.json"), level: "project" as const },
++		{ path: path.join(ctx.cwd, LEGACY_PATHS.projectDir, "mcp.json"), level: "project" as const },
++		{ path: path.join(ctx.cwd, LEGACY_PATHS.projectDir, ".mcp.json"), level: "project" as const },
+ 		{ path: path.join(userAgentDir, "mcp.json"), level: "user" as const },
+ 		{ path: path.join(userAgentDir, ".mcp.json"), level: "user" as const },
+ 	];
+@@ -311,14 +330,16 @@ async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
+ 	// the user config root, never a project (see findNearestProjectConfigDir).
+ 	const projectScans: Promise<LoadResult<Skill>>[] = [];
+ 	for await (const { dir } of getProjectAncestorDirs(ctx)) {
+-		projectScans.push(
+-			scanSkillsFromDir(ctx, {
+-				dir: path.join(dir, PATHS.projectDir, "skills"),
+-				providerId: PROVIDER_ID,
+-				level: "project",
+-				requireDescription: true,
+-			}),
+-		);
++		for (const name of PROJECT_DIR_NAMES) {
++			projectScans.push(
++				scanSkillsFromDir(ctx, {
++					dir: path.join(dir, name, "skills"),
++					providerId: PROVIDER_ID,
++					level: "project",
++					requireDescription: true,
++				}),
++			);
++		}
+ 	}
+ 
+ 	// User-level scan from ~/.omp/agent/skills/
+diff --git a/packages/coding-agent/src/discovery/helpers.ts b/packages/coding-agent/src/discovery/helpers.ts
+index 2b9f062d7b..7f690388d5 100644
+--- a/packages/coding-agent/src/discovery/helpers.ts
++++ b/packages/coding-agent/src/discovery/helpers.ts
+@@ -9,6 +9,7 @@ import {
+ 	getPluginsDir,
+ 	getProjectDir,
+ 	isEnoent,
++	LEGACY_CONFIG_DIR_NAME,
+ 	logger,
+ 	normalizePathForComparison,
+ 	parseFrontmatter,
+@@ -50,6 +51,16 @@ export const SOURCE_PATHS = {
+ 		},
+ 		projectDir: CONFIG_DIR_NAME,
+ 	},
++	/**
++	 * Pre-rebrand native roots (`~/.omp/agent`, `.omp/`), same shape as
++	 * {@link SOURCE_PATHS.native}. Exposed read-only so discovery can still read
++	 * config written before the `.juling` rename; nothing writes to it.
++	 */
++	nativeLegacy: {
++		userBase: LEGACY_CONFIG_DIR_NAME,
++		userAgent: `${LEGACY_CONFIG_DIR_NAME}/agent`,
++		projectDir: LEGACY_CONFIG_DIR_NAME,
++	},
+ 	claude: {
+ 		userBase: ".claude",
+ 		userAgent: ".claude",
+@@ -1053,11 +1064,14 @@ export function getProjectDiscoveryCeilings(): ReadonlySet<string> {
+ 
+ /** The current user's config roots are never project anchors. */
+ export function isUserConfigRoot(root: string): boolean {
+-	const configDir = normalizePathForComparison(path.join(root, getConfigDirName()));
+-	return (
+-		configDir === normalizePathForComparison(path.join(os.homedir(), getConfigDirName())) ||
+-		configDir === normalizePathForComparison(path.dirname(getPluginsDir()))
+-	);
++	const pluginsRoot = normalizePathForComparison(path.dirname(getPluginsDir()));
++	for (const name of [getConfigDirName(), LEGACY_CONFIG_DIR_NAME]) {
++		const configDir = normalizePathForComparison(path.join(root, name));
++		if (configDir === normalizePathForComparison(path.join(os.homedir(), name)) || configDir === pluginsRoot) {
++			return true;
++		}
++	}
++	return false;
+ }
+ 
+ /**
+diff --git a/packages/coding-agent/src/modes/acp/acp-agent.ts b/packages/coding-agent/src/modes/acp/acp-agent.ts
+index 000a1f49cb..d5aeb27db3 100644
+--- a/packages/coding-agent/src/modes/acp/acp-agent.ts
++++ b/packages/coding-agent/src/modes/acp/acp-agent.ts
+@@ -3,6 +3,7 @@ import * as path from "node:path";
+ import { AgentBusyError, type AgentToolResult } from "@oh-my-pi/pi-agent-core";
+ import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
+ import { getAgentDir, getBlobsDir, isEnoent, logger, type postmortem, VERSION } from "@oh-my-pi/pi-utils";
++import { APP_NAME, CONFIG_DIR_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import {
+ 	type Agent,
+ 	type AgentSideConnection,
+@@ -1057,23 +1058,23 @@ export class AcpAgent implements Agent {
+ 			{
+ 				id: "agent",
+ 				name: "Use existing local credentials",
+-				description: "Authenticate via the provider keys/OAuth state already configured under ~/.omp.",
++				description: `Authenticate via the provider keys/OAuth state already configured under ~/${CONFIG_DIR_NAME}.`,
+ 			},
+ 		];
+ 		if (params.clientCapabilities?.auth?.terminal === true) {
+ 			authMethods.push({
+ 				type: "terminal",
+ 				id: "terminal",
+-				name: "Set up omp in terminal",
+-				description: "Launch the omp TUI to add provider keys and select models.",
++				name: `Set up ${APP_NAME} in terminal`,
++				description: `Launch the ${APP_NAME} TUI to add provider keys and select models.`,
+ 				args: [ACP_TERMINAL_AUTH_FLAG],
+ 			});
+ 		}
+ 		return {
+ 			protocolVersion: PROTOCOL_VERSION,
+ 			agentInfo: {
+-				name: "omp",
+-				title: "omp",
++				name: APP_NAME,
++				title: APP_NAME,
+ 				version: VERSION,
+ 			},
+ 			authMethods,
+diff --git a/packages/coding-agent/src/modes/acp/acp-mode.ts b/packages/coding-agent/src/modes/acp/acp-mode.ts
+index 5bd70ee738..3cc5ef1c15 100644
+--- a/packages/coding-agent/src/modes/acp/acp-mode.ts
++++ b/packages/coding-agent/src/modes/acp/acp-mode.ts
+@@ -1,6 +1,7 @@
+ import * as stream from "node:stream";
+ import { inspect } from "node:util";
+ import { getLogsDir, postmortem } from "@oh-my-pi/pi-utils";
++import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import { AgentSideConnection, ndJsonStream, type Stream } from "@oh-my-pi/pi-utils/acp";
+ import type { ExtensionUIContext } from "../../extensibility/extensions/types";
+ import type { AgentSession } from "../../session/agent-session";
+@@ -78,7 +79,7 @@ export async function runAcpMode(createSession: AcpSessionFactory, initialSessio
+ 	// before the transport starts.
+ 	if (process.stdin.isTTY) {
+ 		process.stderr.write(
+-			"omp acp: ACP server speaking JSON-RPC over stdio.\n" +
++			`${APP_NAME} acp: ACP server speaking JSON-RPC over stdio.\n` +
+ 				'This command is meant to be spawned by an ACP client (e.g. Zed\'s "agent_servers" config), not run directly.\n' +
+ 				`Waiting for protocol frames on stdin; logs: ${getLogsDir()}\n`,
+ 		);
+diff --git a/packages/coding-agent/test/plan-autosave.test.ts b/packages/coding-agent/test/plan-autosave.test.ts
+index 74fe271722..3d38dddf43 100644
+--- a/packages/coding-agent/test/plan-autosave.test.ts
++++ b/packages/coding-agent/test/plan-autosave.test.ts
+@@ -67,7 +67,7 @@ describe("resolvePlanAutosaveDir", () => {
+ 			path.join(cwd, "docs", "plans"),
+ 		);
+ 		expect(resolvePlanAutosaveDir(Settings.isolated({ "plan.autosaveDir": "   " }), cwd)).toBe(
+-			path.join(cwd, ".omp", "plans"),
++			path.join(cwd, ".juling", "plans"),
+ 		);
+ 	});
+ });
+@@ -83,7 +83,7 @@ describe("autosaveApprovedPlan", () => {
+ 			planContent: "# Plan\n",
+ 		});
+ 		expect(result).toBeNull();
+-		expect(await Bun.file(path.join(cwd, ".omp", "plans", "AUTH_PLAN.md")).exists()).toBe(false);
++		expect(await Bun.file(path.join(cwd, ".juling", "plans", "AUTH_PLAN.md")).exists()).toBe(false);
+ 	});
+ 
+ 	it("saves the approved plan under the default dir", async () => {
+@@ -95,7 +95,7 @@ describe("autosaveApprovedPlan", () => {
+ 			title: "Auth storage",
+ 			planContent: "# Plan\n\nShip it.\n",
+ 		});
+-		expect(result).toBe(path.join(cwd, ".omp", "plans", "AUTH_STORAGE_PLAN.md"));
++		expect(result).toBe(path.join(cwd, ".juling", "plans", "AUTH_STORAGE_PLAN.md"));
+ 		expect(await Bun.file(result!).text()).toBe("# Plan\n\nShip it.\n");
+ 	});
+ 
+@@ -104,8 +104,8 @@ describe("autosaveApprovedPlan", () => {
+ 		const settings = Settings.isolated({ "plan.autosave": true });
+ 		const first = await autosaveApprovedPlan({ settings, cwd, title: "Auth", planContent: "# v1\n" });
+ 		const second = await autosaveApprovedPlan({ settings, cwd, title: "Auth", planContent: "# v2\n" });
+-		expect(first).toBe(path.join(cwd, ".omp", "plans", "AUTH_PLAN.md"));
+-		expect(second).toBe(path.join(cwd, ".omp", "plans", "AUTH_PLAN-1.md"));
++		expect(first).toBe(path.join(cwd, ".juling", "plans", "AUTH_PLAN.md"));
++		expect(second).toBe(path.join(cwd, ".juling", "plans", "AUTH_PLAN-1.md"));
+ 		expect(await Bun.file(first!).text()).toBe("# v1\n");
+ 		expect(await Bun.file(second!).text()).toBe("# v2\n");
+ 	});
+@@ -205,7 +205,7 @@ describe("plan-yolo approval autosave", () => {
+ 		expect(result.details).toMatchObject({ planFilePath: "local://auth-plan.md", title: "auth", planExists: true });
+ 		expect(result.content[0]?.text).toBe(`Plan approved. Implementing now with ${target.id}.`);
+ 		expect(result.content[0]?.text).not.toContain(cwd);
+-		expect(await Bun.file(path.join(cwd, ".omp", "plans", "AUTH_PLAN.md")).text()).toBe("# Plan\n\nYolo.\n");
++		expect(await Bun.file(path.join(cwd, ".juling", "plans", "AUTH_PLAN.md")).text()).toBe("# Plan\n\nYolo.\n");
+ 		expect(t.notices).toContainEqual({
+ 			level: "info",
+ 			message: expect.stringContaining("Plan autosaved to"),
+diff --git a/packages/tui/src/apps/debug/protocol-probe.ts b/packages/tui/src/apps/debug/protocol-probe.ts
+index 7d8c4213df..04a2ef6365 100644
+--- a/packages/tui/src/apps/debug/protocol-probe.ts
++++ b/packages/tui/src/apps/debug/protocol-probe.ts
+@@ -14,6 +14,7 @@
+  * protocols, each of which decodes a standard PNG.
+  */
+ import { hsvToRgb } from "@oh-my-pi/pi-utils/color";
++import { APP_NAME, APP_URL } from "@oh-my-pi/pi-utils/dirs";
+ import * as zlib from "node:zlib";
+ import { type Component, Container } from "../../tui";
+ import { encodeTextSized, type TextSizingScale } from "../../utils";
+@@ -208,7 +209,7 @@ export class ProtocolProbeComponent extends Container {
+ 			new Text(
+ 				[
+ 					`${theme.fg("muted", "Hyperlinks (OSC 8)")} — ${yesNo(hyperlinksOn)}`,
+-					`  \x1b]8;;https://github.com/can1357/oh-my-pi\x07omp repo\x1b]8;;\x07`,
++					`  \x1b]8;;${APP_URL}\x07${APP_NAME} repo\x1b]8;;\x07`,
+ 				].join("\n"),
+ 				1,
+ 				0,
+diff --git a/packages/tui/src/apps/ps-top.ts b/packages/tui/src/apps/ps-top.ts
+index 5ddf8a9c77..57b6ef502d 100644
+--- a/packages/tui/src/apps/ps-top.ts
++++ b/packages/tui/src/apps/ps-top.ts
+@@ -21,6 +21,7 @@ import { actionBar, actionButton, iconButton, segmentedTabs } from "../native/ov
+ import { Memo } from "../native/memo";
+ import { truncateToWidth } from "../utils";
+ import { formatDuration } from "@oh-my-pi/pi-utils";
++import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import chalk from "@oh-my-pi/pi-utils/chalk";
+ import type { DaemonSnapshot, DaemonSpec } from "../tools/daemon";
+ import {
+@@ -527,7 +528,7 @@ export class PsTopComponent implements Component {
+ 					[
+ 						text("No broker scopes", { role: "omp.app.empty-title" }),
+ 						text([
+-							span("No omp process broker runs here. ", "muted"),
++							span(`No ${APP_NAME} process broker runs here. `, "muted"),
+ 							span(this.#all ? "Nothing runs anywhere." : "Show every scope with ", "muted"),
+ 							...(this.#all ? [] : [span("a", "key"), span(".", "muted")]),
+ 						]),
+diff --git a/packages/tui/src/desktop-notify.ts b/packages/tui/src/desktop-notify.ts
+index f7cd0772fc..3b700b5e4e 100644
+--- a/packages/tui/src/desktop-notify.ts
++++ b/packages/tui/src/desktop-notify.ts
+@@ -23,11 +23,9 @@
+ import * as fs from "node:fs";
+ import * as path from "node:path";
+ import { $which } from "@oh-my-pi/pi-utils";
++import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import type { TerminalId, TerminalNotification } from "./terminal-capabilities";
+ 
+-/** Application name surfaced as the notification source. */
+-const APP_NAME = "omp";
+-
+ /** Resolved notifier binary used to fan a notification out to D-Bus. */
+ export type DesktopNotifierKind = "notify-send" | "gdbus";
+ 
+diff --git a/packages/tui/src/terminal-capabilities.ts b/packages/tui/src/terminal-capabilities.ts
+index bc6756c983..80a3e40495 100644
+--- a/packages/tui/src/terminal-capabilities.ts
++++ b/packages/tui/src/terminal-capabilities.ts
+@@ -1,4 +1,5 @@
+ import { encodeSixel } from "@oh-my-pi/pi-natives";
++import { APP_NAME } from "@oh-my-pi/pi-utils/dirs";
+ import { $env, isBunTestRuntime, isTerminalHeadless, isWsl } from "@oh-my-pi/pi-utils/env";
+ import { writeTerminalSequence } from "./active-terminal";
+ import { sendDesktopNotification, shouldDeliverDesktopNotification } from "./desktop-notify";
+@@ -1476,7 +1477,6 @@ function notificationToLine(n: TerminalNotification): string {
+ // C0/C1 control characters that are unsafe inside an OSC payload (must base64).
+ const OSC99_UNSAFE = /[\x00-\x1f\x7f\x80-\x9f]/u;
+ const OSC99_MAX_PAYLOAD_BYTES = 2048;
+-const OSC99_APP_NAME = "omp";
+ // Kitty matches notification ids across its whole process, not per window, so
+ // a bare counter would collide between omp sessions sharing one kitty instance
+ // and turn a new notification into a silent replacement of another session's.
+@@ -1579,7 +1579,7 @@ function osc99Actions(actions: TerminalNotification["actions"]): string | undefi
+  */
+ function formatOsc99Notification(n: TerminalNotification): string {
+ 	const id = osc99Id(n.id);
+-	const meta: string[] = [`i=${id}`, `f=${base64Utf8(OSC99_APP_NAME)}`];
++	const meta: string[] = [`i=${id}`, `f=${base64Utf8(APP_NAME)}`];
+ 	const actions = osc99Actions(n.actions);
+ 	if (actions) meta.push(`a=${actions}`);
+ 	const urgency = osc99Urgency(n.urgency);
+diff --git a/packages/utils/src/dirs.ts b/packages/utils/src/dirs.ts
+index c5f9c5d5d4..b464f490e2 100644
+--- a/packages/utils/src/dirs.ts
++++ b/packages/utils/src/dirs.ts
+@@ -1,14 +1,16 @@
+ /**
+- * Centralized path helpers for omp config directories.
++ * Centralized path helpers for juling config directories.
+  *
+- * Uses PI_CONFIG_DIR (default ".omp") for the config root and
+- * PI_CODING_AGENT_DIR to override the agent directory.
++ * Uses JULING_CONFIG_DIR (default ".juling", legacy fallback PI_CONFIG_DIR) for
++ * the config root and JULING_CODING_AGENT_DIR (legacy fallback
++ * PI_CODING_AGENT_DIR) to override the agent directory. A pre-rebrand install
++ * that only has the legacy `~/.omp` root keeps resolving there (read-only).
+  *
+  * On Linux, if XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME environment
+  * variables are set, paths are redirected to XDG-compliant locations under
+- * $XDG_*_HOME/omp/. This requires running `omp config migrate` first to
++ * $XDG_*_HOME/juling/. This requires running `juling config migrate` first to
+  * move data to the new locations. No filesystem existence checks are performed
+- * — if the env var is set, omp trusts that the migration has been done.
++ * — if the env var is set, juling trusts that the migration has been done.
+  */
+ 
+ import * as fs from "node:fs";
+@@ -19,14 +21,21 @@ import { engines, version } from "../package.json" with { type: "json" };
+ import { isEnoent, isEnotdir } from "./fs-error";
+ import { isBunTestRuntime } from "./test-runtime";
+ 
+-/** App name (e.g. "omp") */
+-export const APP_NAME: string = "omp";
++/** App name (e.g. "juling") */
++export const APP_NAME: string = "juling";
+ 
+-/** Public homepage that inference gateways (OpenRouter, Vercel AI Gateway) credit omp traffic to. */
+-export const APP_URL: string = "https://omp.sh/";
++/** Public homepage that inference gateways (OpenRouter, Vercel AI Gateway) credit juling traffic to. */
++export const APP_URL: string = "https://github.com/177911-juling/juling-harness";
+ 
+-/** Config directory name (e.g. ".omp") */
+-export const CONFIG_DIR_NAME: string = ".omp";
++/** Config directory name (e.g. ".juling") */
++export const CONFIG_DIR_NAME: string = ".juling";
++
++/**
++ * Upstream `omp` config directory name. Compatibility-only: an install created
++ * before the rebrand keeps `~/.omp` around, and readers fall back to it while it
++ * exists. Never a default for new data — legacy roots are read-only.
++ */
++export const LEGACY_CONFIG_DIR_NAME: string = ".omp";
+ 
+ /** Ordered main settings filenames: canonical write target first, legacy-compatible YAML fallback second. */
+ export const MAIN_CONFIG_FILENAMES = ["config.yml", "config.yaml"] as const;
+@@ -34,14 +43,17 @@ export const MAIN_CONFIG_FILENAMES = ["config.yml", "config.yaml"] as const;
+ /** Version (e.g. "1.0.0") */
+ export const VERSION: string = version;
+ 
+-/** Default User-Agent header string (e.g. "omp/17.2.12") */
+-export const USER_AGENT = `omp/${VERSION}`;
++/** Default User-Agent header string (e.g. "juling/17.2.12") */
++export const USER_AGENT = `juling/${VERSION}`;
+ 
+ /** Minimum Bun version */
+ export const MIN_BUN_VERSION: string = engines.bun.replace(/[^0-9.]/g, "");
+ 
+ const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+-const PROFILE_ENV_KEYS = ["OMP_PROFILE", "PI_PROFILE"] as const;
++/** Legacy upstream app name, used for `$XDG_*_HOME/omp` compatibility roots. */
++const LEGACY_APP_NAME: string = LEGACY_CONFIG_DIR_NAME.replace(/^\./, "");
++/** Profile env vars in precedence order: canonical first, legacy fallbacks after. */
++const PROFILE_ENV_KEYS = ["JULING_PROFILE", "OMP_PROFILE", "PI_PROFILE"] as const;
+ 
+ /**
+  * Names Windows treats as reserved device aliases. Matches the basename
+@@ -81,28 +93,32 @@ export function normalizeProfileName(profile: string | undefined): string | unde
+ }
+ 
+ /**
+- * Resolve the active profile from the two profile env vars. `OMP_PROFILE` is the
+- * canonical variable and takes precedence; `PI_PROFILE` is the legacy
+- * compatibility fallback, consulted only when `OMP_PROFILE` is undefined. An
+- * explicitly-empty `OMP_PROFILE` therefore selects the default profile rather
+- * than silently inheriting `PI_PROFILE`. Delegates validation/normalization to
++ * Resolve the active profile from the profile env vars, in precedence order:
++ * `JULING_PROFILE` → `OMP_PROFILE` → `PI_PROFILE`. Only the highest-priority
++ * variable that is defined is consulted, so an explicitly-empty
++ * `JULING_PROFILE` selects the default profile rather than silently inheriting
++ * a legacy value. Delegates validation/normalization to
+  * {@link normalizeProfileName} (which throws on a syntactically invalid value).
+  */
+-export function resolveProfileEnv(omp: string | undefined, pi: string | undefined): string | undefined {
+-	return normalizeProfileName(omp !== undefined ? omp : pi);
++export function resolveProfileEnv(
++	juling: string | undefined,
++	omp?: string | undefined,
++	pi?: string | undefined,
++): string | undefined {
++	return normalizeProfileName(juling !== undefined ? juling : omp !== undefined ? omp : pi);
+ }
+ 
+ function getProfileFromEnv(): string | undefined {
+-	return resolveProfileEnv(process.env.OMP_PROFILE, process.env.PI_PROFILE);
++	return resolveProfileEnv(process.env.JULING_PROFILE, process.env.OMP_PROFILE, process.env.PI_PROFILE);
+ }
+ 
+ /**
+  * Module-load profile resolution. Unlike {@link getProfileFromEnv}, an invalid
+- * OMP_PROFILE/PI_PROFILE value does NOT throw here — a bad env var must not
+- * crash a bare `import` of this module with an uncaught stack trace before the
+- * CLI's error handling is in scope. The default profile is used instead; the
+- * CLI re-validates the env (see `runCli` in coding-agent/src/cli.ts) so the
+- * user still gets a clean "Invalid OMP profile" message.
++ * profile env value does NOT throw here — a bad env var must not crash a bare
++ * `import` of this module with an uncaught stack trace before the CLI's error
++ * handling is in scope. The default profile is used instead; the CLI
++ * re-validates the env (see `runCli` in coding-agent/src/cli.ts) so the user
++ * still gets a clean "Invalid profile" message.
+  */
+ function readProfileFromEnvSafe(): string | undefined {
+ 	try {
+@@ -112,9 +128,52 @@ function readProfileFromEnvSafe(): string | undefined {
+ 	}
+ }
+ 
+-/** Profile-independent config root (~/.omp), shared by every omp profile. */
++/**
++ * Resolve the app root under an XDG base directory, preferring `<base>/juling`
++ * and falling back to a pre-migration `<base>/omp` root. Mirrors
++ * {@link getBaseConfigRoot} so the XDG and plain-home branches agree on when a
++ * legacy install is still in charge.
++ */
++function resolveXdgAppRoot(baseDir: string): string | undefined {
++	try {
++		const canonical = path.join(baseDir, APP_NAME);
++		if (fs.existsSync(canonical)) return canonical;
++		const legacy = path.join(baseDir, LEGACY_APP_NAME);
++		return fs.existsSync(legacy) ? legacy : undefined;
++	} catch {
++		return undefined;
++	}
++}
++
++let baseConfigRootMemo: { home: string; dirName: string; root: string } | undefined;
++
++/**
++ * Profile-independent config root, shared by every profile.
++ *
++ * The canonical root is `~/<CONFIG_DIR_NAME>` (or the
++ * `JULING_CONFIG_DIR`/`PI_CONFIG_DIR` override). A pre-rebrand install that
++ * only has the legacy `~/.omp` root keeps working standalone: when the
++ * canonical root does not exist and `~/.omp` does, this returns the legacy
++ * root. Legacy roots are read-only — nothing here writes to them by default.
++ *
++ * The existence probe runs once: the resolved root is memoized until the home
++ * directory or the configured dir name changes (e.g. `refreshDirsFromEnv`
++ * applying a profile `.env` that sets `JULING_CONFIG_DIR`).
++ */
+ export function getBaseConfigRoot(): string {
+-	return path.join(os.homedir(), getConfigDirName());
++	const home = os.homedir();
++	const dirName = getConfigDirName();
++	const memo = baseConfigRootMemo;
++	if (memo && memo.home === home && memo.dirName === dirName) return memo.root;
++
++	const canonical = path.join(home, dirName);
++	let root = canonical;
++	if (dirName !== LEGACY_CONFIG_DIR_NAME && !fs.existsSync(canonical)) {
++		const legacy = path.join(home, LEGACY_CONFIG_DIR_NAME);
++		if (fs.existsSync(legacy)) root = legacy;
++	}
++	baseConfigRootMemo = { home, dirName, root };
++	return root;
+ }
+ 
+ function getProfileConfigRoot(profile: string | undefined): string {
+@@ -122,14 +181,6 @@ function getProfileConfigRoot(profile: string | undefined): string {
+ 	return profile ? path.join(root, "profiles", profile) : root;
+ }
+ 
+-function readPiProfileFromEnvSafe(): string | undefined {
+-	try {
+-		return normalizeProfileName(process.env.PI_PROFILE);
+-	} catch {
+-		return undefined;
+-	}
+-}
+-
+ function getProfileAgentDir(profile: string): string {
+ 	return path.join(getProfileConfigRoot(profile), "agent");
+ }
+@@ -328,9 +379,14 @@ export function getSafeProjectCwd(): string {
+ 	return os.homedir();
+ }
+ 
+-/** Get the config directory name relative to home (e.g. ".omp" or PI_CONFIG_DIR override). */
++/**
++ * Get the config directory name relative to home (e.g. ".juling" or the
++ * `JULING_CONFIG_DIR` override). `JULING_CONFIG_DIR` is canonical;
++ * `PI_CONFIG_DIR` is the legacy compatibility fallback, consulted only when the
++ * canonical variable is unset/empty.
++ */
+ export function getConfigDirName(): string {
+-	return process.env.PI_CONFIG_DIR || CONFIG_DIR_NAME;
++	return process.env.JULING_CONFIG_DIR || process.env.PI_CONFIG_DIR || CONFIG_DIR_NAME;
+ }
+ 
+ // =============================================================================
+@@ -387,16 +443,13 @@ class DirResolver {
+ 			const resolveIf = (envVar: string) => {
+ 				const value = process.env[envVar];
+ 				if (!value) return undefined;
+-				try {
+-					const appRoot = path.join(value, APP_NAME);
+-					if (profile) {
+-						const profilePath = path.join(appRoot, "profiles", profile);
+-						if (fs.existsSync(profilePath)) return profilePath;
+-						return undefined;
+-					}
+-					return fs.existsSync(appRoot) ? appRoot : undefined;
+-				} catch {}
+-				return undefined;
++				const appRoot = resolveXdgAppRoot(value);
++				if (!appRoot) return undefined;
++				if (profile) {
++					const profilePath = path.join(appRoot, "profiles", profile);
++					return fs.existsSync(profilePath) ? profilePath : undefined;
++				}
++				return appRoot;
+ 			};
+ 			xdgData = resolveIf("XDG_DATA_HOME");
+ 			xdgState = resolveIf("XDG_STATE_HOME");
+@@ -412,11 +465,7 @@ class DirResolver {
+ 			if (!xdgPlatform) return undefined;
+ 			const value = process.env[envVar];
+ 			if (!value) return undefined;
+-			try {
+-				const appRoot = path.join(value, APP_NAME);
+-				return fs.existsSync(appRoot) ? appRoot : undefined;
+-			} catch {}
+-			return undefined;
++			return resolveXdgAppRoot(value);
+ 		};
+ 
+ 		this.#rootDirs = {
+@@ -468,14 +517,33 @@ class DirResolver {
+ }
+ 
+ /**
+- * Decide which `PI_CODING_AGENT_DIR` value to capture as the pre-profile
++ * Resolve the agent-directory override from the environment.
++ * `JULING_CODING_AGENT_DIR` is canonical; `PI_CODING_AGENT_DIR` is the legacy
++ * compatibility fallback, consulted only when the canonical variable is unset.
++ */
++function resolveAgentDirEnv(): string | undefined {
++	return process.env.JULING_CODING_AGENT_DIR ?? process.env.PI_CODING_AGENT_DIR;
++}
++
++/**
++ * Publish an agent-dir override to the environment: the canonical variable plus
++ * the legacy mirror, so nested upstream tooling that only knows
++ * `PI_CODING_AGENT_DIR` resolves the same directory.
++ */
++function setAgentDirEnv(dir: string): void {
++	process.env.JULING_CODING_AGENT_DIR = dir;
++	process.env.PI_CODING_AGENT_DIR = dir;
++}
++
++/**
++ * Decide which agent-dir override value to capture as the pre-profile
+  * baseline. A value equal to a profile's derived agent dir is profile-derived
+  * (propagated by a parent's `setProfile`), so it must NOT be snapshotted as the
+  * default-mode baseline — otherwise default mode would resolve to the profile's
+  * agent dir. The profile source can be the active profile or a lower-priority
+- * `PI_PROFILE` that was bypassed because `OMP_PROFILE` explicitly selected the
+- * default profile. Returns `undefined` in those cases so reset falls back to the
+- * standard `~/.omp/agent`.
++ * legacy profile env var (`OMP_PROFILE`/`PI_PROFILE`) that was bypassed because
++ * `JULING_PROFILE` explicitly selected the default profile. Returns `undefined`
++ * in those cases so reset falls back to the standard `~/.juling/agent`.
+  */
+ function resolvePreProfileAgentDir(
+ 	profile: string | undefined,
+@@ -490,14 +558,14 @@ let activeProfile = readProfileFromEnvSafe();
+ /**
+  * Resolve the agent-dir override for the current `activeProfile` from the live
+  * environment. A named profile derives its own agent dir (no override); default
+- * mode honors a non-profile `PI_CODING_AGENT_DIR` (see
++ * mode honors a non-profile agent-dir override (see
+  * {@link resolvePreProfileAgentDir}). Shared by the module-load resolver and
+  * {@link refreshDirsFromEnv} so both apply identical logic.
+  */
+ function resolveActiveAgentDirOverride(): string | undefined {
+ 	return activeProfile
+ 		? undefined
+-		: resolvePreProfileAgentDir(undefined, process.env.PI_CODING_AGENT_DIR, readPiProfileFromEnvSafe());
++		: resolvePreProfileAgentDir(undefined, resolveAgentDirEnv(), readProfileFromEnvSafe());
+ }
+ 
+ let dirs = new DirResolver({
+@@ -505,20 +573,21 @@ let dirs = new DirResolver({
+ 	profile: activeProfile,
+ });
+ /**
+- * Snapshot of `PI_CODING_AGENT_DIR` from before the first named-profile
+- * activation. Reset paths restore this value (or its absence) instead of
+- * unconditionally deleting the env var. Without the snapshot, a process started
+- * with `PI_CODING_AGENT_DIR=/custom` then `setProfile("work")` then
++ * Snapshot of the agent-dir override (`JULING_CODING_AGENT_DIR`, or its legacy
++ * `PI_CODING_AGENT_DIR` alias) from before the first named-profile activation.
++ * Reset paths restore this value (or its absence) instead of unconditionally
++ * deleting the env var. Without the snapshot, a process started with
++ * `JULING_CODING_AGENT_DIR=/custom` then `setProfile("work")` then
+  * `setProfile(undefined)` would silently lose `/custom` and fall back to
+- * `~/.omp/agent`. Captured at module load — ignoring a profile-derived value
++ * `~/.juling/agent`. Captured at module load — ignoring a profile-derived value
+  * inherited from a parent's `setProfile` (see {@link resolvePreProfileAgentDir})
+  * — and refreshed on `setAgentDir`, since that call is the user explicitly
+  * redefining the baseline.
+  */
+ let preProfileAgentDirEnv: string | undefined = resolvePreProfileAgentDir(
+ 	activeProfile,
+-	process.env.PI_CODING_AGENT_DIR,
+-	activeProfile ?? readPiProfileFromEnvSafe(),
++	resolveAgentDirEnv(),
++	activeProfile ?? readProfileFromEnvSafe(),
+ );
+ // Anchor home for the resolver. Captured at module load to stay stable across
+ // test mocks of `os.homedir()`. `getPluginsDir(home)` compares against this so
+@@ -529,7 +598,7 @@ const RESOLVER_HOME = os.homedir();
+ /**
+  * Rebuild the dirs resolver from the current environment, reusing the profile
+  * resolved at module load. Directory-affecting keys (XDG_*_HOME and, in default
+- * mode, `PI_CODING_AGENT_DIR`) loaded from a profile/agent `.env` only reach
++ * mode, the agent-dir override) loaded from a profile/agent `.env` only reach
+  * `process.env` *after* this module froze the resolver at import time, so
+  * `env.ts` calls this once after applying its `.env` files. The agent `.env`
+  * location derives from the profile name + home before this runs, so the
+@@ -556,7 +625,7 @@ export function getConfigRootDir(): string {
+ export function setAgentDir(dir: string): void {
+ 	activeProfile = undefined;
+ 	dirs = new DirResolver({ agentDirOverride: dir });
+-	process.env.PI_CODING_AGENT_DIR = dir;
++	setAgentDirEnv(dir);
+ 	preProfileAgentDirEnv = dir;
+ 	for (const key of PROFILE_ENV_KEYS) {
+ 		delete process.env[key];
+@@ -564,18 +633,18 @@ export function setAgentDir(dir: string): void {
+ }
+ 
+ /**
+- * Test-only: reset the pre-profile `PI_CODING_AGENT_DIR` snapshot to whatever
+- * the current environment looks like. Cross-suite test pollution can otherwise
+- * leak a stale snapshot through `setAgentDir` and corrupt `setProfile(undefined)`
+- * restore semantics. Production code MUST NOT call this — the snapshot's
+- * lifecycle is owned by `setAgentDir` / `setProfile` and a runtime caller has
+- * no business clearing it.
++ * Test-only: reset the pre-profile agent-dir snapshot to whatever the current
++ * environment looks like. Cross-suite test pollution can otherwise leak a stale
++ * snapshot through `setAgentDir` and corrupt `setProfile(undefined)` restore
++ * semantics. Production code MUST NOT call this — the snapshot's lifecycle is
++ * owned by `setAgentDir` / `setProfile` and a runtime caller has no business
++ * clearing it.
+  */
+ export function __resetProfileSnapshotForTests(): void {
+ 	preProfileAgentDirEnv = resolvePreProfileAgentDir(
+ 		activeProfile,
+-		process.env.PI_CODING_AGENT_DIR,
+-		activeProfile ?? readPiProfileFromEnvSafe(),
++		resolveAgentDirEnv(),
++		activeProfile ?? readProfileFromEnvSafe(),
+ 	);
+ }
+ 
+@@ -596,30 +665,28 @@ export function setProfile(profile: string | undefined): void {
+ 	const next = normalizeProfileName(profile);
+ 	if (next && !activeProfile) {
+ 		// First activation of a named profile in this process: snapshot the
+-		// current PI_CODING_AGENT_DIR so a later reset can restore the user's
++		// current agent-dir override so a later reset can restore the user's
+ 		// explicit override. Subsequent profile switches keep the original
+ 		// snapshot — the "pre-profile" baseline is the state before profiles
+ 		// entered the picture, not the state between two activations.
+-		preProfileAgentDirEnv = resolvePreProfileAgentDir(
+-			undefined,
+-			process.env.PI_CODING_AGENT_DIR,
+-			readPiProfileFromEnvSafe(),
+-		);
++		preProfileAgentDirEnv = resolvePreProfileAgentDir(undefined, resolveAgentDirEnv(), readProfileFromEnvSafe());
+ 	}
+ 	activeProfile = next;
+ 	if (activeProfile) {
+ 		dirs = new DirResolver({ profile: activeProfile });
++		process.env.JULING_PROFILE = activeProfile;
+ 		process.env.OMP_PROFILE = activeProfile;
+ 		process.env.PI_PROFILE = activeProfile;
+-		process.env.PI_CODING_AGENT_DIR = dirs.agentDir;
++		setAgentDirEnv(dirs.agentDir);
+ 	} else {
+ 		for (const key of PROFILE_ENV_KEYS) {
+ 			delete process.env[key];
+ 		}
+ 		if (preProfileAgentDirEnv === undefined) {
++			delete process.env.JULING_CODING_AGENT_DIR;
+ 			delete process.env.PI_CODING_AGENT_DIR;
+ 		} else {
+-			process.env.PI_CODING_AGENT_DIR = preProfileAgentDirEnv;
++			setAgentDirEnv(preProfileAgentDirEnv);
+ 		}
+ 		dirs = new DirResolver({ agentDirOverride: preProfileAgentDirEnv });
+ 	}
+@@ -1238,14 +1305,17 @@ let cachedInstallId: string | null = null;
+ 
+ const INSTALL_ID_FILE = "install-id";
+ /**
+- * Application label for usage attribution (`OMP_APP_NAME`), defaulting to
+- * `omp`. Embedders that drive omp programmatically (robomp, CI bots, …) set
+- * the env var so broker-side per-client burn tracking can answer "what did
++ * Application label for usage attribution, defaulting to {@link APP_NAME}.
++ * `JULING_APP_NAME` is canonical; `OMP_APP_NAME` is the legacy compatibility
++ * fallback. Embedders that drive juling programmatically (robomp, CI bots, …)
++ * set the env var so broker-side per-client burn tracking can answer "what did
+  * app X use" instead of folding everything into one install-wide bucket.
+  */
+ export function getAppName(): string {
+-	const value = process.env.OMP_APP_NAME?.trim();
+-	return value ? value : "omp";
++	const juling = process.env.JULING_APP_NAME?.trim();
++	if (juling) return juling;
++	const omp = process.env.OMP_APP_NAME?.trim();
++	return omp ? omp : APP_NAME;
+ }
+ 
+ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

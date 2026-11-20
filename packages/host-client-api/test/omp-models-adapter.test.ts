@@ -1,0 +1,1852 @@
+import assert from "node:assert/strict";
+import { after, before, describe, test } from "node:test";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  clampRoleThinking,
+  parseCacheThinkingEfforts,
+  roleThinkingControl,
+} from "@juling-harness/client-contract";
+import {
+  authProbeUrl,
+  availableFromCacheModel,
+  availableFromCatalogEntry,
+  catalogEntryFromAvailable,
+  createOmpModelsService,
+  envNameForProvider,
+  isEnvConfigName,
+  isRetryableTestFailure,
+  modelListRequest,
+  networkErrorDetail,
+  ollamaTagsUrl,
+  parseDiscoveryModels,
+  toYamlProvider,
+  upsertNestedRecordList,
+  upsertYamlRecordEntry,
+  upsertYamlStringList,
+  withRuntimeModels,
+} from "../src/omp-models-adapter.js";
+import { restoreRedactedApiKeys } from "../src/models-yml.js";
+
+test("Google Decisions uses the Google key header and unsupported model lists make no guessed HTTP requests", async () => {
+  const request = modelListRequest("https://generativelanguage.googleapis.com/v1beta", "google-decisions", "test-key");
+  assert.equal(request.headers["x-goog-api-key"], "test-key");
+  assert.equal(request.headers.Authorization, undefined);
+  assert.deepEqual(request.urls, []);
+  const directory = await mkdtemp(join(tmpdir(), "omp-model-probe-unsupported-"));
+  let calls = 0;
+  const service = createOmpModelsService({ agentDir: directory, fetch: async () => { calls++; throw new Error("No network request is authorized"); } });
+  try {
+    for (const api of ["google-decisions", "nace-systemone", "antigravity-acp", "unknown-api"]) {
+      const result = await service.probeProvider({ providerId: "test-provider", api, endpointUrl: "https://provider.invalid", apiKey: "test-key" });
+      assert.equal(result.ok, false);
+      assert.deepEqual(result.models, []);
+    }
+    assert.equal(calls, 0);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("managed Antigravity cannot be saved or tested as an HTTP provider, while Judge HTTP configuration remains editable", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-managed-models-"));
+  let calls = 0;
+  const service = createOmpModelsService({ agentDir: directory, fetch: async () => { calls++; throw new Error("No network request is authorized"); } });
+  try {
+    await assert.rejects(async () => service.upsertProvider({ id: "antigravity-cli", name: "Antigravity", api: "openai-completions", auth: { type: "none" } }), { code: "INVALID_ARGUMENT" });
+    await assert.rejects(async () => service.upsertProvider({ id: "alias", name: "Alias", api: "antigravity-acp", auth: { type: "none" } }), { code: "INVALID_ARGUMENT" });
+    await assert.rejects(async () => service.writeModelsYml({ text: "providers:\n  alias:\n    api: antigravity-acp\n" }), { code: "INVALID_ARGUMENT" });
+    assert.equal((await service.testProvider({ providerId: "antigravity-cli", endpointUrl: "https://provider.invalid" })).ok, false);
+    assert.equal(calls, 0);
+    await service.upsertProvider({ id: "nace", name: "Nace", api: "nace-systemone", auth: { type: "api-key", apiKey: "sk-test-only" }, models: [{ id: "drex-test", kind: "judge" }] });
+    const read = await service.get();
+    assert.equal(read.providers[0]?.models[0]?.kind, "judge");
+    assert.equal(read.presets.flatMap(group => group.items).find(provider => provider.id === "antigravity-cli")?.configurationMode, "managed");
+    assert.deepEqual(read.availableModels, []);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("only the Runtime snapshot authorizes configured models and invalid saved roles are not reassigned", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-model-runtime-truth-"));
+  try {
+    await writeFile(join(directory, "models.yml"), "providers:\n  gateway:\n    api: openai-completions\n    apiKey: sk-test-only\n    models:\n    - id: obsolete\n");
+    const roles = "modelRoles:\n  default: gateway/obsolete:high\n";
+    await writeFile(join(directory, "config.yml"), roles);
+    const saved = await createOmpModelsService({ agentDir: directory }).get();
+    const projected = withRuntimeModels(saved, { sessionId: "session", version: "native-generation", total: 1, truncated: false, models: [{ id: "judge", selector: "gateway/judge", name: "Judge", provider: "gateway", api: "google-decisions", kind: "judge", source: "registry", reasoning: false, image: true, tools: false }] });
+    assert.deepEqual(projected.availableModels.map(model => model.selector), ["gateway/judge"]);
+    assert.equal(projected.providers[0]?.models.find(model => model.id === "obsolete")?.status, "unavailable");
+    assert.equal(projected.roles.find(role => role.id === "default")?.primary, "gateway/obsolete");
+    assert.equal(projected.roles.find(role => role.id === "default")?.thinking, "high");
+    assert.equal(projected.roles.find(role => role.id === "default")?.issue?.kind, "model-missing");
+    assert.equal(await readFile(join(directory, "config.yml"), "utf8"), roles);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+describe("upsertYamlRecordEntry", () => {
+  test("updates an existing entry in block form", () => {
+    const source = "modelRoles:\n  default: a/b\n  smol: c/d\n";
+    const out = upsertYamlRecordEntry(source, "modelRoles", "default", "x/y");
+    assert.equal(out, "modelRoles:\n  default: x/y\n  smol: c/d\n");
+  });
+
+  test("inserts a missing entry in block form without rewriting siblings", () => {
+    const source = "modelRoles:\n  default: a/b\n";
+    const out = upsertYamlRecordEntry(source, "modelRoles", "smol", "c/d");
+    assert.equal(out, "modelRoles:\n  default: a/b\n  smol: c/d\n");
+  });
+
+  test("updates an existing entry in inline map form", () => {
+    const source = "modelRoles: { default: a/b, smol: c/d }\n";
+    const out = upsertYamlRecordEntry(source, "modelRoles", "default", "x/y");
+    assert.equal(out, "modelRoles: { default: x/y, smol: c/d }\n");
+  });
+
+  test("inserts a missing entry in inline map form without duplicating the key", () => {
+    const source = "modelRoles: { default: a/b }\n";
+    const out = upsertYamlRecordEntry(source, "modelRoles", "smol", "c/d");
+    assert.equal(out, "modelRoles: { default: a/b, smol: c/d }\n");
+  });
+
+  test("quotes an inline value that contains a colon (thinking selector)", () => {
+    const source = "modelRoles: { default: a/b }\n";
+    const out = upsertYamlRecordEntry(source, "modelRoles", "slow", "x/y:high");
+    assert.equal(out, 'modelRoles: { default: a/b, slow: "x/y:high" }\n');
+  });
+
+  test("appends block form when the record is absent", () => {
+    const source = "otherKey: true\n";
+    const out = upsertYamlRecordEntry(source, "modelRoles", "default", "a/b");
+    assert.equal(out, "otherKey: true\nmodelRoles:\n  default: a/b\n");
+  });
+
+  test("preserves CRLF line endings", () => {
+    const source = "modelRoles:\r\n  default: a/b\r\n";
+    const out = upsertYamlRecordEntry(source, "modelRoles", "default", "x/y");
+    assert.equal(out, "modelRoles:\r\n  default: x/y\r\n");
+  });
+});
+
+describe("toYamlProvider auth boundary", () => {
+  test("drops a stale command credential when switching command -> api-key with a blank key", () => {
+    const previous = { apiKey: "!op read op://dev/openai/api-key", api: "openai-completions" };
+    const input = { id: "p", name: "p", api: "openai-completions", auth: { type: "api-key" as const } };
+    const out = toYamlProvider(input, previous);
+    assert.equal("apiKey" in out, false);
+  });
+
+  test("drops a stale command credential when switching command -> oauth", () => {
+    const previous = { apiKey: "!op read op://dev/openai/api-key", api: "openai-completions" };
+    const input = { id: "p", name: "p", api: "openai-completions", auth: { type: "oauth" as const } };
+    const out = toYamlProvider(input, previous);
+    assert.equal("apiKey" in out, false);
+    assert.equal(out.auth, "oauth");
+  });
+
+  test("oauth save drops a leftover bearer so OAuth is not shadowed", () => {
+    const previous = { apiKey: "sk-123", api: "openai-completions" };
+    const out = toYamlProvider({ id: "p", name: "p", api: "openai-completions", auth: { type: "oauth" as const } }, previous);
+    assert.equal("apiKey" in out, false);
+    assert.equal(out.auth, "oauth");
+  });
+
+  test("writes env auth as an environment variable name, not a secret", () => {
+    const out = toYamlProvider(
+      { id: "openai", name: "OpenAI", api: "openai-completions", auth: { type: "env" as const, envName: "OPENAI_API_KEY" } },
+      { apiKey: "sk-123" },
+    );
+    assert.equal(out.apiKey, "OPENAI_API_KEY");
+    assert.equal("auth" in out, false);
+  });
+
+  test("env save falls back to the conventional name when envName is omitted", () => {
+    const out = toYamlProvider(
+      { id: "open-ai", name: "OpenAI", api: "openai-completions", auth: { type: "env" as const } },
+      undefined,
+    );
+    assert.equal(out.apiKey, "OPEN_AI_API_KEY");
+  });
+
+  test("drops a stale env name when switching env -> api-key with a blank key", () => {
+    const previous = { apiKey: "OPENAI_API_KEY", api: "openai-completions" };
+    const out = toYamlProvider({ id: "p", name: "p", api: "openai-completions", auth: { type: "api-key" as const } }, previous);
+    assert.equal("apiKey" in out, false);
+  });
+
+  test("keeps a custom env name when re-saving env with the same envName", () => {
+    const previous = { apiKey: "CUSTOM_PROVIDER_KEY", api: "openai-completions" };
+    const out = toYamlProvider(
+      { id: "openai", name: "OpenAI", api: "openai-completions", auth: { type: "env" as const, envName: "CUSTOM_PROVIDER_KEY" } },
+      previous,
+    );
+    assert.equal(out.apiKey, "CUSTOM_PROVIDER_KEY");
+  });
+
+  test("none auth writes auth: none and drops credentials", () => {
+    const previous = { apiKey: "sk-123", api: "openai-completions" };
+    const out = toYamlProvider({ id: "ollama", name: "Ollama", api: "openai-completions", auth: { type: "none" as const } }, previous);
+    assert.equal(out.auth, "none");
+    assert.equal("apiKey" in out, false);
+  });
+
+  test("keeps the command credential when re-saving command without re-entering it", () => {
+    const previous = { apiKey: "!op read op://dev/openai/api-key", api: "openai-completions" };
+    const input = { id: "p", name: "p", api: "openai-completions", auth: { type: "command" as const } };
+    const out = toYamlProvider(input, previous);
+    assert.equal(out.apiKey, "!op read op://dev/openai/api-key");
+  });
+
+  test("keeps an existing api key when re-saving api-key with a blank key", () => {
+    const previous = { apiKey: "sk-123", api: "openai-completions" };
+    const input = { id: "p", name: "p", api: "openai-completions", auth: { type: "api-key" as const } };
+    const out = toYamlProvider(input, previous);
+    assert.equal(out.apiKey, "sk-123");
+  });
+
+  test("clearSecret removes the stored key", () => {
+    const previous = { apiKey: "sk-123", api: "openai-completions" };
+    const input = { id: "p", name: "p", api: "openai-completions", auth: { type: "api-key" as const, clearSecret: true } };
+    const out = toYamlProvider(input, previous);
+    assert.equal("apiKey" in out, false);
+  });
+
+  test("persists enabled: false and drops it when re-enabled", () => {
+    const previous = { apiKey: "sk-123", api: "openai-completions" };
+    const off = toYamlProvider({ id: "p", name: "p", api: "openai-completions", enabled: false, auth: { type: "api-key" } }, previous);
+    assert.equal("enabled" in off, false);
+    const on = toYamlProvider({ id: "p", name: "p", api: "openai-completions", enabled: true, auth: { type: "api-key" } }, off);
+    assert.equal("enabled" in on, false);
+  });
+
+  test("serializes advanced fields (headers/disableStrictTools/transport/remoteCompaction)", () => {
+    const input = {
+      id: "p",
+      name: "p",
+      api: "openai-completions",
+      auth: { type: "api-key" as const, apiKey: "sk-123" },
+      headers: { "X-Org-Id": "org-1" },
+      disableStrictTools: true,
+      transport: "pi-native" as const,
+      remoteCompaction: { enabled: true, model: "gpt-5-mini" },
+    };
+    const out = toYamlProvider(input, undefined);
+    assert.deepEqual(out.headers, { "X-Org-Id": "org-1" });
+    assert.equal(out.disableStrictTools, true);
+    assert.equal(out.transport, "pi-native");
+    assert.deepEqual(out.remoteCompaction, { enabled: true, model: "gpt-5-mini" });
+  });
+
+  test("serializes modelOverrides and custom model tools/cost", () => {
+    const input = {
+      id: "anthropic",
+      name: "Anthropic",
+      api: "anthropic-messages",
+      auth: { type: "api-key" as const, apiKey: "sk-123" },
+      models: [
+        {
+          id: "custom-1",
+          name: "Custom One",
+          contextWindow: 128000,
+          maxTokens: 8192,
+          reasoning: true,
+          image: true,
+          tools: false,
+          cost: { input: 1, output: 2 },
+        },
+      ],
+      modelOverrides: {
+        "claude-sonnet-4.5": {
+          name: "Sonnet Corp",
+          image: true,
+          tools: true,
+          cost: { input: 3, output: 15 },
+        },
+      },
+    };
+    const out = toYamlProvider(input, undefined);
+    assert.deepEqual(out.models, [
+      {
+        id: "custom-1",
+        name: "Custom One",
+        contextWindow: 128000,
+        maxTokens: 8192,
+        reasoning: true,
+        input: ["text", "image"],
+        supportsTools: false,
+        cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+      },
+    ]);
+    assert.deepEqual(out.modelOverrides, {
+      "claude-sonnet-4.5": {
+        name: "Sonnet Corp",
+        supportsTools: true,
+        input: ["text", "image"],
+        cost: { input: 3, output: 15 },
+      },
+    });
+  });
+
+  test("Bedrock Messages writes the native compatibility slot and preserves unrelated flags",()=>{
+    const previous={models:[{id:"custom",compat:{bedrockMessagesApi:true,supportsToolChoice:false}}],modelOverrides:{catalog:{compat:{bedrockMessagesApi:true,supportsEffort:false}}}};
+    const out=toYamlProvider({id:"bedrock",name:"Bedrock",api:"anthropic-messages",auth:{type:"api-key",apiKey:"synthetic"},models:[{id:"custom",bedrockMessagesApi:false}],modelOverrides:{catalog:{bedrockMessagesApi:false}}},previous);
+    assert.deepEqual((out.models as Array<Record<string,unknown>>)[0]?.compat,{bedrockMessagesApi:false,supportsToolChoice:false});
+    assert.deepEqual((out.modelOverrides as Record<string,Record<string,unknown>>).catalog?.compat,{bedrockMessagesApi:false,supportsEffort:false});
+    const inherited=toYamlProvider({id:"bedrock",name:"Bedrock",api:"anthropic-messages",auth:{type:"api-key",apiKey:"synthetic"},models:[{id:"custom"}],modelOverrides:{catalog:{name:"Catalog"}}},previous);
+    assert.deepEqual((inherited.models as Array<Record<string,unknown>>)[0]?.compat,{supportsToolChoice:false});
+    assert.deepEqual((inherited.modelOverrides as Record<string,Record<string,unknown>>).catalog?.compat,{supportsEffort:false});
+  });
+
+  test("serializes custom and override thinking.efforts", () => {
+    const input = {
+      id: "gateway",
+      name: "Gateway",
+      api: "openai-completions",
+      auth: { type: "api-key" as const, apiKey: "sk-123" },
+      models: [
+        {
+          id: "custom-reasoner",
+          name: "Custom Reasoner",
+          reasoning: true,
+          thinking: ["max", "off", "low", "minimal"],
+        },
+      ],
+      modelOverrides: {
+        "catalog-1": {
+          reasoning: true,
+          thinking: ["high", "xhigh"],
+        },
+      },
+    };
+    const out = toYamlProvider(input, undefined);
+    assert.deepEqual((out.models as Array<Record<string, unknown>>)[0]?.thinking, {
+      mode: "effort",
+      efforts: ["minimal", "low", "max"],
+    });
+    assert.deepEqual((out.modelOverrides as Record<string, Record<string, unknown>>)["catalog-1"]?.thinking, {
+      mode: "effort",
+      efforts: ["high", "xhigh"],
+    });
+  });
+
+  test("clears modelOverrides when null", () => {
+    const previous = {
+      modelOverrides: { "claude-sonnet-4.5": { name: "Old" } },
+      api: "anthropic-messages",
+    };
+    const input = {
+      id: "anthropic",
+      name: "Anthropic",
+      api: "anthropic-messages",
+      auth: { type: "oauth" as const },
+      modelOverrides: null,
+    };
+    const out = toYamlProvider(input, previous);
+    assert.equal("modelOverrides" in out, false);
+  });
+
+  test("serializes custom model extras and override cache/headers", () => {
+    const input = {
+      id: "gateway",
+      name: "Gateway",
+      api: "openai-completions",
+      auth: { type: "api-key" as const, apiKey: "sk-123" },
+      models: [
+        {
+          id: "gpt-example",
+          name: "GPT Example",
+          api: "openai-responses",
+          baseUrl: "https://example.internal/v1",
+          omitMaxOutputTokens: true,
+          premiumMultiplier: 1.5,
+          headers: { "X-Model": "example" },
+          contextPromotionTarget: "gateway/big",
+          compactionModel: "gateway/small",
+          remoteCompaction: { enabled: true, model: "gateway/small" },
+          cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.4 },
+        },
+      ],
+      modelOverrides: {
+        "catalog-1": {
+          omitMaxOutputTokens: false,
+          cost: { cacheRead: 0.2, cacheWrite: 0.8 },
+          headers: { "X-Team": "ops" },
+        },
+      },
+    };
+    const out = toYamlProvider(input, undefined);
+    assert.equal((out.models as Array<Record<string, unknown>>)[0]?.omitMaxOutputTokens, true);
+    assert.equal((out.models as Array<Record<string, unknown>>)[0]?.api, "openai-responses");
+    assert.equal((out.models as Array<Record<string, unknown>>)[0]?.baseUrl, "https://example.internal/v1");
+    assert.deepEqual((out.modelOverrides as Record<string, Record<string, unknown>>)["catalog-1"]?.cost, {
+      cacheRead: 0.2,
+      cacheWrite: 0.8,
+    });
+    assert.equal((out.modelOverrides as Record<string, Record<string, unknown>>)["catalog-1"]?.omitMaxOutputTokens, false);
+  });
+
+  test("writes name and drops empty baseUrl", () => {
+    const named = toYamlProvider({
+      id: "acme",
+      name: "Acme Corp",
+      website: "https://acme.example",
+      note: "corp",
+      api: "openai-completions",
+      endpointUrl: "https://api.acme.test/v1",
+      auth: { type: "api-key" as const },
+    }, undefined);
+    assert.equal(named.name, "Acme Corp");
+    assert.equal(named.website, "https://acme.example");
+    assert.equal(named.note, "corp");
+    assert.equal(named.baseUrl, "https://api.acme.test/v1");
+    const cleared = toYamlProvider({
+      id: "acme",
+      name: "Acme Corp",
+      api: "openai-completions",
+      endpointUrl: "",
+      auth: { type: "api-key" as const },
+    }, named);
+    assert.equal("baseUrl" in cleared, false);
+  });
+
+  test("clears advanced fields when disabled/emptied", () => {
+    const previous = {
+      headers: { "X-Org-Id": "org-1" },
+      disableStrictTools: true,
+      transport: "pi-native",
+      remoteCompaction: { enabled: true, model: "gpt-5-mini" },
+    };
+    const input = {
+      id: "p",
+      name: "p",
+      api: "openai-completions",
+      auth: { type: "api-key" as const, apiKey: "sk-123" },
+      headers: {},
+      disableStrictTools: false,
+      transport: null,
+      remoteCompaction: null,
+    };
+    const out = toYamlProvider(input, previous);
+    assert.equal("headers" in out, false);
+    assert.equal("disableStrictTools" in out, false);
+    assert.equal("transport" in out, false);
+    assert.equal("remoteCompaction" in out, false);
+  });
+});
+
+describe("upsertYamlStringList", () => {
+  test("replaces an existing block list", () => {
+    const source = "cycleOrder:\n  - smol\n  - default\n  - slow\n";
+    const out = upsertYamlStringList(source, "cycleOrder", ["default", "slow"]);
+    assert.equal(out, "cycleOrder:\n  - default\n  - slow\n");
+  });
+
+  test("appends a missing list as block form", () => {
+    const source = "modelRoles:\n  default: a/b\n";
+    const out = upsertYamlStringList(source, "cycleOrder", ["smol", "slow"]);
+    assert.equal(out, "modelRoles:\n  default: a/b\ncycleOrder:\n  - smol\n  - slow\n");
+  });
+
+  test("replaces an inline list with block form", () => {
+    const source = "cycleOrder: [smol, default]\n";
+    const out = upsertYamlStringList(source, "cycleOrder", ["slow"]);
+    assert.equal(out, "cycleOrder:\n  - slow\n");
+  });
+});
+
+describe("restoreRedactedApiKeys", () => {
+  test("puts the previous apiKey back when the new document still has the placeholder", () => {
+    const next = { providers: { acme: { api: "openai-completions", apiKey: "********" } } };
+    const previous = { providers: { acme: { api: "openai-completions", apiKey: "sk-live" } } };
+    restoreRedactedApiKeys(next, previous);
+    assert.equal((next.providers.acme as { apiKey: string }).apiKey, "sk-live");
+  });
+
+  test("leaves an explicit new apiKey alone", () => {
+    const next = { providers: { acme: { apiKey: "sk-new" } } };
+    const previous = { providers: { acme: { apiKey: "sk-live" } } };
+    restoreRedactedApiKeys(next, previous);
+    assert.equal((next.providers.acme as { apiKey: string }).apiKey, "sk-new");
+  });
+});
+
+// ---------- 测试连接（testProvider） ----------
+
+type FetchHandler = (url: string, init?: RequestInit) => Response | Promise<Response> | never;
+
+function stubFetch(handler: FetchHandler): { fetch: typeof globalThis.fetch; calls: Array<{ url: string; headers: Record<string, string> }> } {
+  const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+  const fetch = (async (input: unknown, init?: RequestInit) => {
+    const url = String(input);
+    const headers: Record<string, string> = {};
+    if (init?.headers !== undefined) {
+      for (const [key, value] of Object.entries(init.headers as Record<string, string>)) headers[key] = value;
+    }
+    calls.push({ url, headers });
+    return await handler(url, init);
+  }) as typeof globalThis.fetch;
+  return { fetch, calls };
+}
+
+function networkError(code: string | undefined, name = "fetch failed"): TypeError {
+  const error = new TypeError(name);
+  if (code !== undefined) {
+    const cause = new Error(`network error ${code}`) as NodeJS.ErrnoException;
+    cause.code = code;
+    (error as { cause?: unknown }).cause = cause;
+  }
+  return error;
+}
+
+function abortError(): Error {
+  return Object.assign(new Error("aborted"), { name: "AbortError" });
+}
+
+describe("testProvider", () => {
+  let dir: string;
+
+  before(async () => {
+    dir = await mkdtemp(join(tmpdir(), "omp-models-test-"));
+  });
+
+  after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function serviceWith(handler: FetchHandler) {
+    const { fetch, calls } = stubFetch(handler);
+    const service = createOmpModelsService({ fetch, agentDir: dir });
+    return { service, calls };
+  }
+
+  test("no credentials: any HTTP response counts as reachable", async () => {
+    const { service, calls } = await serviceWith(async () => new Response(null, { status: 401 }));
+    const result = await service.testProvider({ endpointUrl: "https://example.com/v1" });
+    assert.equal(result.ok, true);
+    assert.equal(result.httpStatus, 401);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.url, "https://example.com/v1");
+    assert.equal(calls[0]?.headers.Accept, "*/*");
+  });
+
+  test("no credentials: network-level errors fail with classification", async () => {
+    const { service, calls } = await serviceWith(async () => {
+      throw networkError("ECONNREFUSED");
+    });
+    const result = await service.testProvider({ endpointUrl: "https://example.com" });
+    assert.equal(result.ok, false);
+    assert.match(result.detail, /connection refused/);
+    assert.equal(calls.length, 1); // definitive errors are not retried
+  });
+
+  test("no credentials: DNS failure is classified", async () => {
+    const { service } = await serviceWith(async () => {
+      throw networkError("ENOTFOUND");
+    });
+    const result = await service.testProvider({ endpointUrl: "https://nope.invalid" });
+    assert.equal(result.ok, false);
+    assert.match(result.detail, /failed to resolve hostname/);
+  });
+
+  test("no credentials: timeout-class failure retries once", async () => {
+    const { service, calls } = await serviceWith(async () => {
+      throw abortError();
+    });
+    const result = await service.testProvider({ endpointUrl: "https://example.com" });
+    assert.equal(result.ok, false);
+    assert.match(result.detail, /timed out/);
+    assert.equal(result.retryCount, 1);
+    assert.equal(calls.length, 2);
+  });
+
+  test("with key: 2xx means credentials valid", async () => {
+    const { service, calls } = await serviceWith(async () => new Response(null, { status: 200 }));
+    const result = await service.testProvider({
+      endpointUrl: "https://api.deepseek.com/v1",
+      api: "openai-completions",
+      apiKey: "sk-123",
+    });
+    assert.equal(result.ok, true);
+    assert.match(result.detail, /Valid credentials/);
+    assert.equal(result.httpStatus, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.url, "https://api.deepseek.com/v1/models");
+    assert.equal(calls[0]?.headers.Authorization, "Bearer sk-123");
+  });
+
+  test("with key: 401 means invalid credentials but endpoint reachable", async () => {
+    const { service } = await serviceWith(async () => new Response(null, { status: 401 }));
+    const result = await service.testProvider({
+      endpointUrl: "https://example.com/v1",
+      api: "openai-completions",
+      apiKey: "bad",
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.detail, /Invalid credentials/);
+    assert.equal(result.httpStatus, 401);
+  });
+
+  test("with key: missing model-list endpoint degrades to reachability", async () => {
+    let phase = 0;
+    const { service, calls } = await serviceWith(async () => {
+      phase += 1;
+      return phase === 1 ? new Response(null, { status: 404 }) : new Response(null, { status: 200 });
+    });
+    const result = await service.testProvider({
+      endpointUrl: "https://example.com",
+      api: "openai-completions",
+      apiKey: "sk",
+    });
+    assert.equal(result.ok, true);
+    assert.match(result.detail, /model list unavailable/);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1]?.url, "https://example.com");
+  });
+
+  test("anthropic probes /v1/models when base lacks /v1", async () => {
+    const { service, calls } = await serviceWith(async () => new Response(null, { status: 200 }));
+    const result = await service.testProvider({
+      endpointUrl: "https://api.anthropic.com",
+      api: "anthropic-messages",
+      apiKey: "sk",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(calls[0]?.url, "https://api.anthropic.com/v1/models");
+    assert.equal(calls[0]?.headers["x-api-key"], "sk");
+  });
+
+  test("anthropic keeps /models when base already ends with /v1", async () => {
+    const { service, calls } = await serviceWith(async () => new Response(null, { status: 200 }));
+    await service.testProvider({
+      endpointUrl: "https://api.anthropic.com/v1",
+      api: "anthropic-messages",
+      apiKey: "sk",
+    });
+    assert.equal(calls[0]?.url, "https://api.anthropic.com/v1/models");
+  });
+
+  test("apis without a model-list endpoint fall back to reachability", async () => {
+    const { service, calls } = await serviceWith(async () => new Response(null, { status: 200 }));
+    const result = await service.testProvider({
+      endpointUrl: "https://bedrock.example.com",
+      api: "bedrock-converse-stream",
+      apiKey: "sk",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(calls[0]?.url, "https://bedrock.example.com");
+  });
+
+  test("providerId resolves saved config from models.yml", async () => {
+    await writeFile(
+      join(dir, "models.yml"),
+      "providers:\n  p1:\n    api: openai-completions\n    baseUrl: https://example.com/v1\n    apiKey: sk-123\n",
+      "utf8",
+    );
+    const { service, calls } = await serviceWith(async () => new Response(null, { status: 200 }));
+    const result = await service.testProvider({ providerId: "p1" });
+    assert.equal(result.ok, true);
+    assert.equal(calls[0]?.url, "https://example.com/v1/models");
+    assert.equal(calls[0]?.headers.Authorization, "Bearer sk-123");
+  });
+
+  test("external command credentials are not auto-tested", async () => {
+    await writeFile(
+      join(dir, "models.yml"),
+      "providers:\n  p2:\n    api: openai-completions\n    baseUrl: https://example.com/v1\n    apiKey: \"!op read op://vault/item/key\"\n",
+      "utf8",
+    );
+    const { service, calls } = await serviceWith(async () => new Response(null, { status: 200 }));
+    const result = await service.testProvider({ providerId: "p2" });
+    assert.equal(result.ok, false);
+    assert.match(result.detail, /external command/);
+    assert.equal(calls.length, 0);
+  });
+
+  test("missing base URL fails closed", async () => {
+    const { service, calls } = await serviceWith(async () => new Response(null, { status: 200 }));
+    const result = await service.testProvider({ api: "openai-completions" });
+    assert.equal(result.ok, false);
+    assert.match(result.detail, /Base URL/);
+    assert.equal(calls.length, 0);
+  });
+});
+
+describe("authProbeUrl", () => {
+  test("shapes model-list URL per wire api", () => {
+    assert.equal(authProbeUrl("https://api.deepseek.com/v1", "openai-completions"), "https://api.deepseek.com/v1/models");
+    assert.equal(authProbeUrl("https://x.ai/v1/", "openai-completions"), "https://x.ai/v1/models");
+    assert.equal(authProbeUrl("https://api.anthropic.com", "anthropic-messages"), "https://api.anthropic.com/v1/models");
+    assert.equal(authProbeUrl("https://api.anthropic.com/v1", "anthropic-messages"), "https://api.anthropic.com/v1/models");
+    assert.equal(authProbeUrl("https://api.openai.com/v1", "openai-responses"), "https://api.openai.com/v1/models");
+    assert.equal(authProbeUrl("https://bedrock.example.com", "bedrock-converse-stream"), undefined);
+    assert.equal(authProbeUrl("https://gemini.example.com", "google-gemini-cli"), undefined);
+  });
+});
+
+describe("networkErrorDetail", () => {
+  test("classifies each failure class", () => {
+    assert.equal(networkErrorDetail(abortError()), "Connection failed: request timed out");
+    assert.equal(networkErrorDetail(networkError("ENOTFOUND")), "Connection failed: failed to resolve hostname");
+    assert.equal(networkErrorDetail(networkError("EAI_AGAIN")), "Connection failed: failed to resolve hostname");
+    assert.equal(networkErrorDetail(networkError("ECONNREFUSED")), "Connection failed: connection refused");
+    assert.equal(networkErrorDetail(networkError("ECONNRESET")), "Connection failed: connection reset");
+    assert.equal(networkErrorDetail(networkError("CERT_HAS_EXPIRED")), "Connection failed: TLS certificate error");
+    assert.equal(networkErrorDetail(networkError(undefined)), "Connection failed: network unreachable");
+  });
+});
+
+describe("isRetryableTestFailure", () => {
+  test("only timeout-class jitter is retried", () => {
+    assert.equal(isRetryableTestFailure(abortError()), true);
+    assert.equal(isRetryableTestFailure(networkError(undefined)), true);
+    assert.equal(isRetryableTestFailure(networkError("ECONNRESET")), true);
+    assert.equal(isRetryableTestFailure(networkError("ENOTFOUND")), false);
+    assert.equal(isRetryableTestFailure(networkError("ECONNREFUSED")), false);
+  });
+});
+
+describe("parseCacheThinkingEfforts", () => {
+  test("reads catalog thinking.efforts objects, not a string array", () => {
+    assert.deepEqual(parseCacheThinkingEfforts({ efforts: ["low", "high", "max"] }), ["low", "high", "max"]);
+    assert.deepEqual(parseCacheThinkingEfforts(["minimal", "low"]), ["minimal", "low"]);
+    assert.deepEqual(parseCacheThinkingEfforts({ efforts: ["high", "nope", "off"] }), ["high"]);
+    assert.deepEqual(parseCacheThinkingEfforts({ mode: "effort" }), []);
+    assert.deepEqual(parseCacheThinkingEfforts(undefined), []);
+  });
+});
+
+describe("availableFromCacheModel", () => {
+  test("hydrates context window, reasoning, image and thinking from a catalog cache row", () => {
+    const record = availableFromCacheModel({
+      id: "claude-sonnet-4.5",
+      name: "Claude Sonnet 4.5",
+      provider: "anthropic",
+      reasoning: true,
+      input: ["text", "image"],
+      contextWindow: 200000,
+      maxTokens: 64000,
+      supportsTools: true,
+      thinking: { mode: "anthropic-adaptive", efforts: ["low", "medium", "high", "max"] },
+      cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+    }, "anthropic");
+    assert.equal(record?.selector, "anthropic/claude-sonnet-4.5");
+    assert.equal(record?.contextWindow, 200000);
+    assert.equal(record?.maxTokens, 64000);
+    assert.equal(record?.reasoning, true);
+    assert.equal(record?.image, true);
+    assert.deepEqual(record?.thinking, ["low", "medium", "high", "max"]);
+    const entry = catalogEntryFromAvailable(record!);
+    assert.equal(entry.contextWindow, 200000);
+    assert.equal(entry.source, "catalog");
+    assert.equal(entry.reasoning, true);
+  });
+
+  test("skips null context windows and empty thinking objects", () => {
+    const record = availableFromCacheModel({
+      id: "local-chat",
+      reasoning: false,
+      input: ["text"],
+      contextWindow: null,
+      thinking: { mode: "effort" },
+    }, "ollama");
+    assert.equal(record?.selector, "ollama/local-chat");
+    assert.equal(record?.contextWindow, undefined);
+    assert.equal(record?.reasoning, false);
+    assert.equal(record?.thinking, undefined);
+  });
+});
+
+describe("role thinking control", () => {
+  test("disables Off-only when the model does not reason", () => {
+    const control = roleThinkingControl({ reasoning: false });
+    assert.deepEqual(control.ids, ["off"]);
+    assert.equal(control.disabled, true);
+    assert.equal(clampRoleThinking("high", { reasoning: false }), undefined);
+  });
+
+  test("keeps the full ladder when reasoning has no controllable efforts", () => {
+    const control = roleThinkingControl({ reasoning: true });
+    assert.equal(control.disabled, false);
+    assert.equal(control.ids.includes("xhigh"), true);
+    assert.equal(clampRoleThinking("xhigh", { reasoning: true }), "xhigh");
+  });
+
+  test("clamps to the nearest legal effort on a sparse ladder", () => {
+    const model = { reasoning: true, thinking: ["low", "high"] };
+    assert.deepEqual(roleThinkingControl(model).ids, ["off", "low", "high"]);
+    assert.equal(clampRoleThinking("xhigh", model), "high");
+    assert.equal(clampRoleThinking("medium", model), "high");
+    assert.equal(clampRoleThinking("minimal", model), "low");
+    assert.equal(clampRoleThinking("off", model), "off");
+    assert.equal(clampRoleThinking("high", model), "high");
+  });
+});
+
+describe("upsertProvider enabled / disabledProviders", () => {
+  test("writes disabledProviders in config.yml and get() reflects the switch", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-enabled-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers:\n  acme:\n    api: openai-completions\n    apiKey: sk-test\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const service = createOmpModelsService({ agentDir: dir });
+      const before = await service.get();
+      assert.equal(before.providers.find((item) => item.id === "acme")?.enabled, true);
+
+      await service.upsertProvider({
+        id: "acme",
+        name: "Acme",
+        api: "openai-completions",
+        enabled: false,
+        auth: { type: "api-key" },
+        ...(before.contentHash ? { expectedHash: before.contentHash } : {}),
+      });
+      const config = await readFile(join(dir, "config.yml"), "utf8");
+      assert.match(config, /disabledProviders:\n  - acme/);
+      const models = await readFile(join(dir, "models.yml"), "utf8");
+      assert.doesNotMatch(models, /enabled: false/);
+      const disabled = await service.get();
+      assert.equal(disabled.providers.find((item) => item.id === "acme")?.enabled, false);
+      assert.equal(disabled.providers.find((item) => item.id === "acme")?.status, "disabled");
+
+      await service.upsertProvider({
+        id: "acme",
+        name: "Acme",
+        api: "openai-completions",
+        enabled: true,
+        auth: { type: "api-key" },
+        ...(disabled.contentHash ? { expectedHash: disabled.contentHash } : {}),
+      });
+      const enabled = await service.get();
+      assert.equal(enabled.providers.find((item) => item.id === "acme")?.enabled, true);
+      const configAfter = await readFile(join(dir, "config.yml"), "utf8");
+      assert.match(configAfter, /disabledProviders: \[\]/);
+      const modelsAfter = await readFile(join(dir, "models.yml"), "utf8");
+      assert.doesNotMatch(modelsAfter, /enabled: false/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("disables against a real-shaped config.yml with trailing spaces and no disabledProviders yet", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-enabled-real-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers:\n  sub2api-go:\n    api: openai-completions\n    apiKey: sk-test\n", "utf8");
+      await writeFile(
+        join(dir, "config.yml"),
+        [
+          "shellPath: D:\\Program Files\\Git\\bin\\bash.exe",
+          "defaultProvider: sub2api-go",
+          "modelRoles: ",
+          "  default: sub2api-go/grok-4.6:xhigh",
+          "task: ",
+          "  agentModelOverrides: ",
+          "    task: sub2api-go/deepseek-v4-flash:max",
+          "theme: ",
+          "  dark: titanium",
+          "dev: ",
+          "  autoqaConsent: granted",
+        ].join("\n"),
+        "utf8",
+      );
+      const service = createOmpModelsService({ agentDir: dir });
+      const before = await service.get();
+      await service.upsertProvider({
+        id: "sub2api-go",
+        name: "sub2api-go",
+        api: "openai-completions",
+        enabled: false,
+        auth: { type: "api-key" },
+        ...(before.contentHash ? { expectedHash: before.contentHash } : {}),
+      });
+      const after = await service.get();
+      assert.equal(after.providers.find((item) => item.id === "sub2api-go")?.enabled, false);
+      const config = await readFile(join(dir, "config.yml"), "utf8");
+      assert.match(config, /disabledProviders:\n  - sub2api-go/);
+      assert.match(config, /defaultProvider: sub2api-go/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("provider disabling remains editable without treating a disk cache as available", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-disabled-available-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers:\n  acme:\n    api: openai-completions\n    apiKey: sk-test\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(join(dir, "models.db"));
+      db.exec("CREATE TABLE model_cache (provider_id TEXT, models TEXT, authoritative INTEGER)");
+      db.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "acme",
+        JSON.stringify([{ id: "fast", name: "Acme Fast", provider: "acme", reasoning: false, input: ["text"], output: ["text"] }]),
+      );
+      db.close();
+      const service = createOmpModelsService({ agentDir: dir });
+      const before = await service.get();
+      assert.deepEqual(before.availableModels, []);
+      assert.equal(before.availability?.status, "unverified");
+      await service.upsertProvider({
+        id: "acme",
+        name: "Acme",
+        api: "openai-completions",
+        enabled: false,
+        auth: { type: "api-key" },
+        ...(before.contentHash ? { expectedHash: before.contentHash } : {}),
+      });
+      const after = await service.get();
+      assert.equal(after.providers.find((item) => item.id === "acme")?.enabled, false);
+      assert.equal(after.availableModels.some((item) => item.provider === "acme"), false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("model configuration thinking without Runtime", () => {
+  test("keeps models.yml thinking.efforts on the selector used by role rows", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-role-thinking-"));
+    try {
+      await writeFile(
+        join(dir, "models.yml"),
+        [
+          "providers:",
+          "  gateway:",
+          "    api: openai-completions",
+          "    models:",
+          "    - id: flash",
+          "      reasoning: true",
+          "      thinking:",
+          "        mode: effort",
+          "        efforts:",
+          "        - high",
+          "        - max",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await writeFile(join(dir, "config.yml"), "modelRoles:\n  default: gateway/flash:high\n", "utf8");
+      const snapshot = await createOmpModelsService({ agentDir: dir }).get();
+      assert.deepEqual(snapshot.availableModels, []);
+      assert.equal(snapshot.availability?.status, "unverified");
+      assert.equal(snapshot.roles.find(role => role.id === "default")?.primary, "gateway/flash");
+      assert.equal(snapshot.roles.find(role => role.id === "default")?.thinking, "high");
+      assert.equal(snapshot.roles.find(role => role.id === "default")?.issue, undefined);
+      const catalog = snapshot.providers[0]?.models.find((model) => model.id === "flash");
+      assert.deepEqual(catalog?.thinking, ["high", "max"]);
+      const roundTrip = availableFromCatalogEntry("gateway", catalog!);
+      assert.deepEqual(roundTrip.thinking, ["high", "max"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("parseDiscoveryModels", () => {
+  test("nested gateway ladders override defaults, explicit false disables reasoning and opt-out leaves it unknown", () => {
+    const payload = { data: [{ id: "gateway", metadata: { display_name: "Gateway", context_window: 32768, input_modalities: ["text", "image"], supported_reasoning_levels: [{ effort: "none" }, { effort: "HIGH" }, { effort: "low" }], default_reasoning_level: "high" } }] };
+    const model = parseDiscoveryModels(payload)[0]!;
+    assert.equal(model.name, "Gateway"); assert.equal(model.contextWindow, 32768); assert.equal(model.image, true);
+    assert.deepEqual(model.thinkingConfig?.efforts, ["low", "high"]); assert.equal(model.thinkingConfig?.defaultLevel, "high");
+    const disabled = parseDiscoveryModels({ data: [{ ...payload.data[0], metadata: { ...payload.data[0]!.metadata, reasoning: false } }] })[0]!;
+    assert.equal(disabled.reasoning, false); assert.equal(disabled.thinkingConfig, undefined);
+    assert.equal(parseDiscoveryModels(payload, false)[0]?.reasoning, undefined);
+    assert.equal(parseDiscoveryModels({ data: [{ model_name: "judge", model_info: { mode: "decisions" } }] })[0]?.kind, "judge");
+  });
+  test("reads Ollama tags and OpenAI data lists", () => {
+    assert.deepEqual(
+      parseDiscoveryModels({ models: [{ name: "qwen2.5:latest" }, { name: "llama3.2" }] }).map((item) => item.id),
+      ["qwen2.5:latest", "llama3.2"],
+    );
+    assert.deepEqual(
+      parseDiscoveryModels({ data: [{ id: "gpt-4.1" }, { id: "gpt-4.1-mini" }] }).map((item) => item.id),
+      ["gpt-4.1", "gpt-4.1-mini"],
+    );
+  });
+
+  test("keeps metadata absent when the endpoint reports none", () => {
+    assert.deepEqual(parseDiscoveryModels({ data: [{ id: "gpt-4.1" }] }), [{ id: "gpt-4.1", name: "gpt-4.1" }]);
+  });
+
+  test("extracts OpenAI-compatible context and output limits", () => {
+    const [model] = parseDiscoveryModels({
+      data: [{
+        id: "acme/big",
+        context_length: 1_000_000,
+        top_provider: { max_completion_tokens: 64_000 },
+        architecture: { input_modalities: ["text", "image"] },
+        supported_parameters: ["reasoning", "tools"],
+      }],
+    });
+    assert.equal(model?.contextWindow, 1_000_000);
+    assert.equal(model?.maxTokens, 64_000);
+    assert.equal(model?.image, true);
+    assert.equal(model?.reasoning, true);
+  });
+
+  test("reads vLLM max_model_len and text-only modality", () => {
+    const [model] = parseDiscoveryModels({ data: [{ id: "local", max_model_len: "32768", input_modalities: ["text"] }] });
+    assert.equal(model?.contextWindow, 32_768);
+    assert.equal(model?.image, false);
+    assert.equal(model?.maxTokens, undefined);
+  });
+
+  test("uses the Anthropic display_name as the label", () => {
+    const [model] = parseDiscoveryModels({ data: [{ id: "claude-opus-4-5", display_name: "Claude Opus 4.5" }] });
+    assert.equal(model?.id, "claude-opus-4-5");
+    assert.equal(model?.name, "Claude Opus 4.5");
+  });
+
+  test("strips the Google models/ prefix and maps token limits", () => {
+    const [model] = parseDiscoveryModels({
+      models: [{ name: "models/gemini-3-pro", displayName: "Gemini 3 Pro", inputTokenLimit: 1_048_576, outputTokenLimit: 65_536 }],
+    });
+    assert.equal(model?.id, "gemini-3-pro");
+    assert.equal(model?.name, "Gemini 3 Pro");
+    assert.equal(model?.contextWindow, 1_048_576);
+    assert.equal(model?.maxTokens, 65_536);
+  });
+
+  test("reads Ollama thinking capability", () => {
+    const [model] = parseDiscoveryModels({ models: [{ name: "qwen3:32b", capabilities: ["completion", "thinking"] }] });
+    assert.equal(model?.reasoning, true);
+  });
+
+  test("ignores non-positive and unparsable limits", () => {
+    const [model] = parseDiscoveryModels({ data: [{ id: "x", context_length: 0, max_output_tokens: "n/a" }] });
+    assert.equal(model?.contextWindow, undefined);
+    assert.equal(model?.maxTokens, undefined);
+  });
+});
+
+describe("modelListRequest", () => {
+  test("openai-compatible bases try /models then the /v1 variant", () => {
+    assert.deepEqual(modelListRequest("https://acme.test", "openai-completions").urls, [
+      "https://acme.test/models",
+      "https://acme.test/v1/models",
+    ]);
+    assert.deepEqual(modelListRequest("https://acme.test/v1", "openai-completions").urls, [
+      "https://acme.test/v1/models",
+    ]);
+  });
+
+  test("anthropic uses x-api-key with an explicit api version", () => {
+    const request = modelListRequest("https://api.anthropic.com", "anthropic-messages", "sk");
+    assert.deepEqual(request.urls, ["https://api.anthropic.com/v1/models"]);
+    assert.equal(request.headers["x-api-key"], "sk");
+    assert.equal(request.headers["anthropic-version"], "2023-06-01");
+    assert.equal(request.headers.Authorization, undefined);
+  });
+
+  test("google apis use x-goog-api-key", () => {
+    const request = modelListRequest("https://generativelanguage.googleapis.com/v1beta", "google-generative-ai", "key");
+    assert.equal(request.headers["x-goog-api-key"], "key");
+    assert.equal(request.headers.Authorization, undefined);
+  });
+
+  test("apis without a model-list surface yield no urls", () => {
+    assert.deepEqual(modelListRequest("https://bedrock.test", "bedrock-converse-stream", "sk").urls, []);
+    assert.deepEqual(modelListRequest("https://gemini.test", "google-gemini-cli").urls, []);
+  });
+});
+
+describe("envNameForProvider", () => {
+  test("maps provider id to conventional API key env", () => {
+    assert.equal(envNameForProvider("open-ai"), "OPEN_AI_API_KEY");
+    assert.equal(envNameForProvider("ollama"), "OLLAMA_API_KEY");
+  });
+
+  test("classifies env names vs literal keys", () => {
+    assert.equal(isEnvConfigName("OPENAI_API_KEY"), true);
+    assert.equal(isEnvConfigName("ACME_TOKEN"), true);
+    assert.equal(isEnvConfigName("sk-proj-abc"), false);
+    assert.equal(isEnvConfigName("!op read op://vault/key"), false);
+  });
+});
+
+describe("P1/P2 model-config adapter surfaces", () => {
+  async function withAgentDir<T>(run: (dir: string, service: ReturnType<typeof createOmpModelsService>) => Promise<T>): Promise<T> {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-p1p2-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      return await run(dir, createOmpModelsService({ agentDir: dir }));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("env auth stays authenticated when the conventional env var is set", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-env-"));
+    const key = envNameForProvider("acme");
+    const previous = process.env[key];
+    try {
+      process.env[key] = "sk-from-env";
+      await writeFile(join(dir, "models.yml"), "providers:\n  acme:\n    api: openai-completions\n    name: Acme\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const snapshot = await createOmpModelsService({ agentDir: dir }).get();
+      const acme = snapshot.providers.find((item) => item.id === "acme");
+      assert.equal(acme?.auth.type, "env");
+      assert.equal(acme?.auth.hasSecret, true);
+      assert.equal(acme?.auth.envName, key);
+      assert.notEqual(acme?.status, "not-authenticated");
+    } finally {
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit env name round-trips through upsert and get", async () => {
+    await withAgentDir(async (dir, service) => {
+      await service.upsertProvider({
+        id: "acme",
+        name: "Acme",
+        api: "openai-completions",
+        auth: { type: "env", envName: "ACME_TOKEN" },
+      });
+      const yaml = await readFile(join(dir, "models.yml"), "utf8");
+      assert.match(yaml, /apiKey: ACME_TOKEN/);
+      assert.doesNotMatch(yaml, /auth:/);
+      const snapshot = await service.get();
+      const acme = snapshot.providers.find((item) => item.id === "acme");
+      assert.equal(acme?.auth.type, "env");
+      assert.equal(acme?.auth.envName, "ACME_TOKEN");
+      assert.equal(acme?.auth.apiKey, undefined);
+    });
+  });
+
+  test("name round-trips and empty baseUrl is omitted from yaml", async () => {
+    await withAgentDir(async (dir, service) => {
+      await service.upsertProvider({
+        id: "acme",
+        name: "Acme Corp",
+        api: "openai-completions",
+        endpointUrl: "https://api.acme.test/v1",
+        auth: { type: "api-key", apiKey: "sk-test" },
+      });
+      const named = await service.get();
+      assert.equal(named.providers.find((item) => item.id === "acme")?.name, "Acme Corp");
+      await service.upsertProvider({
+        id: "acme",
+        name: "Acme Corp",
+        api: "openai-completions",
+        endpointUrl: "",
+        auth: { type: "api-key" },
+        ...(named.contentHash ? { expectedHash: named.contentHash } : {}),
+      });
+      const yaml = await readFile(join(dir, "models.yml"), "utf8");
+      assert.doesNotMatch(yaml, /baseUrl:/);
+      assert.match(yaml, /name: Acme Corp/);
+    });
+  });
+
+  test("setEnabled only touches disabledProviders", async () => {
+    await withAgentDir(async (dir, service) => {
+      await service.upsertProvider({
+        id: "acme",
+        name: "Acme",
+        api: "openai-completions",
+        auth: { type: "api-key", apiKey: "sk-test" },
+      });
+      const before = await readFile(join(dir, "models.yml"), "utf8");
+      await service.setProviderEnabled({ id: "acme", enabled: false });
+      const after = await readFile(join(dir, "models.yml"), "utf8");
+      assert.equal(after, before);
+      const config = await readFile(join(dir, "config.yml"), "utf8");
+      assert.match(config, /disabledProviders:\n  - acme/);
+      const snapshot = await service.get();
+      assert.equal(snapshot.providers.find((item) => item.id === "acme")?.enabled, false);
+    });
+  });
+
+  test("thinking from models.db does not leak across providers with the same model id", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-think-"));
+    try {
+      await writeFile(
+        join(dir, "models.yml"),
+        [
+          "providers:",
+          "  openai:",
+          "    api: openai-completions",
+          "    models:",
+          "    - id: shared",
+          "      name: Shared",
+          "  anthropic:",
+          "    api: anthropic-messages",
+          "    models:",
+          "    - id: shared",
+          "      name: Shared",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(join(dir, "models.db"));
+      db.exec("CREATE TABLE model_cache (provider_id TEXT, models TEXT, authoritative INTEGER)");
+      db.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "openai",
+        JSON.stringify([{ id: "shared", provider: "openai", reasoning: true, thinking: { efforts: ["low"] } }]),
+      );
+      db.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "anthropic",
+        JSON.stringify([{ id: "shared", provider: "anthropic", reasoning: true, thinking: { efforts: ["max"] } }]),
+      );
+      db.close();
+      const snapshot = await createOmpModelsService({ agentDir: dir }).get();
+      assert.deepEqual(snapshot.availableModels, []);
+      assert.equal(snapshot.availability?.status, "unverified");
+      assert.equal(snapshot.providers.find(provider => provider.id === "openai")?.models[0]?.thinking, undefined);
+      assert.equal(snapshot.providers.find(provider => provider.id === "anthropic")?.models[0]?.thinking, undefined);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not surface cache-only catalog providers that are absent from models.yml", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-cache-only-"));
+    try {
+      await writeFile(
+        join(dir, "models.yml"),
+        [
+          "providers:",
+          "  gateway:",
+          "    api: openai-completions",
+          "    models:",
+          "    - id: flash",
+          "      name: Flash",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(join(dir, "models.db"));
+      db.exec("CREATE TABLE model_cache (provider_id TEXT, models TEXT, authoritative INTEGER)");
+      db.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "gateway",
+        JSON.stringify([
+          { id: "flash", provider: "gateway", name: "Flash", reasoning: true, thinking: { efforts: ["high"] } },
+          { id: "pro", provider: "gateway", name: "Pro" },
+        ]),
+      );
+      db.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "zenmux",
+        JSON.stringify([{ id: "claude-sonnet-4", provider: "zenmux", name: "Claude Sonnet 4" }]),
+      );
+      db.close();
+      const snapshot = await createOmpModelsService({ agentDir: dir }).get();
+      assert.deepEqual(
+        snapshot.providers.map((item) => item.id),
+        ["gateway"],
+      );
+      assert.equal(
+        snapshot.availableModels.some((item) => item.provider === "zenmux" || item.selector.startsWith("zenmux/")),
+        false,
+      );
+      assert.deepEqual(snapshot.availableModels, []);
+      assert.deepEqual(snapshot.providers[0]?.models.map(model => model.id), ["flash"]);
+      assert.equal(snapshot.providers[0]?.models[0]?.thinking, undefined);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("credential-scoped OAuth caches stay in the live Runtime catalog", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-authed-cache-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers:\n  gateway:\n    api: openai-completions\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const { DatabaseSync } = await import("node:sqlite");
+      const modelsDb = new DatabaseSync(join(dir, "models.db"));
+      modelsDb.exec("CREATE TABLE model_cache (provider_id TEXT, models TEXT, authoritative INTEGER)");
+      modelsDb.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "zenmux",
+        JSON.stringify([{ id: "claude-sonnet-4", provider: "zenmux", name: "Claude Sonnet 4" }]),
+      );
+      modelsDb.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "opencode-go:models-v1:testfp",
+        JSON.stringify([{ id: "glm-5", provider: "opencode-go", name: "GLM 5" }]),
+      );
+      modelsDb.close();
+      const authDb = new DatabaseSync(join(dir, "agent.db"));
+      authDb.exec("CREATE TABLE auth_credentials (provider TEXT, disabled_cause TEXT, updated_at INTEGER)");
+      authDb.prepare("INSERT INTO auth_credentials (provider, disabled_cause) VALUES (?, NULL)").run("opencode-go");
+      authDb.close();
+      const snapshot = await createOmpModelsService({ agentDir: dir }).get();
+      assert.deepEqual(
+        snapshot.providers.map((item) => item.id).sort(),
+        ["gateway"],
+      );
+      assert.equal(snapshot.availableModels.some((item) => item.selector === "opencode-go/glm-5"), false);
+      assert.equal(
+        snapshot.availableModels.some((item) => item.provider === "zenmux" || item.selector.startsWith("zenmux/")),
+        false,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("LM Studio native decisions become judges with their loaded context window", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-lm-decisions-"));
+    try {
+      const service = createOmpModelsService({ agentDir: dir, fetch: (async input => {
+        const url = String(input);
+        const payload = url.endsWith("/api/v1/models") ? { models: [{ key: "decision-model", type: "decision", has_vision_adapter: true, max_context_length: 32768, loaded_instances: [{ id: "loaded-judge", config: { context_length: 8192 } }] }] } : url.endsWith("/api/v0/models") ? { data: [] } : { data: [{ id: "loaded-judge" }] };
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }) as typeof fetch });
+      const result = await service.probeProvider({ providerId: "lm-studio", discoveryType: "lm-studio", endpointUrl: "http://127.0.0.1:1234/v1" });
+      assert.equal(result.models[0]?.kind, "judge"); assert.equal(result.models[0]?.api, "openai-decisions"); assert.equal(result.models[0]?.contextWindow, 8192); assert.equal(result.models[0]?.image, true); assert.equal(result.models[0]?.reasoning, false);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  test("probe parses Ollama tags and does not write models.db", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-probe-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers:\n  ollama:\n    api: openai-completions\n    baseUrl: http://127.0.0.1:11434/v1\n    discovery:\n      type: ollama\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const calls: string[] = [];
+      const service = createOmpModelsService({
+        agentDir: dir,
+        fetch: (async (input) => {
+          calls.push(String(input));
+          return new Response(JSON.stringify({ models: [{ name: "qwen2.5" }, { name: "llama3.2" }] }), { status: 200 });
+        }) as typeof fetch,
+      });
+      const before = await readFile(join(dir, "models.yml"), "utf8");
+      const result = await service.probeProvider({ providerId: "ollama" });
+      assert.equal(result.ok, true);
+      assert.equal(result.found, 2);
+      assert.deepEqual(result.models.map((item) => item.id), ["qwen2.5", "llama3.2"]);
+      assert.equal(calls[0], ollamaTagsUrl("http://127.0.0.1:11434/v1"));
+      assert.equal(await readFile(join(dir, "models.yml"), "utf8"), before);
+      assert.equal(await readFile(join(dir, "models.db"), "utf8").then(() => "exists").catch(() => "missing"), "missing");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("probe without a discovery type fetches the wire API model list", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-probe-api-"));
+    try {
+      await writeFile(
+        join(dir, "models.yml"),
+        "providers:\n  gateway:\n    api: openai-completions\n    baseUrl: \"https://gw.test/v1\"\n    apiKey: sk-gateway\n",
+        "utf8",
+      );
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+      const service = createOmpModelsService({
+        agentDir: dir,
+        fetch: (async (input, init?: RequestInit) => {
+          calls.push({ url: String(input), headers: { ...((init?.headers ?? {}) as Record<string, string>) } });
+          return new Response(
+            JSON.stringify({ data: [{ id: "glm-5", context_length: 200_000 }] }),
+            { status: 200 },
+          );
+        }) as typeof fetch,
+      });
+      const before = await readFile(join(dir, "models.yml"), "utf8");
+      const result = await service.probeProvider({ providerId: "gateway", headers: { "X-Org-Id": "org-1" } });
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.models, [{ id: "glm-5", name: "glm-5", contextWindow: 200_000 }]);
+      assert.equal(calls[0]?.url, "https://gw.test/v1/models");
+      assert.equal(calls[0]?.headers.Authorization, "Bearer sk-gateway");
+      assert.equal(calls[0]?.headers["X-Org-Id"], "org-1");
+      assert.equal(await readFile(join(dir, "models.yml"), "utf8"), before);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("probe honors the request api over models.yml and never lets headers shadow auth", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-probe-anthropic-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+      const service = createOmpModelsService({
+        agentDir: dir,
+        fetch: (async (input, init?: RequestInit) => {
+          calls.push({ url: String(input), headers: { ...((init?.headers ?? {}) as Record<string, string>) } });
+          return new Response(JSON.stringify({ data: [{ id: "claude-opus-4-5", display_name: "Claude Opus 4.5" }] }), { status: 200 });
+        }) as typeof fetch,
+      });
+      const result = await service.probeProvider({
+        providerId: "proxy",
+        api: "anthropic-messages",
+        endpointUrl: "https://proxy.test",
+        apiKey: "sk-live",
+        headers: { "x-api-key": "attacker", "anthropic-version": "1999-01-01" },
+      });
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.models, [{ id: "claude-opus-4-5", name: "Claude Opus 4.5" }]);
+      assert.equal(calls[0]?.url, "https://proxy.test/v1/models");
+      assert.equal(calls[0]?.headers["x-api-key"], "sk-live");
+      assert.equal(calls[0]?.headers["anthropic-version"], "2023-06-01");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("probe reports command credentials and apis without a model list instead of firing blind requests", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-probe-guard-"));
+    try {
+      await writeFile(
+        join(dir, "models.yml"),
+        "providers:\n  vault:\n    api: openai-completions\n    baseUrl: \"https://vault.test/v1\"\n    apiKey: \"!op read op://dev/key\"\n",
+        "utf8",
+      );
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      let calls = 0;
+      const service = createOmpModelsService({
+        agentDir: dir,
+        fetch: (async () => {
+          calls += 1;
+          return new Response(null, { status: 200 });
+        }) as typeof fetch,
+      });
+      const command = await service.probeProvider({ providerId: "vault" });
+      assert.equal(command.ok, false);
+      assert.match(command.detail, /external command/);
+      const noList = await service.probeProvider({
+        providerId: "bedrock",
+        api: "bedrock-converse-stream",
+        endpointUrl: "https://bedrock.test",
+      });
+      assert.equal(noList.ok, false);
+      assert.match(noList.detail, /no model-list endpoint/);
+      assert.equal(calls, 0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("probe surfaces invalid credentials distinctly from a plain failure", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-probe-401-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const service = createOmpModelsService({
+        agentDir: dir,
+        fetch: (async () => new Response(null, { status: 401 })) as typeof fetch,
+      });
+      const result = await service.probeProvider({
+        providerId: "gateway",
+        api: "openai-completions",
+        endpointUrl: "https://gw.test/v1",
+        apiKey: "bad",
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.httpStatus, 401);
+      assert.match(result.detail, /Invalid credentials/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("custom roles, writeRoles deletes, project storage needs cwd", async () => {
+    await withAgentDir(async (dir, service) => {
+      await service.createRole({ id: "review", name: "Review", desc: "custom" });
+      const created = await readFile(join(dir, "config.yml"), "utf8");
+      assert.match(created, /modelTags:/);
+      assert.match(created, /review:/);
+      await service.setRole({ roleId: "review", selector: "acme/fast" });
+      await service.writeRoles({ roles: { default: "acme/fast" } });
+      const snapshot = await service.get();
+      assert.equal(snapshot.roles.find((role) => role.id === "default")?.primary, "acme/fast");
+      assert.equal(snapshot.roles.find((role) => role.id === "review")?.primary, "");
+      await assert.rejects(
+        async () => {
+          await service.setRoleStorage({ storage: "project" });
+        },
+        (error: unknown) => {
+          assert.equal((error as { code?: string }).code, "UNAVAILABLE");
+          return true;
+        },
+      );
+    });
+  });
+
+  test("project role storage writes cwd .juling/config.yml when a workspace exists", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-project-"));
+    const cwd = await mkdtemp(join(tmpdir(), "omp-models-cwd-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles:\n  default: acme/fast\n", "utf8");
+      const service = createOmpModelsService({ agentDir: dir, getCwd: () => cwd });
+      await service.setRoleStorage({ storage: "project" });
+      await service.setRole({ roleId: "default", selector: "acme/slow" });
+      const project = await readFile(join(cwd, ".juling", "config.yml"), "utf8");
+      assert.match(project, /acme\/slow/);
+      const snapshot = await service.get();
+      assert.equal(snapshot.modelRoleStorage, "project");
+      assert.equal(snapshot.projectScopeAvailable, true);
+      assert.equal(snapshot.roles.find((role) => role.id === "default")?.scope, "project");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("project role storage reads legacy .omp/config.yml but writes .juling", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-legacy-"));
+    const cwd = await mkdtemp(join(tmpdir(), "omp-models-legacy-cwd-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\nmodelRoleStorage: project\n", "utf8");
+      await mkdir(join(cwd, ".omp"), { recursive: true });
+      const legacyConfig = "modelRoles:\n  default: acme/legacy\n";
+      await writeFile(join(cwd, ".omp", "config.yml"), legacyConfig, "utf8");
+
+      const service = createOmpModelsService({ agentDir: dir, getCwd: () => cwd });
+      const snapshot = await service.get();
+      assert.equal(snapshot.roles.find((role) => role.id === "default")?.scope, "project");
+      assert.equal(snapshot.roles.find((role) => role.id === "default")?.primary, "acme/legacy");
+
+      // Writes land in the canonical tree; the legacy file stays byte-identical.
+      await service.setRole({ roleId: "default", selector: "acme/canonical" });
+      assert.match(await readFile(join(cwd, ".juling", "config.yml"), "utf8"), /acme\/canonical/);
+      assert.equal(await readFile(join(cwd, ".omp", "config.yml"), "utf8"), legacyConfig);
+      assert.equal((await service.get()).roles.find((role) => role.id === "default")?.primary, "acme/canonical");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("fallback chains and modelProviderOrder persist", async () => {
+    await withAgentDir(async (dir, service) => {
+      await service.setFallback({
+        chains: { "acme/fast": ["acme/slow"] },
+        revertPolicy: "never",
+      });
+      await service.setProviderOrder({ order: ["anthropic", "openai"] });
+      const snapshot = await service.get();
+      assert.deepEqual(snapshot.fallbackChains["acme/fast"], ["acme/slow"]);
+      assert.equal(snapshot.fallbackRevertPolicy, "never");
+      assert.deepEqual(snapshot.modelProviderOrder, ["anthropic", "openai"]);
+      const config = await readFile(join(dir, "config.yml"), "utf8");
+      assert.match(config, /fallbackRevertPolicy: never/);
+      assert.match(config, /modelProviderOrder:/);
+    });
+  });
+
+  test("logout does not return secrets and authenticated follows auth sqlite", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-auth-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(join(dir, "agent.db"));
+      db.exec("CREATE TABLE auth_credentials (provider TEXT, disabled_cause TEXT, updated_at INTEGER, secret TEXT)");
+      db.prepare("INSERT INTO auth_credentials (provider, disabled_cause, secret) VALUES (?, NULL, ?)").run("anthropic", "sk-should-not-leak");
+      db.close();
+      const service = createOmpModelsService({ agentDir: dir });
+      const before = await service.get();
+      assert.equal(before.loginProviders.find((item) => item.id === "anthropic")?.authenticated, true);
+      const result = await service.logout({ providerId: "anthropic" });
+      assert.equal(result.applied, true);
+      assert.equal(JSON.stringify(result).includes("sk-should-not-leak"), false);
+      const after = await service.get();
+      assert.equal(after.loginProviders.find((item) => item.id === "anthropic")?.authenticated, false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("provider presets", () => {
+  test("gateway and aggregator presets come before official providers", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-preset-order-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const service = createOmpModelsService({ agentDir: dir });
+      const model = await service.get();
+      const groups = model.presets.map((group) => group.group);
+      assert.match(groups[0] ?? "", /Gateway \/ 聚合|Gateway \/ Aggregators/u);
+      assert.match(groups[1] ?? "", /官方 \/ 主流|Official \/ Popular/u);
+      const gateways = model.presets[0]?.items ?? [];
+      assert.equal(gateways.length, 6);
+      assert.equal(gateways[0]?.id, "juling-main");
+      assert.equal(gateways[0]?.endpoint, "https://www.177911.com/v1");
+      assert.deepEqual(gateways.map((item) => item.endpoint), [
+        "https://www.177911.com/v1",
+        "https://v1.177911.com/v1",
+        "https://v2.177911.com/v1",
+        "https://v3.177911.com/v1",
+        "https://v4.177911.com/v1",
+        "https://v5.177911.com/v1",
+      ]);
+      assert.deepEqual(gateways.map((item) => item.website), [
+        "https://www.177911.com",
+        "https://v1.177911.com",
+        "https://v2.177911.com",
+        "https://v3.177911.com",
+        "https://v4.177911.com",
+        "https://v5.177911.com",
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("xAI paid API preset uses OpenAI Responses", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-xai-preset-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const service = createOmpModelsService({ agentDir: dir });
+      const model = await service.get();
+      const xai = model.presets.flatMap((group) => [...group.items]).find((item) => item.id === "xai");
+      assert.equal(xai?.api, "openai-responses");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("upsertNestedRecordList", () => {
+  test("inserts a block-form list into an existing block record", () => {
+    const source = "providers:\n  tinyModel: online\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", ["perplexity", "exa"]);
+    assert.equal(out, "providers:\n  tinyModel: online\n  webSearchOrder:\n    - perplexity\n    - exa\n");
+  });
+
+  test("replaces an inline list entry inside a block record", () => {
+    const source = "providers:\n  webSearchOrder: [perplexity]\n  tinyModel: online\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", ["gemini"]);
+    assert.equal(out, "providers:\n  webSearchOrder:\n    - gemini\n  tinyModel: online\n");
+  });
+
+  test("consumes a block-form list entry so no stray items remain", () => {
+    const source = "providers:\n  webSearchOrder:\n    - perplexity\n    - gemini\n  tinyModel: online\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", ["duckduckgo"]);
+    assert.equal(out, "providers:\n  webSearchOrder:\n    - duckduckgo\n  tinyModel: online\n");
+  });
+
+  test("writes an empty list as inline [] and clears block items", () => {
+    const source = "providers:\n  webSearchOrder:\n    - perplexity\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", []);
+    assert.equal(out, "providers:\n  webSearchOrder: []\n");
+  });
+
+  test("updates an entry inside an inline record form", () => {
+    const source = "providers: { tinyModel: online }\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", ["perplexity", "exa"]);
+    assert.equal(out, "providers: { tinyModel: online, webSearchOrder: [perplexity, exa] }\n");
+  });
+
+  test("appends block form when the record is absent", () => {
+    const source = "theme:\n  dark: titanium\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", ["google"]);
+    assert.equal(out, "theme:\n  dark: titanium\nproviders:\n  webSearchOrder:\n    - google\n");
+  });
+});
+
+describe("web search config", () => {
+  async function withDir<T>(run: (dir: string, service: ReturnType<typeof createOmpModelsService>) => Promise<T>): Promise<T> {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-websearch-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\nproviders:\n  tinyModel: online\n", "utf8");
+      return await run(dir, createOmpModelsService({ agentDir: dir }));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("setWebSearch writes core keys and get() reads them back", async () => {
+    await withDir(async (dir, service) => {
+      await service.setWebSearch({
+        enabled: false,
+        order: ["perplexity", "exa", "duckduckgo"],
+        exclude: ["mojeek"],
+        timeoutSeconds: 120,
+        geminiModel: "gemini-2.5-flash",
+      });
+      const ws = (await service.get()).webSearch;
+      assert.equal(ws.enabled, false);
+      assert.equal(ws.routing?.primary, "web/perplexity");
+      assert.deepEqual(ws.routing?.fallbacks?.slice(0, 2), ["web/exa", "web/duckduckgo"]);
+      assert.equal(ws.routing?.fallbacks?.includes("web/mojeek"), false);
+      assert.equal(ws.timeoutSeconds, 120);
+      assert.ok(ws.routing?.fallbacks?.includes("web/hosted"));
+      assert.equal(ws.routing?.fallbacks?.includes("google/gemini-2.5-flash"), false);
+      const raw = await readFile(join(dir, "config.yml"), "utf8");
+      assert.doesNotMatch(raw, /webSearchOrder:/);
+      assert.doesNotMatch(raw, /webSearchExclude:/);
+      assert.match(raw, /webSearchTimeoutSeconds: 120/);
+      assert.doesNotMatch(raw, /webSearchGeminiModel:/);
+      assert.match(raw, /web_search:\n  enabled: false/);
+    });
+  });
+
+  test("setWebSearch keeps unrelated config.yml keys and comments", async () => {
+    await withDir(async (dir, service) => {
+      const withComment = "modelRoles: {}\n# a comment\nproviders:\n  tinyModel: online\n";
+      await writeFile(join(dir, "config.yml"), withComment, "utf8");
+      await service.setWebSearch({ order: ["google"] });
+      const raw = await readFile(join(dir, "config.yml"), "utf8");
+      assert.match(raw, /# a comment/);
+      assert.match(raw, /tinyModel: online/);
+      assert.match(raw, /web: web\/google/);
+    });
+  });
+
+  test("search auto-order starts with keyless Parallel and accepts Ollama Cloud", async () => {
+    await withDir(async (_dir, service) => {
+      const before = (await service.get()).webSearch;
+      assert.equal(before.providers[0]?.id, "parallel");
+      assert.equal(before.providers[0]?.credentialFree, true);
+      assert.equal(before.providers.find(provider => provider.id === "ollama")?.apiKeyId, "ollama-cloud");
+      await service.setWebSearch({ order: ["ollama", "parallel"] });
+      const routing = (await service.get()).webSearch.routing;
+      assert.equal(routing?.primary, "web/ollama"); assert.equal(routing?.fallbacks?.[0], "web/parallel");
+    });
+  });
+
+  test("setWebSearch filters unknown ids and dedupes the order", async () => {
+    await withDir(async (_dir, service) => {
+      await service.setWebSearch({ order: ["perplexity", "not-a-provider", "perplexity"] });
+      const ws = (await service.get()).webSearch;
+      assert.equal(ws.routing?.primary, "web/perplexity");
+      assert.equal(ws.routing?.fallbacks?.includes("web/not-a-provider"), false);
+    });
+  });
+
+  test("search settings preserve Keenable and DeepSeek with their credential controls", async () => {
+    await withDir(async (_dir, service) => {
+      await service.setWebSearch({ order: ["keenable", "deepseek"] });
+      const ws = (await service.get()).webSearch;
+      assert.equal(ws.routing?.primary, "web/keenable");
+      assert.equal(ws.routing?.fallbacks?.[0], "web/deepseek");
+      const deepseek = ws.providers.find(provider => provider.id === "deepseek");
+      assert.equal(deepseek?.apiKeyId, "deepseek");
+      assert.deepEqual(deepseek?.envKeys, ["DEEPSEEK_API_KEY"]);
+      assert.equal(ws.providers.find(provider => provider.id === "keenable")?.apiKeyId, "keenable");
+    });
+  });
+
+  test("setWebSearch clamps timeout to the runtime ceiling", async () => {
+    await withDir(async (_dir, service) => {
+      await service.setWebSearch({ timeoutSeconds: 9999 });
+      const ws = (await service.get()).webSearch;
+      assert.equal(ws.timeoutSeconds, 300);
+    });
+  });
+
+  test("empty geminiModel clears the key back to the default", async () => {
+    await withDir(async (_dir, service) => {
+      await service.setWebSearch({ geminiModel: "gemini-2.5-flash" });
+      await service.setWebSearch({ geminiModel: "" });
+      const ws = (await service.get()).webSearch;
+      assert.equal(ws.geminiModel, "");
+    });
+  });
+
+  test("searxng token is set but never read back; blank keeps it", async () => {
+    await withDir(async (dir, service) => {
+      await service.setWebSearch({ searxng: { endpoint: "https://search.example.com", token: "tok-123" } });
+      const first = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(first?.endpoint, "https://search.example.com");
+      assert.equal(first?.tokenSet, true);
+      const raw = await readFile(join(dir, "config.yml"), "utf8");
+      assert.match(raw, /token: tok-123/);
+      // Blank token leaves the configured secret untouched.
+      await service.setWebSearch({ searxng: { token: "" } });
+      const second = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(second?.tokenSet, true);
+      assert.match(await readFile(join(dir, "config.yml"), "utf8"), /token: tok-123/);
+    });
+  });
+
+  test("searxng categories / engines / language round-trip and empty clears", async () => {
+    await withDir(async (dir, service) => {
+      await service.setWebSearch({
+        searxng: { categories: "general,it", engines: "bing,duckduckgo", language: "zh-CN" },
+      });
+      const ws = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(ws?.categories, "general,it");
+      assert.equal(ws?.engines, "bing,duckduckgo");
+      assert.equal(ws?.language, "zh-CN");
+      const raw = await readFile(join(dir, "config.yml"), "utf8");
+      // Commas force the YAML writer to quote these values; both forms read back identically.
+      assert.match(raw, /categories: "?general,it"?/);
+      assert.match(raw, /engines: "?bing,duckduckgo"?/);
+      assert.match(raw, /language: zh-CN/);
+      // Empty strings delete the keys again.
+      await service.setWebSearch({ searxng: { categories: "", engines: "", language: "" } });
+      const cleared = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(cleared?.categories, "");
+      assert.equal(cleared?.engines, "");
+      assert.equal(cleared?.language, "");
+    });
+  });
+
+  test("searxng safesearch accepts 0, null deletes the key", async () => {
+    await withDir(async (dir, service) => {
+      await service.setWebSearch({ searxng: { safesearch: 0 } });
+      let ws = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(ws?.safesearch, 0);
+      assert.match(await readFile(join(dir, "config.yml"), "utf8"), /safesearch: 0/);
+      await service.setWebSearch({ searxng: { safesearch: 2 } });
+      ws = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(ws?.safesearch, 2);
+      await service.setWebSearch({ searxng: { safesearch: null } });
+      ws = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(ws?.safesearch, undefined);
+    });
+  });
+
+  test("exa advanced options round-trip", async () => {
+    await withDir(async (_dir, service) => {
+      await service.setWebSearch({ exa: { enabled: false, searchDelayMs: 250 } });
+      const ws = (await service.get()).webSearch.advanced.exa;
+      assert.equal(ws?.enabled, false);
+      assert.equal(ws?.searchDelayMs, 250);
+    });
+  });
+
+  test("retired search credential writes direct callers to the connected Runtime", async () => {
+    await withDir(async (_dir, service) => {
+      await assert.rejects(() => Promise.resolve(service.setWebSearchApiKey({ providerId: "exa", apiKey: "test-key" })), { code: "CAPABILITY_UNAVAILABLE" });
+      await assert.rejects(() => Promise.resolve(service.removeWebSearchApiKey({ providerId: "exa" })), { code: "CAPABILITY_UNAVAILABLE" });
+    });
+  });
+
+  test("web search provider catalog carries credential-free flags and descriptions", async () => {
+    await withDir(async (_dir, service) => {
+      const ws = (await service.get()).webSearch;
+      assert.ok(ws.providers.length >= 23);
+      const byId = new Map(ws.providers.map((p) => [p.id, p]));
+      assert.equal(byId.get("duckduckgo")?.credentialFree, true);
+      assert.equal(byId.get("perplexity")?.credentialFree, false);
+      assert.equal(byId.get("exa")?.credentialFree, true);
+      assert.deepEqual(byId.get("ollama")?.credentialProviders, ["ollama-cloud"]);
+      assert.match(byId.get("brave")?.description ?? "", /BRAVE_API_KEY/);
+      assert.ok(ws.providers.every((p) => p.description.length > 0));
+      // IDs identify native credential storage; the live credentials catalog distinguishes OAuth and API keys.
+      assert.deepEqual(byId.get("brave")?.envKeys, ["BRAVE_API_KEY"]);
+      assert.equal(byId.get("brave")?.loginId, "brave");
+      assert.equal(byId.get("brave")?.apiKeyId, "brave");
+      assert.equal(byId.get("codex")?.loginId, "openai-codex");
+      assert.equal(byId.get("gemini")?.loginId, "google-gemini-cli");
+      assert.equal(byId.get("firecrawl")?.loginId, "firecrawl");
+      assert.equal(byId.get("firecrawl")?.apiKeyId, "firecrawl");
+      assert.equal(byId.get("tavily")?.loginId, "tavily");
+      assert.equal(byId.get("gemini")?.apiKeyId, "google");
+      assert.deepEqual(byId.get("duckduckgo")?.envKeys ?? [], []);
+      assert.equal(byId.get("duckduckgo")?.loginId, undefined);
+    });
+  });
+});
+
+
+test("cached model metadata survives catalog round trips without copying private headers", () => {
+ const available = availableFromCacheModel({ id: "test-model", name: "Test model", provider: "test", input: ["text"], reasoning: true, serviceTiers: ["priority", "ultrafast"], promptCache: { short: 300, long: 3600 }, promptCacheConfig: {}, useResponsesLite: true, preferWebsockets: true, toolMode: "code_mode_only", headers: { Authorization: "private-secret" } }, "test");
+ assert.ok(available); const catalog = catalogEntryFromAvailable(available); const roundtrip = availableFromCatalogEntry("test", catalog);
+ assert.deepEqual(roundtrip.serviceTiers, ["priority", "ultrafast"]); assert.deepEqual(roundtrip.promptCache, { short: 300, long: 3600 }); assert.deepEqual(roundtrip.promptCacheConfig, {});
+ assert.deepEqual(roundtrip.compatibility, { preferWebsockets: true, useResponsesLite: true, toolMode: "code_mode_only" }); assert.equal(JSON.stringify(roundtrip).includes("private-secret"), false);
+});

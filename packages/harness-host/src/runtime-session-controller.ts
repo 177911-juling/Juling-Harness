@@ -1,0 +1,445 @@
+import type { RuntimeViewOperation, RuntimeViewResultMap } from "@juling-harness/harness-protocol";
+import type { SessionOwnerState } from "@juling-harness/harness-protocol";
+import type { ContextViewOperation, ContextViewResultMap, ComputerWorkspaceQuery, ComputerWorkspaceResultMap, HarnessComputerEventEnvelope } from "@juling-harness/harness-protocol";
+
+export interface HarnessComputerForward {
+  readonly envelope: HarnessComputerEventEnvelope;
+}
+import type {
+  AgentTranscriptPage,
+  CommandId,
+  CommandLedgerEntry,
+  ConversationOpenResult,
+  ConversationTarget,
+  ConversationTranscriptPage,
+  OpaqueCursor,
+  RuntimeEpoch,
+  RuntimeId,
+  SessionId,
+  HarnessPendingInteraction,
+  HarnessReceipt,
+  HarnessRequest,
+} from "@juling-harness/harness-protocol";
+import { HarnessBridgeClient } from "./bridge-client.js";
+import { BtwEventFanout, type HarnessBtwForward } from "./btw-events.js";
+import { CommandLedger } from "./command-ledger.js";
+import { HarnessHostError } from "./command-arbiter.js";
+import {
+  ConversationEventFanout,
+  type HarnessConversationForward,
+} from "./conversation-events.js";
+import {
+  InteractionEventFanout,
+  type HarnessInteractionForward,
+} from "./interaction-events.js";
+import { TelemetryEventFanout, type HarnessTelemetryForward } from "./telemetry-events.js";
+import { RuntimePublicationStore, type RuntimePublication } from "./runtime-publication.js";
+
+const TERMINAL = new Set<CommandLedgerEntry["status"]>(["completed", "failed", "rejected", "outcome_unknown"]);
+
+/**
+ * Delay between snapshot-recovery attempts after an event-sequence gap. The
+ * first attempt is immediate. Another gap may arrive in the same read as the
+ * recovery snapshot, so subsequent attempts wait long enough not to spin —
+ * 250 ms matches the Runtime's telemetry debounce.
+ */
+const RESYNC_SNAPSHOT_RETRY_MS = 250;
+
+export class HarnessRuntimeSessionController {
+  readonly #unsubscribeProjection: () => void;
+  readonly #unsubscribeEvent: () => void;
+  readonly #unsubscribeComputer: (() => void) | undefined;
+  readonly #computerListeners = new Set<(event: HarnessComputerForward) => void>();
+  readonly #unsubscribeResync: () => void;
+  readonly #conversation: ConversationEventFanout;
+  readonly #interaction = new InteractionEventFanout();
+  readonly #telemetry = new TelemetryEventFanout();
+  readonly #btw = new BtwEventFanout();
+  readonly #publicationListeners = new Set<(publication: RuntimePublication) => void>();
+  #resyncTimer: ReturnType<typeof setTimeout> | undefined;
+  #resyncInFlight = false;
+  #disposed = false;
+  #publishedTerminalRevision = -1;
+  #publishedTerminalOutcomes: CommandLedgerEntry[] = [];
+
+  constructor(
+    private readonly bridge: HarnessBridgeClient,
+    private readonly ledger: CommandLedger,
+    private readonly publications = new RuntimePublicationStore(),
+    options: ConstructorParameters<typeof ConversationEventFanout>[0] = {},
+  ) {
+    this.#conversation = new ConversationEventFanout(options);
+    this.#unsubscribeProjection = bridge.onProjectionChanged((snapshot) => {
+      this.#publish(snapshot);
+    });
+    this.#unsubscribeEvent = bridge.onEvent((envelope) => {
+      this.#conversation.forward(envelope);
+      this.#telemetry.forward(envelope);
+      this.#btw.forward(envelope);
+      this.#interaction.forward(envelope, (commandId) => this.requestIdForCommandId(commandId));
+    });
+    this.#unsubscribeComputer = bridge.onComputerEvent?.((envelope) => {
+      const snapshot = this.publications.current()?.snapshot;
+      if (bridge.state !== "ready" || !snapshot || envelope.runtimeEpoch !== snapshot.runtimeEpoch || envelope.event.sessionId !== snapshot.sessionId) return;
+      const event: HarnessComputerForward = { envelope };
+      for (const listener of [...this.#computerListeners]) {
+        try { listener(event); } catch { /* Isolate Computer consumers. */ }
+      }
+    });
+    this.#unsubscribeResync = bridge.onResyncRequired(() => {
+      this.#conversation.flush();
+      this.#conversation.emitResync("conversation gap; re-read open transcripts");
+      this.#recoverFromGap();
+    });
+  }
+
+  /**
+   * Telling the Renderer to re-read transcripts is only half of gap recovery. A
+   * gap also leaves the Bridge's projection in `snapshot-required`, and nothing
+   * else re-requests a snapshot — `refresh()` is
+   * called once at startup — so without this the connection stays wedged and no
+   * further Runtime event is processed at all.
+   */
+  #recoverFromGap(): void {
+    if (this.#resyncInFlight || this.#resyncTimer !== undefined) return;
+    if (this.#disposed || this.bridge.state !== "snapshot-required") return;
+    this.#resyncInFlight = true;
+    // Deferred by one microtask: the resync fires from inside the Bridge's socket
+    // data handler, and `requestSnapshot` swaps that very handler out.
+    void Promise.resolve()
+      .then(async () => {
+        if (this.#disposed || this.bridge.state !== "snapshot-required") return;
+        await this.refresh();
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.#resyncInFlight = false;
+        // A new gap can be delivered before refresh() settles. Its subscriber
+        // could not start another refresh while this one was still in flight.
+        if (this.#disposed || this.bridge.state !== "snapshot-required") return;
+        this.#resyncTimer = setTimeout(() => {
+          this.#resyncTimer = undefined;
+          this.#recoverFromGap();
+        }, RESYNC_SNAPSHOT_RETRY_MS);
+      });
+  }
+
+  #publish(snapshot: Parameters<RuntimePublicationStore["publish"]>[0]): RuntimePublication {
+    this.#conversation.resetEpoch(Number(snapshot.runtimeEpoch));
+    this.#conversation.flush();
+    if (this.#publishedTerminalRevision !== this.ledger.terminalRevision) {
+      this.#publishedTerminalRevision = this.ledger.terminalRevision;
+      this.#publishedTerminalOutcomes = this.ledger.terminalSnapshot();
+    }
+    const publication = this.publications.publish(snapshot, this.#publishedTerminalOutcomes);
+
+    for (const listener of [...this.#publicationListeners]) {
+      try {
+        listener(publication);
+      } catch {
+        // Isolate publication consumers from the Bridge/ledger path.
+      }
+    }
+    return publication;
+  }
+
+  async refresh(): Promise<RuntimePublication> {
+    const response = await this.bridge.requestSnapshot();
+    for (const receipt of response.terminalReceipts) {
+      const entry = this.ledger.getByRequestId(receipt.requestId);
+      // The authenticated snapshot can settle only work owned by this Runtime
+      // and epoch. A new Runtime cannot resolve its predecessor's unknown work.
+      if (entry === undefined || entry.runtimeId !== response.snapshot.runtimeId || entry.runtimeEpoch !== response.snapshot.runtimeEpoch) continue;
+      this.ledger.reconcileReceipt(receipt);
+    }
+    // `response` is also handed back to `requestSnapshot`'s caller, so the store
+    // cannot take ownership of its snapshot — see `RuntimePublicationStore.publish`.
+    return this.#publish(structuredClone(response.snapshot));
+  }
+
+  onEvaluationChanged(listener: () => void): () => void {
+    return this.bridge.onEvent(event => { if ((event.event as { kind?: string }).kind === "evaluation.changed") listener(); });
+  }
+
+  async invoke(request: HarnessRequest): Promise<HarnessReceipt> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (snapshot === undefined) throw new Error("Runtime snapshot is required before command invocation");
+    const provisionalCommandId = request.requestId as unknown as CommandId;
+    this.ledger.request(provisionalCommandId, request, snapshot.runtimeId, snapshot.stateVersion);
+    this.#publish(snapshot);
+    try {
+      return await this.bridge.invoke(request, (receipt) => {
+        this.ledger.reconcileReceipt(receipt);
+        const current = this.bridge.projectionSnapshot();
+        if (current !== undefined) this.#publish(current);
+      });
+    } catch (error) {
+      const entry = this.ledger.getByRequestId(request.requestId);
+      if (entry !== undefined && !TERMINAL.has(entry.status)) {
+        this.ledger.transition(entry.commandId, "outcome_unknown", { errorCode: "OUTCOME_UNKNOWN" });
+        const current = this.bridge.projectionSnapshot();
+        if (current !== undefined) this.#publish(current);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Read the active-branch transcript. This is a query, not a Composer
+   * command: it is not recorded on the command ledger.
+   */
+  updateOwnerState(state: SessionOwnerState): void { void this.bridge.updateOwner(state).catch(() => {}); }
+
+  async readRuntimeView<K extends RuntimeViewOperation["kind"]>(operation: Extract<RuntimeViewOperation, { kind: K }>): Promise<RuntimeViewResultMap[K]> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (!snapshot || snapshot.sessionId !== operation.sessionId) throw new HarnessHostError("OUTCOME_UNKNOWN", "Runtime view session unavailable");
+    const result = await this.bridge.readRuntimeView(operation);
+    if (this.bridge.projectionSnapshot()?.sessionId !== operation.sessionId) throw new HarnessHostError("CURSOR_STALE", "Session changed during Runtime view");
+    return result;
+  }
+
+  async readContext<K extends ContextViewOperation["kind"]>(operation: Extract<ContextViewOperation, { kind: K }>): Promise<ContextViewResultMap[K]> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (!snapshot || snapshot.sessionId !== operation.sessionId) throw new HarnessHostError("OUTCOME_UNKNOWN", "Context session unavailable");
+    const result = await this.bridge.readContext(operation);
+    if (this.bridge.projectionSnapshot()?.sessionId !== operation.sessionId) throw new HarnessHostError("CURSOR_STALE", "Session changed during context read");
+    return result;
+  }
+
+  async readComputer<K extends ComputerWorkspaceQuery["kind"]>(operation: Extract<ComputerWorkspaceQuery, { kind: K }>): Promise<ComputerWorkspaceResultMap[K]> {
+    const snapshot = this.publications.current()?.snapshot;
+    if (!snapshot || snapshot.sessionId !== operation.sessionId) throw new HarnessHostError("CURSOR_STALE", "Computer session is not active");
+    if (!this.bridge.readComputer) throw new HarnessHostError("CAPABILITY_UNAVAILABLE", "Computer workspace queries are not supported");
+    const result = await this.bridge.readComputer(operation);
+    const current = this.publications.current()?.snapshot;
+    if (this.bridge.state !== "ready" || current?.runtimeEpoch !== snapshot.runtimeEpoch || current.sessionId !== operation.sessionId) {
+      throw new HarnessHostError("CURSOR_STALE", "Session changed during Computer read");
+    }
+    return result;
+  }
+
+  onComputerEvent(listener: (event: HarnessComputerForward) => void): () => void {
+    this.#computerListeners.add(listener);
+    return () => this.#computerListeners.delete(listener);
+  }
+
+  async predict(input:PredictionQuery):Promise<PredictionResult> {
+    const snapshot=this.bridge.projectionSnapshot();
+    if(!snapshot || snapshot.sessionId!==input.sessionId)throw new HarnessHostError("OUTCOME_UNKNOWN","Prediction session unavailable");
+    return this.bridge.predict(input);
+  }
+
+  async readTranscript(
+    input: { readonly cursor?: OpaqueCursor; readonly limit?: number } = {},
+  ): Promise<ConversationTranscriptPage> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (snapshot === undefined) {
+      throw new HarnessHostError("OUTCOME_UNKNOWN", "Runtime snapshot is required before transcript read");
+    }
+    const page = await this.bridge.readTranscript(input);
+    const current = this.bridge.projectionSnapshot();
+    if (current === undefined) {
+      throw new HarnessHostError("OUTCOME_UNKNOWN", "Runtime snapshot disappeared during transcript read");
+    }
+    if (page.runtimeEpoch !== current.runtimeEpoch) {
+      throw new HarnessHostError(
+        "RUNTIME_EPOCH_STALE",
+        "Transcript page runtime epoch does not match the current session",
+      );
+    }
+    if (page.sessionId !== current.sessionId) {
+      throw new HarnessHostError("CURSOR_STALE", "Transcript page session does not match the current session");
+    }
+    return page;
+  }
+
+  /**
+   * Read one page of a per-agent transcript from the Runtime Agent Hub.
+   * Query, not a Composer command: it is not recorded on the command ledger.
+   * The page carries its own generation-bound signed cursor.
+   */
+  async readAgentTranscript(input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<AgentTranscriptPage> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (snapshot === undefined) {
+      throw new HarnessHostError("OUTCOME_UNKNOWN", "Runtime snapshot is required before agent transcript read");
+    }
+    const page = await this.bridge.readAgentTranscript(input);
+    const current = this.bridge.projectionSnapshot();
+    if (current === undefined) {
+      throw new HarnessHostError("OUTCOME_UNKNOWN", "Runtime snapshot disappeared during agent transcript read");
+    }
+    if (page.agentId !== input.agentId) {
+      throw new HarnessHostError("CURSOR_STALE", "Agent transcript page does not match the requested agent");
+    }
+    return page;
+  }
+
+  /**
+   * Read one ConversationItem page for a child agent. Query, not a Composer
+   * command. The child's sessionId is expected and must not match the main
+   * snapshot session.
+   */
+  async readAgentConversation(input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<ConversationTranscriptPage> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (snapshot === undefined) {
+      throw new HarnessHostError("OUTCOME_UNKNOWN", "Runtime snapshot is required before agent conversation read");
+    }
+    const page = await this.bridge.readAgentConversation(input);
+    const current = this.bridge.projectionSnapshot();
+    if (current === undefined) {
+      throw new HarnessHostError("OUTCOME_UNKNOWN", "Runtime snapshot disappeared during agent conversation read");
+    }
+    if (page.runtimeEpoch !== current.runtimeEpoch) {
+      throw new HarnessHostError(
+        "RUNTIME_EPOCH_STALE",
+        "Agent conversation page runtime epoch does not match the current session",
+      );
+    }
+    if (page.sessionId === current.sessionId) {
+      throw new HarnessHostError("CURSOR_STALE", "Agent conversation page belongs to the parent session");
+    }
+    return page;
+  }
+
+  /**
+   * Read the latest page and then atomically capture the bounded live recovery
+   * state. Callers subscribe before invoking this method and discard buffered
+   * events through `live.watermark` to close the query/subscription race.
+   */
+  async openConversation(input: {
+    readonly target: ConversationTarget;
+    readonly limit?: number;
+  }): Promise<ConversationOpenResult> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (snapshot === undefined) {
+      throw new HarnessHostError("OUTCOME_UNKNOWN", "Runtime snapshot is required before conversation open");
+    }
+    let page: ConversationTranscriptPage;
+    let target: ConversationOpenResult["target"];
+    if (input.target.kind === "session") {
+      if (input.target.sessionId !== snapshot.sessionId) {
+        throw new HarnessHostError("CURSOR_STALE", "Conversation target is not the active Runtime session");
+      }
+      page = await this.readTranscript(input.limit === undefined ? {} : { limit: input.limit });
+      target = {
+        kind: "session",
+        sessionId: input.target.sessionId,
+        conversationSessionId: page.sessionId,
+      };
+    } else {
+      if (input.target.parentSessionId !== snapshot.sessionId) {
+        throw new HarnessHostError("CURSOR_STALE", "Agent conversation parent is not the active Runtime session");
+      }
+      page = await this.readAgentConversation({
+        agentId: input.target.agentId,
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+      });
+      target = {
+        kind: "agent",
+        parentSessionId: input.target.parentSessionId,
+        agentId: input.target.agentId,
+        conversationSessionId: page.sessionId,
+      };
+    }
+    const replay = this.#conversation.snapshot(page.sessionId);
+    const live = replay.status === "resyncRequired"
+      ? replay
+      : {
+          status: "complete" as const,
+          watermark: replay.watermark,
+          events: replay.events.map(({ streamSeq, envelope }) => ({
+            streamSeq,
+            eventSeq: Number(envelope.eventSeq),
+            stateVersion: Number(envelope.stateVersion),
+            occurredAt: envelope.occurredAt,
+            update: envelope.event,
+          })),
+        };
+    return { target, page, live };
+  }
+
+  onConversationEvent(listener: (event: HarnessConversationForward) => void): () => void {
+    return this.#conversation.onEvent(listener);
+  }
+
+  setConversationVisibleSessions(ids: ReadonlySet<string> | undefined): void { this.#conversation.setVisibleSessions(ids); }
+  getConversationDiagnostics(): Readonly<Record<string, number>> { return this.#conversation.getDiagnostics(); }
+
+  replayConversationEvents(sessionId: SessionId, listener: (event: HarnessConversationForward) => void): void {
+    this.#conversation.replay(sessionId, listener);
+  }
+
+  onConversationResync(listener: (reason: string) => void): () => void {
+    return this.#conversation.onResync(listener);
+  }
+
+  onInteractionEvent(listener: (event: HarnessInteractionForward) => void): () => void {
+    return this.#interaction.onEvent(listener);
+  }
+
+  onTelemetryEvent(listener: (event: HarnessTelemetryForward) => void): () => void {
+    return this.#telemetry.onEvent(listener);
+  }
+
+  onBtwEvent(listener: (event: HarnessBtwForward) => void): () => void {
+    return this.#btw.onEvent(listener);
+  }
+
+  requestIdForCommandId(commandId: CommandId): string | undefined {
+    return this.ledger.get(commandId)?.requestId ?? this.ledger.getByRequestId(String(commandId))?.requestId;
+  }
+
+  messagesCursor(): OpaqueCursor | undefined {
+    return this.bridge.messagesCursor();
+  }
+
+  runtimeLost(runtimeId: RuntimeId, runtimeEpoch: RuntimeEpoch): CommandLedgerEntry[] {
+    this.#conversation.flush();
+    const changed = this.ledger.markRuntimeLost(runtimeId, runtimeEpoch);
+    const snapshot = this.bridge.projectionSnapshot();
+    if (snapshot !== undefined) this.#publish(snapshot);
+    this.#conversation.emitResync("runtime lost; re-read open transcripts");
+    return changed;
+  }
+
+  publication(): RuntimePublication | undefined {
+    return this.publications.current();
+  }
+
+  /** Recover the Runtime-owned pending interaction when a resident session is reattached. */
+  pendingInteraction(): HarnessPendingInteraction | undefined {
+    return this.publications.current()?.snapshot.pendingInteraction;
+  }
+
+  onPublication(listener: (publication: RuntimePublication) => void): () => void {
+    this.#publicationListeners.add(listener);
+    return () => {
+      this.#publicationListeners.delete(listener);
+    };
+  }
+
+  dispose(): void {
+    this.#disposed = true;
+    if (this.#resyncTimer !== undefined) clearTimeout(this.#resyncTimer);
+    this.#resyncTimer = undefined;
+    this.#unsubscribeProjection();
+    this.#unsubscribeEvent();
+    this.#unsubscribeComputer?.();
+    this.#computerListeners.clear();
+    this.#unsubscribeResync();
+    this.#publicationListeners.clear();
+    this.#conversation.dispose();
+    this.#interaction.dispose();
+    this.#telemetry.dispose();
+    this.#btw.dispose();
+  }
+}
+import type { PredictionQuery, PredictionResult } from "@juling-harness/harness-protocol";

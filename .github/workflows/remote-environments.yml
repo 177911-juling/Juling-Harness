@@ -1,0 +1,108 @@
+name: Remote environments
+
+on:
+  workflow_call:
+    inputs:
+      platforms:
+        type: string
+        default: all
+      prepared_runtime:
+        type: boolean
+        default: false
+      rebuild_runtime:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      rebuild_runtime:
+        type: boolean
+        description: Force a Runtime rebuild even when its sources are unchanged
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  BUN_VERSION: "1.4.4"
+  OMP_RUNTIME_CHANNEL: stable
+
+jobs:
+  plan:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.runtime_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: plan
+        env:
+          RUNTIME_PLATFORMS: ${{ inputs.platforms || 'all' }}
+        run: node scripts/release-plan.mjs
+
+  runtime:
+    if: ${{ !inputs.prepared_runtime }}
+    uses: ./.github/workflows/runtime-artifacts.yml
+    with:
+      platforms: ${{ inputs.platforms || 'all' }}
+      rebuild_runtime: ${{ inputs.rebuild_runtime || false }}
+    secrets: inherit
+
+  build:
+    needs: [plan, runtime]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (inputs.prepared_runtime || needs.runtime.result == 'success') }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    environment: release
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OMP_TARGET_PLATFORM: ${{ startsWith(matrix.target, 'win32-') && 'win32' || startsWith(matrix.target, 'darwin-') && 'darwin' || 'linux' }}
+      OMP_TARGET_ARCH: ${{ endsWith(matrix.target, '-arm64') && 'arm64' || 'x64' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: ./.github/actions/cache-release-downloads
+      - name: Install Host dependencies
+        env:
+          # Remote hosts use the bundled private Node, never Electron.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm ci --prefer-offline --no-audit --no-fund
+      - run: npm run omp:overlay:apply
+      - name: Download prepared Runtime
+        uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-${{ matrix.target }}-*
+          merge-multiple: true
+          path: packages/runtime-installer/dist/artifacts/${{ matrix.target }}/
+      - name: Build remote Host without desktop renderer
+        run: npm run build:remote
+      - name: Package and verify remote environment
+        env:
+          OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          node -e 'require("node:fs").writeFileSync(require("node:path").join(process.env.RUNNER_TEMP,"omp-remote-signing.pem"),process.env.OMP_SIGNING_SECRET,{mode:384})'
+          export OMP_RUNTIME_SIGNING_KEY="$RUNNER_TEMP/omp-remote-signing.pem"
+          trap 'rm -f "$OMP_RUNTIME_SIGNING_KEY"' EXIT
+          export OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
+          node scripts/build-remote-environment.mjs
+          node scripts/verify-remote-environment.mjs "outputs/remote-environments/$TARGET"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-remote-${{ matrix.target }}
+          compression-level: 0
+          path: outputs/remote-environments/${{ matrix.target }}/
+          if-no-files-found: error

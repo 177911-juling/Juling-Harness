@@ -1,0 +1,35 @@
+import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
+import { join } from "node:path";
+import { parse, stringify } from "yaml";
+import { desktopText } from "../desktop-language-shared.js";
+
+export interface RemoteProvisioning {
+  modelsYml: string;
+  settings: Record<string, unknown>;
+  brokerToken: string;
+}
+export const MIRRORED_MODEL_SETTINGS = ["model", "modelRoles", "disabledProviders", "thinking", "tier", "auth"] as const;
+/** The target edits only Harness's private agent profile; remote project settings remain native. */
+export async function applyRemoteProvisioning(state: string, brokerUrl: string, input: RemoteProvisioning): Promise<void> {
+  const directory = join(state, "agent"); await mkdir(directory, { recursive: true, mode: 0o700 });
+  const models = parse(input.modelsYml || "providers: {}\n");
+  if (!models || typeof models !== "object" || Array.isArray(models)) throw new Error(desktopText("模型配置必须为 YAML 对象", "Model configuration must be a YAML object"));
+  const path = join(directory, "config.yml");
+  const config = parse(await readFile(path, "utf8").catch(error => { if (error.code === "ENOENT") return "{}"; throw error; })) as Record<string, unknown> ?? {};
+  for (const key of MIRRORED_MODEL_SETTINGS) {
+    if (key === "auth") continue;
+    if (Object.hasOwn(input.settings, key)) config[key] = input.settings[key]; else delete config[key];
+  }
+  // Native discovery delegates refresh to the local vault. Refresh tokens never enter this file.
+  // The legacy pair stays alongside the canonical name for a Runtime built
+  // from a vendor tree that only knows the pre-rename spelling.
+  process.env.JULING_AUTH_BROKER_URL = brokerUrl;
+  process.env.JULING_AUTH_BROKER_TOKEN = input.brokerToken;
+  process.env.OMP_AUTH_BROKER_URL = brokerUrl;
+  process.env.OMP_AUTH_BROKER_TOKEN = input.brokerToken;
+  const broker = { url: brokerUrl, token: input.brokerToken };
+  const auth = config.auth && typeof config.auth === "object" ? config.auth as Record<string, unknown> : {};
+  config.auth = { ...auth, broker };
+  const save = async (file: string, contents: string) => { const temporary = `${file}.harness-tmp`; await writeFile(temporary, contents, { mode: 0o600 }); await rename(temporary, file); };
+  await save(join(directory, "models.yml"), stringify(models)); await save(path, stringify(config));
+}

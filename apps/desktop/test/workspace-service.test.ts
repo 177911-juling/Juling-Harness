@@ -1,0 +1,173 @@
+/**
+ * Desktop workspace service tests: registry-backed pick/open wired the way
+ * `createProductionHostFactory` wires them (real adapter, injected picker,
+ * runtime port observing rebind calls). No Electron and no process is ever
+ * spawned: the directory picker and the runtime port are fakes.
+ */
+
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { test } from "node:test";
+
+import { WorkspaceRegistry, canonicalWorkspacePath } from "@juling-harness/harness-host";
+
+import { createOmpWorkspaceService, WorkspacePickCancelledError } from "@juling-harness/host-client-api/workspaces";
+import type { StoredWorkspace } from "@juling-harness/harness-host";
+import { createDesktopRuntimeSessionPort } from "../src/runtime-session.js";
+import type { DesktopRuntimeSession, DesktopRuntimeSessionPort } from "../src/host-composition.js";
+import { InMemorySessionLeaseStore } from "@juling-harness/harness-host";
+
+function fakePicker(dirs: string[]): () => Promise<string | undefined> {
+  let index = 0;
+  return async () => {
+    const next = dirs[index];
+    index += 1;
+    return next;
+  };
+}
+
+test("pick registers the folder and returns its canonical root for display", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "omp-ws-service-"));
+  const picked = await mkdtemp(join(tmpdir(), "omp-ws-picked-"));
+  try {
+    const registry = new WorkspaceRegistry(join(profile, "workspaces.json"));
+    await registry.load();
+    const pick = fakePicker([picked]);
+    const service = createOmpWorkspaceService({
+      registry,
+      pickDirectory: pick,
+      now: () => "2026-08-14T00:00:00.000Z",
+    });
+
+    const model = await service.pick();
+    assert.equal(model.workspaces.length, 1);
+    assert.equal(model.workspaces[0]!.name, basename(picked));
+    assert.equal(model.workspaces[0]!.active, true);
+    assert.equal(model.activeWorkspaceId, model.workspaces[0]!.workspaceId);
+    assert.equal(model.workspaces[0]!.root, await canonicalWorkspacePath(picked));
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+    await rm(picked, { recursive: true, force: true });
+  }
+});
+
+test("picking the same directory twice yields a single workspace id", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "omp-ws-service-"));
+  const picked = await mkdtemp(join(tmpdir(), "omp-ws-picked-"));
+  try {
+    const registry = new WorkspaceRegistry(join(profile, "workspaces.json"));
+    await registry.load();
+    const pick = fakePicker([picked, picked]);
+    const service = createOmpWorkspaceService({
+      registry,
+      pickDirectory: pick,
+    });
+    const first = await service.pick();
+    const second = await service.pick();
+    assert.equal(second.workspaces.length, 1);
+    assert.equal(second.workspaces[0]!.workspaceId, first.workspaces[0]!.workspaceId);
+    assert.equal(registry.list().length, 1);
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+    await rm(picked, { recursive: true, force: true });
+  }
+});
+
+test("a cancelled pickDirectory rejects instead of fabricating a workspace", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "omp-ws-service-"));
+  try {
+    const registry = new WorkspaceRegistry(join(profile, "workspaces.json"));
+    await registry.load();
+    const service = createOmpWorkspaceService({
+      registry,
+      pickDirectory: async () => undefined,
+    });
+    await assert.rejects(() => service.pick(), WorkspacePickCancelledError);
+    assert.deepEqual(registry.list(), []);
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
+test("onActivated fires with the stored workspace; the runtime port rebind receives its canonical cwd", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "omp-ws-service-"));
+  const picked = await mkdtemp(join(tmpdir(), "omp-ws-picked-"));
+  try {
+    const registry = new WorkspaceRegistry(join(profile, "workspaces.json"));
+    await registry.load();
+    // Fake runtime session port: records rebind calls like the production
+    // DesktopRuntimeSessionPort would.
+    const rebindCalls: Array<{ workspaceId: string; cwd: string }> = [];
+    const port = {
+      async rebind(workspace: { workspaceId: string; cwd: string }) {
+        rebindCalls.push({ ...workspace });
+        return undefined;
+      },
+    };
+    const activated: StoredWorkspace[] = [];
+    const service = createOmpWorkspaceService({
+      registry,
+      pickDirectory: async () => picked,
+      onActivated: async (stored) => {
+        activated.push(stored);
+        await port.rebind({ workspaceId: stored.workspaceId, cwd: stored.canonicalPath });
+      },
+    });
+
+    const model = await service.pick();
+    assert.equal(activated.length, 1);
+    assert.equal(rebindCalls.length, 1);
+    // realpath on Windows; on macOS also without the /private prefix of /var.
+    assert.equal(rebindCalls[0]!.cwd, await canonicalWorkspacePath(picked));
+    assert.equal(rebindCalls[0]!.workspaceId, model.workspaces[0]!.workspaceId);
+
+    // Re-opening the already-active workspace must not restart the Runtime.
+    await service.open({ workspaceId: model.workspaces[0]!.workspaceId });
+    assert.equal(activated.length, 1, "re-opening the active workspace must not re-activate");
+    assert.equal(rebindCalls.length, 1, "re-opening the active workspace must not rebind");
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+    await rm(picked, { recursive: true, force: true });
+  }
+});
+
+test("a stale workspace and failed saved session restore do not block a fresh Runtime in the available project", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "omp-workspace-recovery-"));
+  let port: DesktopRuntimeSessionPort | undefined;
+  try {
+    const valid = join(profile, "project"), old = join(profile, "old-install", "runtime");
+    await mkdir(valid); await mkdir(old, { recursive: true });
+    const registry = new WorkspaceRegistry(join(profile, "workspaces.json"));
+    const project = await registry.upsertByPath(valid);
+    const stale = await registry.upsertByPath(old);
+    await rm(join(profile, "old-install"), { recursive: true });
+    await writeFile(join(profile, "update-session-restore.json"), JSON.stringify({ activeSessionId: "missing", residents: [
+      { sessionId: "old", workspace: { workspaceId: stale.workspaceId, cwd: stale.canonicalPath } },
+      { sessionId: "missing", workspace: { workspaceId: project.workspaceId, cwd: project.canonicalPath } },
+    ] }));
+    const reloaded = new WorkspaceRegistry(registry.path);
+    await reloaded.load();
+    const selected = reloaded.get(reloaded.activeWorkspaceId!)!;
+    const launched: string[] = [];
+    port = createDesktopRuntimeSessionPort({ ownerId: "recovery-test", sessionLeaseStore: new InMemorySessionLeaseStore(),
+      workerPortFactory: ({ resumeSessionId, nextRuntimeEpoch }) => ({
+        async start(context) {
+          if (context.workspace?.cwd !== project.canonicalPath) return undefined;
+          if (resumeSessionId) throw new Error("Saved session is unavailable");
+          launched.push(context.workspace.cwd);
+          const snapshot = { sessionId: "fresh", runtimeId: "runtime", runtimeEpoch: nextRuntimeEpoch(), stateVersion: 1, activeMode: "normal", approvalMode: "yolo", isStreaming: false, isCompacting: false, jobs: [], agents: [] };
+          return { controller: { publication: () => ({ snapshot }) }, hello: () => ({ runtimeId: "runtime", runtimeEpoch: snapshot.runtimeEpoch }), onPublication: () => () => {} } as unknown as DesktopRuntimeSession;
+        },
+        stop: async () => {},
+      }),
+    });
+    const session = await port.start({ profileDirectory: profile, resolution: { classification: "managed" } as never, endpoint: {} as never, runtimeInstallDirectory: join(profile, "runtimes"), workspace: { workspaceId: selected.workspaceId, cwd: selected.canonicalPath } });
+    assert.equal(session?.controller.publication()?.snapshot.sessionId, "fresh");
+    assert.deepEqual(launched, [project.canonicalPath]);
+    assert.equal(port.lastUnavailable?.(), undefined);
+    await assert.rejects(readFile(join(profile, "update-session-restore.json")), /ENOENT/);
+    assert.equal(reloaded.get(stale.workspaceId)?.unavailable, true);
+  } finally { await port?.stop(); await rm(profile, { recursive: true, force: true }); }
+});

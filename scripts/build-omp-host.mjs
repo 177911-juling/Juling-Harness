@@ -1,0 +1,151 @@
+import { existsSync, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { assertForkApplied, overlayRoot } from "./omp-overlay.mjs";
+import { PATCHSET_VERSION_FILE, UPSTREAM_COMMIT_FILES, readPatchsetVersionConstant, readUpstreamCommitConstant } from "./omp-seam.mjs";
+import { findBun, npmInvocation, ompSourceDirectory, run, toolingEnvironment } from "./omp-tooling.mjs";
+import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
+import { resolveTargetArch, assertNativeRuntimeBuild, assertPeArchitecture } from "./windows-architecture.mjs";
+import { assertExecutableTarget, assertNativeTargetBuild, resolveTargetPlatform, runtimeEntrypointFor, verifyMacCodeSignature } from "./target-platform.mjs";
+import { assertMacToolchain } from "./mac-toolchain.mjs";
+import { installNativeArtifact } from "./native-artifact.mjs";
+import {
+  PATCHES_DIRECTORY,
+  defaultArtifactDirectory,
+  deriveRuntimeVersion,
+  generateRuntimeArtifact,
+  probeRuntimeIdentity,
+  readPatchSeries,
+  readUpstreamPin,
+  readUpstreamVersion,
+} from "./runtime-artifact.mjs";
+
+/** Fail fast when the Runtime would report a version the series does not expect. */
+async function assertRuntimeIdentityInSync() {
+  const expected = (await readPatchSeries()).patchsetVersion;
+  const expectedCommit = (await readUpstreamPin()).commit;
+  for (const root of [overlayRoot, ompSourceDirectory]) {
+    for (const relativePath of UPSTREAM_COMMIT_FILES) {
+      const file = join(root, ...relativePath.split("/"));
+      if (readUpstreamCommitConstant(await readFile(file, "utf8")) !== expectedCommit) {
+        throw new Error(`UPSTREAM_COMMIT in ${file} does not match ${expectedCommit}; update Runtime identity before building`);
+      }
+    }
+    const path = join(root, ...PATCHSET_VERSION_FILE.split("/"));
+    const found = readPatchsetVersionConstant(await readFile(path, "utf8"));
+    if (found !== expected) {
+      throw new Error(
+        `PATCHSET_VERSION is ${found} in ${path} but series.json says ${expected}. Run npm run omp:patches:regen.`,
+      );
+    }
+  }
+}
+
+
+const nativeArtifactFlag = process.argv.indexOf("--native-artifact");
+const nativeArtifactDirectory = nativeArtifactFlag === -1 ? undefined : process.argv[nativeArtifactFlag + 1];
+if (nativeArtifactFlag !== -1 && !nativeArtifactDirectory) throw new Error("--native-artifact requires an artifact directory");
+if (process.platform === "win32") assertNativeRuntimeBuild(resolveTargetArch());
+else assertNativeTargetBuild(resolveTargetPlatform());
+const artifactPlatform = `${process.platform}-${process.arch}`;
+const bun = findBun();
+const env = toolingEnvironment({
+  CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
+});
+// Inherited, this skips both Bun's and upstream's ad-hoc signing; Apple Silicon
+// then kills the unsigned binary the moment the smoke test runs it.
+if (process.platform === "darwin") {
+  delete env.BUN_NO_CODESIGN_MACHO_BINARY;
+  assertMacToolchain({ rust: !nativeArtifactDirectory, targetArch: process.arch, bunVersion: run(bun, ["--version"], { env, capture: true }), env });
+}
+
+// Building a vendor tree without the fork applied yields a Runtime binary with no
+// harness-host mode. That only surfaces much later, as an opaque identity probe
+// failure after a full Rust build, so check the cheap precondition first.
+await assertForkApplied();
+// Same reasoning for the version the Runtime will report: packaging refuses to
+// sign an artifact whose probed identity disagrees with series.json, and that
+// check lands only after the native build. `npm run omp:patches:regen` keeps the
+// two in sync; this catches a hand-edited constant before the build starts.
+await assertRuntimeIdentityInSync();
+run(process.execPath, [fileURLToPath(new URL("./verify-omp-source.mjs", import.meta.url))], { env });
+run(process.execPath, [fileURLToPath(new URL("./install-omp-deps.mjs", import.meta.url))], { env });
+
+if (nativeArtifactDirectory) installNativeArtifact(artifactPlatform, nativeArtifactDirectory);
+else run(process.execPath, [fileURLToPath(new URL("./build-omp-natives.mjs", import.meta.url))], { env });
+run(bun, ["--cwd=packages/coding-agent", "run", "build"], { cwd: ompSourceDirectory, env });
+
+const executable = join(
+  ompSourceDirectory,
+  "packages",
+  "coding-agent",
+  "dist",
+  runtimeEntrypointFor(artifactPlatform),
+);
+if (!existsSync(executable) || !statSync(executable).isFile()) {
+  throw new Error(`Expected host executable was not produced: ${executable}`);
+}
+if (process.platform === "darwin") {
+  // Upstream already ad-hoc signs with its entitlements, so verify instead of
+  // re-signing. Everything below (smoke test, probe, checksums, Ed25519
+  // signature) then covers the final signed bytes.
+  assertExecutableTarget(executable, artifactPlatform);
+  verifyMacCodeSignature(executable);
+}
+
+run(executable, ["--version"], { cwd: ompSourceDirectory, env });
+if (process.platform === "linux") assertExecutableTarget(executable, artifactPlatform);
+if (process.platform === "win32") assertPeArchitecture(executable, resolveTargetArch());
+run(executable, ["--smoke-test"], { cwd: ompSourceDirectory, env });
+console.log(`Built and verified ${executable}`);
+
+const npm = npmInvocation();
+// Remote release jobs build their Host dependencies first and never need the
+// desktop renderer. Local/installer callers keep the complete workspace build.
+if (!process.argv.includes("--skip-build")) run(npm.command, [...npm.prefix, "run", "build"]);
+const runtimeIdentity = await probeRuntimeIdentity({ binaryPath: executable });
+console.log(`Probed Runtime identity ${runtimeIdentity.runtimeVersion}`);
+
+const upstream = await readUpstreamPin();
+const series = await readPatchSeries();
+const upstreamVersion = await readUpstreamVersion();
+const runtimeVersion = deriveRuntimeVersion(upstreamVersion, series);
+const artifactDirectory =
+  process.env.OMP_ARTIFACT_DIR ?? defaultArtifactDirectory(artifactPlatform, runtimeVersion);
+const envKeyPath = process.env.OMP_RUNTIME_SIGNING_KEY?.trim();
+const envKeyId = process.env.OMP_RUNTIME_SIGNING_KEY_ID?.trim();
+let signingKey;
+let keyId;
+if (envKeyPath && envKeyId) {
+  signingKey = await readFile(envKeyPath);
+  keyId = envKeyId;
+} else {
+  try {
+    const local = await readRuntimeSigningKeys();
+    signingKey = local.privateKey;
+    keyId = local.keyId;
+  } catch {
+    throw new Error(
+      "OMP_RUNTIME_SIGNING_KEY and OMP_RUNTIME_SIGNING_KEY_ID are required to package a Runtime artifact. Run npm run omp:keys to create a local signing key.",
+    );
+  }
+}
+
+const { manifestPath, checksumsPath, signaturePath, manifest } = await generateRuntimeArtifact({
+  upstream,
+  series,
+  upstreamVersion,
+  binaryPath: executable,
+  patchesDirectory: PATCHES_DIRECTORY,
+  platform: artifactPlatform,
+  entrypoint: runtimeEntrypointFor(artifactPlatform),
+  channel: process.env.OMP_RUNTIME_CHANNEL ?? "stable",
+  signingKey,
+  keyId,
+  outDirectory: artifactDirectory,
+  runtimeIdentity,
+});
+console.log(`Generated ${manifestPath} (runtimeVersion=${manifest.runtimeVersion})`);
+console.log(`Generated ${checksumsPath}`);
+console.log(`Generated ${signaturePath}`);

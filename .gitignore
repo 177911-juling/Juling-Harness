@@ -1,0 +1,101 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Local environment files; examples can be committed
+.env
+.env.*
+!.env.example
+
+# Build / release output (scoped to our own packages; vendored upstream source
+# under omp-patch/vendor/ must NOT match these — it contains .zip fixtures, an
+# `out/` dir, etc.)
+packages/*/dist/
+packages/*/build/
+packages/*/out/
+packages/*/release/
+apps/*/dist/
+apps/*/build/
+apps/*/out/
+*.exe
+*.dmg
+*.AppImage
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor & OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/
+
+# WorkBuddy local project data (not meant for public repo)
+.workbuddy/
+
+# Local Codex / ZCode / agent session data
+.codex-backups/
+.codex-tools/
+/.tools/
+.zcode/
+.omp/
+
+# Unpackaged desktop sidecar (avatars etc.); packaged builds use {installDir}/userdata/
+apps/desktop/userdata/
+
+# Local Playwright CLI captures and scratch UI dumps
+.playwright-cli/
+/.cap-tmp/
+**/__scratch__/
+
+# Task backups, scratch work, and generated audit outputs
+backup/
+tmp/
+output/
+outputs/
+*.bak
+
+# Local launch scripts
+/启动生产版.cmd
+/一键启动生产版.cmd
+/启动预览.cmd
+
+# Architecture review packs / extracted archives (local working notes, not product code)
+architecture_review_v2_work/
+
+# Root scratch images (never product assets)
+/spacing-compare.png
+/Untitled*.png
+
+# Root scratch HTML exports (timestamp-named dumps such as 202609231523.html)
+/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*.html
+
+# UI experiment dumps (not the ver1/ver2 design reference)
+ui_reference/test/
+
+# Local visual QA notes (often contain machine-specific paths)
+doc/qa/
+
+# Local agent/IDE config (project skills live under repo .claude only on dev machines)
+.claude/
+skills-lock.json
+
+# Local generated installer public key (never the private signing key)
+packaging/runtime-keys/
+packaging/runtime-payload/
+
+# WebView2 installer host (compiled at pack:win)
+packaging/installer-host/.cache/
+packaging/installer-host/dist/
+packaging/resources/installer-ui/
+packaging/resources/installer-host/
+
+# Alternate package manager artifacts (repo uses npm / package-lock.json)
+pnpm-lock.yaml
+pnpm-workspace.yaml

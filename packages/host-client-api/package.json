@@ -1,0 +1,54 @@
+{
+  "name": "@juling-harness/host-client-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Presentation-neutral Host semantic facade for the Juling Harness product client (P1)",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./models": {
+      "types": "./dist/src/omp-models-adapter.d.ts",
+      "default": "./dist/src/omp-models-adapter.js"
+    },
+    "./extensibility": {
+      "types": "./dist/src/omp-extensibility-adapter.d.ts",
+      "default": "./dist/src/omp-extensibility-adapter.js"
+    },
+    "./mcp": {
+      "types": "./dist/src/omp-mcp-adapter.d.ts",
+      "default": "./dist/src/omp-mcp-adapter.js"
+    },
+    "./agent-definitions": {
+      "types": "./dist/src/omp-agent-definitions-adapter.d.ts",
+      "default": "./dist/src/omp-agent-definitions-adapter.js"
+    },
+    "./workspaces": {
+      "types": "./dist/src/omp-workspace-adapter.d.ts",
+      "default": "./dist/src/omp-workspace-adapter.js"
+    },
+    "./usage": {
+      "types": "./dist/src/omp-usage-adapter.d.ts",
+      "default": "./dist/src/omp-usage-adapter.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test \"dist/test/*.test.js\"",
+    "test:built": "node --test \"dist/test/*.test.js\""
+  },
+  "dependencies": {
+    "@juling-harness/client-contract": "1.0.0",
+    "@juling-harness/harness-host": "1.0.0",
+    "@juling-harness/harness-protocol": "1.0.0",
+    "yaml": "^2.9.0"
+  }
+}

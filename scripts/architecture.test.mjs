@@ -1,0 +1,283 @@
+// Executable architecture rules. These encode the constraints AGENTS.md asks
+// reviewers to remember, so a wrong import fails in seconds instead of surviving
+// review. They run in `npm run check` before anything is compiled.
+//
+// If a rule becomes intentionally wrong, change the table or the allowance in the
+// same commit as the code — that diff is the decision record.
+import assert from "node:assert/strict";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { builtinModules } from "node:module";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const scope = "@juling-harness/";
+const builtins = new Set(builtinModules.map(name => name.replace(/^node:/, "")));
+
+// Internal dependency direction. A package may only depend on what its row allows;
+// units without a row (testkit, desktop, renderer) are not constrained here.
+const ALLOWED_INTERNAL_DEPS = {
+  "harness-protocol": [],
+  "client-contract": ["harness-protocol"],
+  client: ["client-contract", "harness-protocol"],
+  "transport-desktop": ["client-contract"],
+  "transport-web": ["client-contract"],
+  platform: [],
+  "platform-win32": ["platform"],
+  "platform-darwin": ["platform"],
+  "runtime-installer": ["harness-protocol"],
+  "harness-host": ["runtime-installer", "harness-protocol"],
+  "host-client-api": ["client-contract", "harness-host", "harness-protocol"],
+};
+
+function readUnits() {
+  const found = [];
+  for (const parent of ["packages", "apps"]) {
+    const base = join(root, parent);
+    if (!existsSync(base)) continue;
+    for (const name of readdirSync(base)) {
+      const dir = join(base, name);
+      const manifest = join(dir, "package.json");
+      if (!existsSync(manifest)) continue;
+      const pkg = JSON.parse(readFileSync(manifest, "utf8"));
+      if (!pkg.name?.startsWith(scope)) continue;
+      const declared = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+      found.push({
+        key: pkg.name.slice(scope.length),
+        dir,
+        relativeDir: `${parent}/${name}`,
+        internal: declared.filter(dep => dep.startsWith(scope)).map(dep => dep.slice(scope.length)),
+        declared,
+      });
+    }
+  }
+  return found.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+const units = readUnits();
+const byKey = new Map(units.map(unit => [unit.key, unit]));
+const sourceFileCache = new Map();
+const sourceTextCache = new Map();
+const importCache = new Map();
+
+// Only implementation sources: tests and fixtures may use whatever they need.
+function sourceFiles(dir) {
+  const cached = sourceFileCache.get(dir);
+  if (cached) return cached;
+  const files = [];
+  if (existsSync(dir)) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name === "dist") continue;
+        files.push(...sourceFiles(path));
+      } else if (/\.[cm]?[jt]sx?$/.test(entry.name) && !/\.test\.[cm]?[jt]sx?$/.test(entry.name)) {
+        files.push(path);
+      }
+    }
+  }
+  sourceFileCache.set(dir, files);
+  return files;
+}
+
+// All rules inspect the same source snapshot for this process.
+function sourceText(file) {
+  let text = sourceTextCache.get(file);
+  if (text === undefined) {
+    text = readFileSync(file, "utf8");
+    sourceTextCache.set(file, text);
+  }
+  return text;
+}
+
+const IMPORT = /(?:^\s*import\s+(?:type\s+)?[^"']*?from\s*|^\s*export\s+(?:type\s+)?[^"']*?from\s*|^\s*import\s*|require\s*\(\s*|import\s*\(\s*)["']([^"']+)["']/gm;
+
+function importsOf(file) {
+  const cached = importCache.get(file);
+  if (cached) return cached;
+  const found = [];
+  for (const match of sourceText(file).matchAll(IMPORT)) found.push(match[1]);
+  importCache.set(file, found);
+  return found;
+}
+
+const name = file => relative(root, file).split(sep).join("/");
+
+test("workspace units form no dependency cycle", () => {
+  const cycles = [];
+  const done = new Set();
+  const stack = [];
+  const onStack = new Set();
+  const visit = key => {
+    if (done.has(key)) return;
+    stack.push(key);
+    onStack.add(key);
+    for (const dep of byKey.get(key)?.internal ?? []) {
+      if (!byKey.has(dep)) continue;
+      if (onStack.has(dep)) cycles.push([...stack.slice(stack.indexOf(dep)), dep].join(" -> "));
+      else visit(dep);
+    }
+    stack.pop();
+    onStack.delete(key);
+    done.add(key);
+  };
+  for (const unit of units) visit(unit.key);
+  assert.deepEqual(cycles, [], "workspace dependency cycle");
+});
+
+test("packages keep the declared one-way layering", () => {
+  const violations = [];
+  for (const unit of units) {
+    const allowed = ALLOWED_INTERNAL_DEPS[unit.key];
+    if (!allowed) continue;
+    for (const dep of unit.internal) {
+      if (allowed.includes(dep)) continue;
+      violations.push(`${unit.key} must not depend on ${dep} (allowed: ${allowed.join(", ") || "none"})`);
+    }
+  }
+  assert.deepEqual(violations, [], "layering violation");
+});
+
+test("only the desktop app depends on electron", () => {
+  const violations = [];
+  for (const unit of units) {
+    if (unit.declared.includes("electron") && unit.key !== "desktop") {
+      violations.push(`${unit.key} declares electron`);
+    }
+    for (const file of sourceFiles(join(unit.dir, "src"))) {
+      for (const specifier of importsOf(file)) {
+        if (specifier === "electron" && unit.key !== "desktop") violations.push(`${name(file)} imports electron`);
+      }
+    }
+  }
+  assert.deepEqual(violations, [], "electron leaked outside the desktop app");
+});
+
+test("only the renderer depends on react", () => {
+  const violations = [];
+  for (const unit of units) {
+    const react = unit.declared.filter(dep => dep === "react" || dep === "react-dom" || dep.startsWith("@testing-library/"));
+    if (react.length && unit.key !== "renderer") violations.push(`${unit.key} declares ${react.join(", ")}`);
+  }
+  assert.deepEqual(violations, [], "react leaked into a non-renderer unit");
+});
+
+test("renderer sources do not reach for node or electron", () => {
+  const violations = [];
+  for (const file of sourceFiles(join(root, "apps", "renderer", "src"))) {
+    for (const specifier of importsOf(file)) {
+      const isBuiltin = specifier.startsWith("node:") || builtins.has(specifier.split("/")[0]);
+      if (isBuiltin || specifier === "electron") violations.push(`${name(file)} imports ${specifier}`);
+    }
+  }
+  assert.deepEqual(violations, [], "renderer must go through the preload bridge");
+});
+
+test("host packages never import the test fixtures", () => {
+  const violations = [];
+  for (const unit of units) {
+    if (unit.key === "testkit" || unit.key === "desktop" || unit.key === "renderer") continue;
+    for (const file of sourceFiles(join(unit.dir, "src"))) {
+      for (const specifier of importsOf(file)) {
+        if (specifier === `${scope}testkit`) violations.push(`${name(file)} imports testkit`);
+      }
+    }
+  }
+  assert.deepEqual(violations, [], "demo data belongs in the renderer preview layer");
+});
+
+// Runtime operations are validated once, in the overlay `*-protocol.ts`. The
+// contracts package is types, kind lists and pure helpers; only these files may
+// throw, each being the sole check of a Host-side service (or a pure parser).
+const CONTRACTS_THAT_MAY_THROW = {
+  "annotations.ts": "validateAnnotationBundle — Renderer imports user annotation files",
+  "artifacts.ts": "validateArtifactTextInput — artifact library saveText",
+  "gui-settings.ts": "validateGuiSetting — GUI settings service and snapshot parsing",
+  "session-compaction.ts": "parseSessionCompactionInput — parses user-typed threshold text",
+  "workbench.ts": "validateServiceSpec — desktop stored service definitions",
+};
+
+test("protocol contracts do not grow duplicate validators", () => {
+  const contracts = join(root, "packages", "harness-protocol", "src", "contracts");
+  const throwing = sourceFiles(contracts)
+    .filter(file => /\bthrow\b/.test(sourceText(file)))
+    .map(file => relative(contracts, file).split(sep).join("/"));
+  const stray = throwing.filter(file => !Object.hasOwn(CONTRACTS_THAT_MAY_THROW, file));
+  assert.deepEqual(stray, [], "validate Runtime operations in the overlay *-protocol.ts, not in contracts");
+});
+
+test("no layer re-validates another layer's output", () => {
+  const OUTPUT_VALIDATOR = /\b(?:function\s+|const\s+)((?:validate|assert)\w*(?:Result|Event))\b/g;
+  const dirs = [...units.map(unit => join(unit.dir, "src")), join(root, "omp-patch", "overlay")];
+  const found = [];
+  for (const file of dirs.flatMap(sourceFiles)) {
+    for (const match of sourceText(file).matchAll(OUTPUT_VALIDATOR)) found.push(`${name(file)}: ${match[1]}`);
+  }
+  assert.deepEqual(found, [], "results and events are typed with `as`, not re-validated");
+});
+
+test("the preview switch is defined once", () => {
+  const definitions = [];
+  const readers = [];
+  for (const file of sourceFiles(join(root, "apps"))) {
+    const text = sourceText(file);
+    if (!text.includes("PREVIEW_MODE_SWITCH_ENABLED")) continue;
+    if (/export\s+const\s+PREVIEW_MODE_SWITCH_ENABLED\s*=/.test(text)) definitions.push(name(file));
+    else readers.push(name(file));
+  }
+  assert.deepEqual(definitions, ["apps/renderer/src/preview/mode.ts"], "preview switch must have a single definition");
+  const strayReaders = readers.filter(file => !file.startsWith("apps/renderer/src/preview/"));
+  assert.deepEqual(strayReaders, [], "preview switch is only read by the preview layer");
+});
+
+// The Runtime overlay is copied into the vendor fork and cannot import the root
+// private packages, so protocol identity is duplicated by hand on both sides.
+// A one-sided rename here still type-checks; the only symptom is a Runtime the
+// desktop cannot handshake with. Keep the wire identifiers in lockstep.
+test("the Runtime overlay and the desktop contract agree on wire identifiers", () => {
+  const overlayProtocol = readFileSync(
+    join(root, "omp-patch", "overlay", "packages", "coding-agent", "src", "harness", "bridge-protocol.ts"),
+    "utf8",
+  );
+  const rootProtocol = readFileSync(join(root, "packages", "harness-protocol", "src", "contracts", "protocol.ts"), "utf8");
+  const overlaySessionOrigin = readFileSync(
+    join(root, "omp-patch", "overlay", "packages", "coding-agent", "src", "harness", "session-origin.ts"),
+    "utf8",
+  );
+  const hostSessionCatalog = readFileSync(join(root, "packages", "harness-host", "src", "session-catalog.ts"), "utf8");
+  const cliPatch = readFileSync(join(root, "omp-patch", "patches", "0001-harness-cli-entry.patch"), "utf8");
+  const sessionPatch = readFileSync(join(root, "omp-patch", "patches", "0002-harness-session-runtime.patch"), "utf8");
+  const runtimeArgs = readFileSync(join(root, "packages", "harness-host", "src", "runtime-resolver.ts"), "utf8");
+  const series = JSON.parse(readFileSync(join(root, "omp-patch", "patches", "series.json"), "utf8"));
+  const overlayBridgeServer = readFileSync(
+    join(root, "omp-patch", "overlay", "packages", "coding-agent", "src", "harness", "bridge-server.ts"),
+    "utf8",
+  );
+
+  const constValue = (source, name) => {
+    const match = new RegExp(`export const ${name} = ("[^"]+"|\\d+)(?: as const)?;`, "u").exec(source);
+    assert.ok(match !== null, `${name} is not declared`);
+    return JSON.parse(match[1]);
+  };
+  const protocolName = "juling-harness";
+  assert.equal(constValue(overlayProtocol, "HARNESS_PROTOCOL_NAME"), protocolName, "overlay protocol name drifted");
+  assert.equal(constValue(rootProtocol, "HARNESS_PROTOCOL_NAME"), protocolName, "desktop protocol name drifted");
+  assert.equal(constValue(overlayProtocol, "HARNESS_PROTOCOL_VERSION"), 1);
+  assert.equal(constValue(rootProtocol, "HARNESS_PROTOCOL_VERSION"), 1);
+
+  const frameTypes = source =>
+    [...source.matchAll(/"(harness\.[a-z.]+)"/gu)].map(match => match[1]).filter(value => value.split(".").length === 2);
+  assert.deepEqual([...new Set(frameTypes(overlayProtocol))].sort(), [...new Set(frameTypes(rootProtocol))].sort(), "frame types drifted");
+
+  const origin = /HARNESS_HOST_SESSION_ORIGIN = "([^"]+)"/u.exec(sessionPatch)?.[1];
+  assert.equal(origin, /HARNESS_SESSION_ORIGIN = "([^"]+)"/u.exec(hostSessionCatalog)?.[1], "session origin value drifted");
+  assert.match(hostSessionCatalog, /header\.harnessOrigin/u);
+  assert.match(overlaySessionOrigin, /header\.harnessOrigin/u);
+
+  assert.match(cliPatch, /"harness-host"/u, "Runtime CLI mode drifted");
+  assert.match(runtimeArgs, /"harness-host"/u, "desktop spawn mode drifted");
+
+  const overlayVersion = /PATCHSET_VERSION = "([^"]+)"/u.exec(overlayBridgeServer)?.[1];
+  assert.equal(overlayVersion, series.patchsetVersion, "Runtime patchset version drifted from series.json");
+});

@@ -1,0 +1,140 @@
+.services-pane {
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  margin-bottom: var(--sp-16);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.services-pane > summary {
+  padding: var(--sp-14) var(--sp-20);
+  cursor: pointer;
+  font-weight: var(--fw-semibold);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+}
+.services-pane > summary::before {
+  content: "›";
+  font-size: 16px;
+}
+.services-pane[open] > summary::before {
+  transform: rotate(90deg);
+}
+.services-pane > summary > .muted {
+  font-size: var(--fs-11);
+  font-weight: 400;
+}
+.services-content {
+  max-height: 64vh;
+  overflow: auto;
+  padding: 0 var(--sp-20) var(--sp-16);
+}
+.services-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+.service-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: var(--sp-12) 0;
+  border-bottom: 1px solid var(--border);
+}
+.service-row:last-child { border-bottom: none; }
+.service-name {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  gap: 4px;
+  flex: 1;
+  min-width: 100px;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.service-row.selected {
+  background: var(--surface-hover);
+}
+.service-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding-top: 16px;
+}
+.service-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+.service-wide {
+  grid-column: 1 / -1;
+}
+.service-form textarea {
+  width: 100%;
+  resize: vertical;
+}
+.service-log pre {
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px;
+  background: var(--surface-2);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.service-log form {
+  display: flex;
+  gap: 8px;
+}
+.service-log form .input {
+  flex: 1;
+}
+.service-confirm {
+  padding: 10px 0;
+}
+.services-error {
+  color: var(--red);
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .service-form {
+    grid-template-columns: 1fr;
+  }
+  .service-row {
+    flex-wrap: wrap;
+  }
+}
+
+.service-row > .select {
+  flex: 0 0 150px;
+  width: 150px;
+}
+.service-row > .btn {
+  flex-shrink: 0;
+}
+.service-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.services-toolbar {
+  flex-wrap: wrap;
+}
+.service-form {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.workspace-dialog .service-form {
+  padding-top: 0;
+}
+@media (max-width: 600px) {
+  .service-name {
+    flex-basis: 100%;
+  }
+  .service-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

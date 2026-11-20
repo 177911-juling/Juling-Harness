@@ -1,0 +1,938 @@
+// WP-002: reproducible Windows Runtime artifact metadata pipeline.
+//
+// Generates the installer-consumed metadata files for a built managed
+// Runtime artifact:
+//
+//   runtime-manifest.json   contract fields per RuntimeInstallationManifest
+//                           (packages/harness-protocol/src/contracts/runtime.ts)
+//   checksums.json          sha256 per artifact file, covering the entrypoint
+//                           and runtime-manifest.json itself
+//   runtime-signature.json  Ed25519 signature over the exact manifest and
+//                           checksum bytes (joined by a NUL byte)
+//
+// Determinism rules
+// -----------------
+// Every emitted value is derived from the real pin (omp-patch/upstream.json),
+// the real patch series (omp-patch/patches/series.json), the pinned vendor
+// package version, and the built binary bytes. The emitted JSON contains no
+// timestamps and no absolute paths; two runs over identical inputs produce
+// byte-identical files. Key order is fixed by construction.
+//
+// Runtime identity
+// ----------------
+// The managed Runtime currently exposes a verified backend capability subset.
+// The capability hash is mirrored here so a stale package definition fails
+// closed. The command manifest hash is recorded from a probe of the just-built
+// Runtime, and then re-derived from that probe's own manifest payload
+// (`commandBaselineHash`) so a hash that moved with the build machine's profile
+// fails the build instead of shipping an installer that rejects itself.
+//
+// Entrypoint naming
+// -----------------
+// The managed Runtime CLI is `juling.exe` on Windows and `juling` on macOS and
+// Linux, chosen from the artifact platform (never the build machine) through the
+// shared table in target-platform.mjs. `juling-harness.exe` is reserved for the
+// desktop application and is rejected here.
+
+import { createHash, sign as signPayload } from "node:crypto";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { overlayHash } from "./omp-overlay.mjs";
+import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
+import { RUNTIME_ENTRYPOINTS, RUNTIME_PLATFORMS, runtimeEntrypointFor } from "./target-platform.mjs";
+
+export const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
+
+/** Windows entrypoint; other platforms resolve through `runtimeEntrypointFor(platform)`. */
+export const MANAGED_ENTRYPOINT = RUNTIME_ENTRYPOINTS.win32;
+
+// Must stay in sync with HARNESS_PROTOCOL_VERSION in
+// packages/harness-protocol/src/contracts/protocol.ts.
+export const HARNESS_PROTOCOL_RANGE = Object.freeze({ min: 1, max: 1 });
+
+// Keep this literal usable before workspace builds; tooling checks its exact Runtime order.
+export const IMPLEMENTED_CAPABILITIES = Object.freeze([
+  "timeTravel.capture",
+  "computer.workspace.get",
+  "computer.activity.list",
+  "computer.frame.get",
+  "computer.structure.get",
+  "context.view.open",
+  "context.view.list",
+  "context.view.entry",
+  "context.view.release",
+  "commit.draft.prepare",
+  "commit.draft.read",
+  "commit.draft.preview",
+  "commit.draft.release",
+  "history.prompts.list",
+  "history.prompts.read",
+  "models.available.read",
+  "models.available.release",
+  "models.antigravity.readiness",
+  "models.systemTemplates.list",
+  "models.systemTemplates.inspect",
+  "models.systemTemplates.file.read",
+  "models.auth.providers.read",
+  "runtime.close.confirm",
+  "interaction.form.read",
+  "agent.spawn.options.read",
+  "agent.messages.list",
+  "session.lease.read",
+  "extensions.links.list",
+  "browser.webmcp.list",
+  "session.cache.get",
+  "shell.view.read",
+  "shell.view.release",
+  "live.webrtc.connect",
+  "live.webrtc.status",
+  "live.webrtc.mute",
+  "live.webrtc.release",
+  "models.available.refresh",
+  "models.systemTemplates.binding.set",
+  "models.systemTemplates.file.write",
+  "models.auth.login",
+  "models.auth.cancel",
+  "models.auth.key.set",
+  "models.auth.key.remove",
+  "models.auth.unpause",
+  "models.provider.roster.refresh",
+  "models.accounts.resetPolicy.set",
+  "settings.approval",
+  "prediction.query",
+  "composer.predictions",
+  "commit.draft.select",
+  "commit.draft.execute",
+  "history.prompts.delete",
+  "search.credentials.list",
+  "search.credentials.set",
+  "search.credentials.remove",
+  "extensions.links.activate",
+  "browser.webmcp.invoke",
+  "evaluation.runtime.plan",
+  "evaluation.runtime.start",
+  "evaluation.runtime.read",
+  "evaluation.runtime.rows",
+  "evaluation.runtime.control",
+  "evaluation.runtime.report",
+  "evaluation.runtime.patch",
+  "advisors.config.get",
+  "advisors.config.save",
+  "resource.local.list",
+  "resource.local.open",
+  "resource.local.save",
+  "dictation.inspect",
+  "dictation.open",
+  "dictation.status",
+  "dictation.prepare",
+  "dictation.start",
+  "dictation.stop",
+  "dictation.cancel",
+  "session.titles.inspect",
+  "prediction.status",
+  "prediction.configure",
+  "prediction.clearOverride",
+  "prediction.download.cancel",
+  "prediction.prepare",
+  "prediction.release",
+  "maintenance.compression.auto.status",
+  "maintenance.gc.preview",
+  "maintenance.gc.apply",
+  "maintenance.gc.status",
+  "maintenance.session.export",
+  "maintenance.export.status",
+  "maintenance.connection.check",
+  "archive.sessions.list",
+  "archive.recaps.list",
+  "archive.prompts.search",
+  "archive.session.inspect",
+  "agent.model.inspect",
+  "session.restore.inspect",
+  "session.compaction.enqueue",
+  "session.compaction.cancel",
+  "session.compaction.status",
+  "session.queue.get",
+  "session.queue.entry.remove",
+  "session.queue.promote",
+  "session.queue.edit",
+  "session.queue.restore",
+  "preferences.native.get",
+  "preferences.native.set",
+  "preferences.native.clearOverride",
+  "session.compaction.get",
+  "session.compaction.set",
+  "preferences.features.get",
+  "preferences.features.set",
+  "preferences.features.clearOverride",
+  "accounts.pool.options",
+  "accounts.pool.get",
+  "accounts.pool.set",
+  "models.compaction.preview",
+  "models.compaction.set",
+  "session.portability.pack",
+  "session.portability.anonymize",
+  "session.portability.prepare",
+  "session.portability.import",
+  "session.portability.cancel",
+  "session.portability.moved",
+  "session.portability.status",
+  "maintenance.compression.scan",
+  "maintenance.compression.apply",
+  "maintenance.compression.status",
+  "worktrees.session.resume.list",
+  "worktrees.session.resume.prepare",
+  "worktrees.session.list",
+  "worktrees.session.startPolicy",
+  "worktrees.session.continueHere",
+  "worktrees.session.create",
+  "worktrees.session.open",
+  "worktrees.session.remove.prepare",
+  "worktrees.session.remove.apply",
+  "mode.plan.review.details",
+  "mode.plan.review.resolve",
+  "ratchet.list",
+  "ratchet.read",
+  "ratchet.create",
+  "ratchet.approve",
+  "ratchet.start",
+  "ratchet.stop",
+  "computer.status",
+  "computer.configure",
+  "computer.capture",
+  "computer.stop",
+  "computer.observe.release",
+  "computer.observe.open",
+  "computer.observe.close",
+  "computer.frame.capture",
+  "computer.control.stop",
+  "computer.control.continue",
+  "browser.tabs.get",
+  "browser.observe.prepare",
+  "browser.managed.prepare",
+  "browser.native.open",
+  "browser.native.close",
+  "ida.status.details",
+  "ida.configure",
+  "ida.open",
+  "ida.save",
+  "ida.close",
+  "ida.run",
+  "ida.database.cancel",
+  "session.budget.get",
+  "session.budget.set",
+  "session.budget.clearOverride",
+  "session.speed.get",
+  "session.speed.set",
+  "session.warming.get",
+  "session.warming.set",
+  "models.presets.list",
+  "models.presets.save",
+  "models.presets.apply",
+  "models.presets.delete",
+  "resource.read",
+  "ida.status",
+  "ida.view",
+  "ida.prepare",
+  "ida.commit",
+  "ida.cancel",
+  "agent.btw.read",
+  "agent.btw.ask",
+  "agent.btw.abort",
+  "prediction.control",
+  "session.queue.list",
+  "session.queue.ack",
+  "session.queue.remove",
+  "session.queue.steer",
+  "session.queue.takeback",
+  "session.tier.get",
+  "session.tier.set",
+  "session.skills.list",
+  "skillshare.status",
+  "skillshare.home",
+  "skillshare.search",
+  "skillshare.package",
+  "skillshare.installed",
+  "skillshare.tokens",
+  "skillshare.prepare",
+  "skillshare.execute",
+  "skillshare.action",
+  "skillshare.discard",
+  "live.audio.prepare",
+  "live.audio.start",
+  "live.audio.status",
+  "live.audio.mute",
+  "live.audio.release",
+  "media.models",
+  "media.list",
+  "media.start",
+  "media.read",
+  "media.cancel",
+  "media.resume",
+  "media.close",
+  "benchmarks.accounts.read",
+  "benchmarks.list",
+  "benchmarks.start",
+  "benchmarks.read",
+  "benchmarks.cancel",
+  "benchmarks.close",
+  "templates.list",
+  "templates.get",
+  "templates.prepare",
+  "mcp.runtime.status",
+  "judgments.list",
+  "judgments.create",
+  "judgments.read",
+  "judgments.cancel",
+  "judgments.close",
+  "judgments.retry",
+  "agent.spawn.options",
+  "btw.inject",
+  "session.history.rename",
+  "session.history.pin",
+  "session.lease.inspect",
+  "approvals.forget",
+  "jobs.inspect",
+  "mcp.auth.reauth",
+  "mcp.auth.unauth",
+  "mcp.auth.reconnect",
+  "seance.ask",
+  "annotations.capture",
+  "annotations.prepare",
+  "accounts.status",
+  "accounts.status.details",
+  "accounts.logout",
+  "services.list",
+  "services.start",
+  "services.stop",
+  "services.restart",
+  "services.mode.set",
+  "services.send",
+  "services.logs",
+  "tokens.count",
+  "runtime.models.list",
+  "runtime.models.describe",
+  "btw.history.list",
+  "btw.history.read",
+  "btw.followUp",
+  "btw.images.resolve",
+  "session.models.mentions",
+  "session.import.list",
+  "session.import.preview",
+  "session.import.execute",
+  "runtime.auth.get",
+  "runtime.auth.set",
+  "runtime.auth.remove",
+  "runtime.pause",
+  "runtime.resume",
+  "runtime.snapshot",
+  "session.owner.update",
+  "runtime.settings.get",
+  "runtime.settings.set",
+  "runtime.shutdown",
+  "live.start",
+  "live.stop",
+  "queue.enqueue",
+  "session.clearContext",
+  "session.drop",
+  "turn.retry",
+  "core.continue",
+  "core.prompt",
+  "core.steer",
+  "core.followUp",
+  "core.abort",
+  "loop.enable",
+  "loop.pause",
+  "loop.disable",
+  "session.fast.set",
+  "session.prewalk.arm",
+  "session.prewalk.disarm",
+  "session.prewalk.restart",
+  "mode.plan.enter",
+  "mode.plan.exit",
+  "mode.plan.review.open",
+  "mode.plan.review.saveAndQuit",
+  "mode.plan.review.respond",
+  "mode.vibe.enter",
+  "mode.vibe.exit",
+  "goal.create",
+  "goal.replace",
+  "goal.show",
+  "goal.setBudget",
+  "goal.pause",
+  "goal.resume",
+  "goal.drop",
+  "goal.guided.start",
+  "btw.ask",
+  "btw.abort",
+  "btw.branch",
+  "tan.start",
+  "omfg.generate",
+  "omfg.amend",
+  "omfg.commit",
+  "agent.list",
+  "agent.get",
+  "agent.spawn",
+  "agent.send",
+  "agent.kill",
+  "agent.revive",
+  "agent.release",
+  "agent.transcript.read",
+  "agent.conversation.read",
+  "agent.subscribe",
+  "job.list",
+  "job.get",
+  "job.cancel",
+  "job.subscribe",
+  "session.tree.get",
+  "session.tree.navigate",
+  "session.tree.branch",
+  "session.fork",
+  "session.handoff",
+  "session.model.set",
+  "session.thinking.set",
+  "session.taskModel.set",
+  "session.history",
+  "session.transcript.read",
+  "operator.manifest.get",
+  "operator.invoke",
+  "permissions.mode.set",
+  "interaction.respond",
+  "tui.transfer",
+  "remoteUi.standard",
+  "remoteUi.leaseGeneration",
+  "harness.locale",
+  "tui.manualCompatibility",
+]);
+
+export const LIMITED_CAPABILITIES = Object.freeze({
+  "live.start": ["Requires a frontend-owned authenticated audio device and media sideband"],
+  "live.stop": ["Live start is unavailable until a frontend media sideband is attached"],
+  "loop.enable": ["Token limits are unsupported; use turns or minutes"],
+});
+
+export const UPSTREAM_JSON_PATH = join(REPOSITORY_ROOT, "omp-patch", "upstream.json");
+export const SERIES_JSON_PATH = join(REPOSITORY_ROOT, "omp-patch", "patches", "series.json");
+export const PATCHES_DIRECTORY = join(REPOSITORY_ROOT, "omp-patch", "patches");
+export const VENDOR_DIRECTORY = join(REPOSITORY_ROOT, "omp-patch", "vendor", "oh-my-pi");
+export const VENDOR_CODING_AGENT_PACKAGE_JSON = join(
+  VENDOR_DIRECTORY,
+  "packages",
+  "coding-agent",
+  "package.json",
+);
+
+export function defaultBinaryPath() {
+  return join(
+    VENDOR_DIRECTORY,
+    "packages",
+    "coding-agent",
+    "dist",
+    runtimeEntrypointFor(`${process.platform}-${process.arch}`),
+  );
+}
+
+export function defaultArtifactDirectory(platform, runtimeVersion) {
+  return join(
+    REPOSITORY_ROOT,
+    "packages",
+    "runtime-installer",
+    "dist",
+    "artifacts",
+    platform,
+    runtimeVersion,
+  );
+}
+
+export function sha256Hex(input) {
+  return createHash("sha256").update(input).digest("hex");
+}
+
+export function implementedManifestHash(kind) {
+  if (kind !== "capabilities") {
+    throw new Error(
+      `Only the capability manifest is reproducible from this package definition; found ${kind}. ` +
+        "The command baseline is re-derived from a probed manifest instead; see commandBaselineHash.",
+    );
+  }
+  const content = IMPLEMENTED_CAPABILITIES.map((id) => ({
+    id,
+    grade: LIMITED_CAPABILITIES[id] === undefined ? "stable" : "limited",
+    limitations: LIMITED_CAPABILITIES[id] ?? [],
+  }));
+  return `sha256:${sha256Hex(`${kind}:${JSON.stringify(content)}`)}`;
+}
+
+/**
+ * Re-derive a Runtime's command manifest hash from the manifest it just served.
+ *
+ * The Runtime hashes only its builtin baseline — every descriptor it ships,
+ * which all carry `source: "builtin"` — precisely so the value can be frozen
+ * and signed into `runtime-manifest.json` and still match on an operator
+ * machine whose skills, extensions, MCP prompt templates and file commands
+ * differ from this build machine's. Duplicating the builtin table here would
+ * rot, so the check instead re-serializes the probe's own payload: it fails the
+ * build the moment the Runtime lets anything environment-derived back into the
+ * hash, rather than shipping an installer whose managed Runtime rejects itself
+ * with "managed runtime command manifest hash drift".
+ */
+export function commandBaselineHash(manifest) {
+  const baseline = {
+    upstreamCommit: manifest.upstreamCommit,
+    commands: manifest.commands.filter((command) => command.source === "builtin"),
+    unclassifiedBuiltins: manifest.unclassifiedBuiltins,
+  };
+  return `sha256:${sha256Hex(JSON.stringify(baseline))}`;
+}
+
+export async function probeRuntimeIdentity({
+  binaryPath,
+  platform = process.platform,
+  arch = process.arch,
+  workspaceDirectory,
+  probeTimeoutMs = 30_000,
+} = {}) {
+  if (typeof binaryPath !== "string" || binaryPath.length === 0) {
+    throw new Error("A built Runtime binary is required for identity probing");
+  }
+  let createProcessProbe;
+  try {
+    ({ createProcessProbe } = await import("../packages/harness-host/dist/src/index.js"));
+  } catch (error) {
+    throw new Error(`Harness Host must be built before Runtime identity probing: ${error.message}`);
+  }
+  const { tmpdir } = await import("node:os");
+  const outcome = await createProcessProbe().probe({
+    executablePath: resolve(binaryPath),
+    platform,
+    arch,
+    workspaceDirectory: resolve(workspaceDirectory ?? tmpdir()),
+    supportedProtocolVersions: [HARNESS_PROTOCOL_RANGE.max],
+    probeTimeoutMs,
+  });
+  if (outcome.failure !== undefined) {
+    throw new Error(`Runtime identity probe failed (${outcome.failure}): ${outcome.failureDetail ?? "no detail"}`);
+  }
+  if (outcome.hello === undefined) throw new Error("Runtime identity probe returned no Harness Hello");
+  if (outcome.commandManifest === undefined) {
+    throw new Error("Runtime identity probe could not verify the operator command manifest");
+  }
+  if (outcome.smoke !== "passed") throw new Error(`Runtime identity smoke check was ${outcome.smoke ?? "skipped"}`);
+  if (outcome.shutdown !== "passed") {
+    throw new Error(`Runtime identity graceful shutdown check was ${outcome.shutdown ?? "skipped"}`);
+  }
+  if (outcome.commandManifest.unclassifiedBuiltins.length > 0) {
+    throw new Error("Runtime operator command manifest contains unclassified builtins");
+  }
+  const baselineHash = commandBaselineHash(outcome.commandManifest);
+  if (outcome.commandManifest.hash !== baselineHash) {
+    const dynamic = outcome.commandManifest.commands.filter((command) => command.source !== "builtin");
+    throw new Error(
+      `Runtime command manifest hash covers more than the builtin baseline: expected ${baselineHash}, found ${outcome.commandManifest.hash}. ` +
+        `The probe observed ${dynamic.length} environment-derived command(s)` +
+        `${dynamic.length === 0 ? "" : ` (${dynamic.map((command) => command.id).join(", ")})`}. ` +
+        "A hash that moves with a machine's profile cannot be pinned into runtime-manifest.json.",
+    );
+  }
+  return {
+    runtimeVersion: outcome.hello.runtimeVersion,
+    upstreamVersion: outcome.hello.upstreamVersion,
+    upstreamCommit: outcome.hello.upstreamCommit,
+    selectedProtocolVersion: outcome.hello.selectedProtocolVersion,
+    profile: outcome.hello.capabilityManifest.profile,
+    capabilityHash: outcome.hello.capabilityManifest.hash,
+    commandManifestHash: outcome.commandManifest.hash,
+  };
+}
+
+// Deterministic serialization used for every emitted file and hash input:
+// two-space indentation, fixed key order, trailing newline.
+export function canonicalJson(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+// The patchset version is recorded explicitly rather than derived from the
+// patch count. Counting made the version move backwards the moment patches
+// were consolidated, which collides with an already-installed runtime
+// directory of the same name. `npm run omp:patches:regen` advances it only
+// when the captured overlay+seam digest actually changed.
+export function derivePatchsetVersion(series) {
+  if (typeof series.patchsetVersion === "string" && series.patchsetVersion.length > 0) {
+    return series.patchsetVersion;
+  }
+  return `harness.${series.patches.length}`;
+}
+
+export function nextPatchsetVersion(current) {
+  const match = /^harness\.(\d+)$/u.exec(current ?? "");
+  if (match === null) throw new Error(`patchsetVersion must look like harness.<n>, found ${current ?? "missing"}`);
+  return `harness.${Number(match[1]) + 1}`;
+}
+
+/** Content digest over both layers; the regen script compares it to decide whether to bump the version. */
+export function seriesDigest({ overlayHash, patchHashes }) {
+  const lines = [`overlay:${overlayHash}`];
+  for (const name of Object.keys(patchHashes).sort()) lines.push(`patch:${name}:${patchHashes[name]}`);
+  return `sha256:${sha256Hex(lines.join("\n"))}`;
+}
+
+export function deriveRuntimeVersion(upstreamVersion, series) {
+  return `${upstreamVersion}-${derivePatchsetVersion(series)}`;
+}
+
+function asRecord(value, label) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`);
+  }
+  return value;
+}
+
+function assertRuntimeIdentity(identity, expected) {
+  if (identity === null || typeof identity !== "object" || Array.isArray(identity)) {
+    throw new Error("Authenticated Runtime identity evidence is required for packaging");
+  }
+  for (const [field, value] of Object.entries(expected)) {
+    if (identity[field] !== value) {
+      throw new Error(`Runtime identity ${field} mismatch: expected ${value}, found ${identity[field] ?? "missing"}`);
+    }
+  }
+  if (identity.selectedProtocolVersion !== HARNESS_PROTOCOL_RANGE.max) {
+    throw new Error(`Runtime identity selected unsupported protocol ${identity.selectedProtocolVersion ?? "missing"}`);
+  }
+  if (identity.profile !== "limited") {
+    throw new Error(`Runtime identity profile mismatch: expected limited, found ${identity.profile ?? "missing"}`);
+  }
+  const expectedCapabilityHash = implementedManifestHash("capabilities");
+  if (identity.capabilityHash !== expectedCapabilityHash) {
+    throw new Error(`Runtime identity capability hash does not match the packaged capability definition: expected ${expectedCapabilityHash}, found ${identity.capabilityHash ?? "missing"}`);
+  }
+  for (const field of ["capabilityHash", "commandManifestHash"]) {
+    if (!/^sha256:[a-f0-9]{64}$/u.test(identity[field] ?? "")) {
+      throw new Error(`Runtime identity ${field} is not a sha256 digest`);
+    }
+  }
+}
+
+function requiredString(value, label) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string`);
+  }
+  return value;
+}
+
+export async function readUpstreamPin(path = UPSTREAM_JSON_PATH) {
+  const pin = asRecord(JSON.parse(await readFile(path, "utf8")), "upstream pin");
+  const commit = requiredString(pin.commit, "upstream pin commit");
+  if (!/^[a-f0-9]{40}$/u.test(commit)) {
+    throw new TypeError(`upstream pin commit is not a 40-hex sha: ${commit}`);
+  }
+  const entrypoint = requiredString(pin.entrypoint, "upstream pin entrypoint");
+  const entrypoints = pin.entrypoints === undefined ? { win32: entrypoint } : asRecord(pin.entrypoints, "upstream pin entrypoints");
+  const firstPlatform = requiredString(pin.firstPlatform, "upstream pin firstPlatform");
+  const platforms = pin.platforms === undefined ? [firstPlatform] : pin.platforms;
+  if (!Array.isArray(platforms) || platforms.length === 0 || platforms.some((platform) => typeof platform !== "string")) {
+    throw new TypeError("upstream pin platforms must be a non-empty array of platform strings");
+  }
+  return {
+    repository: requiredString(pin.repository, "upstream pin repository"),
+    commit,
+    firstPlatform,
+    entrypoint,
+    entrypoints: { ...entrypoints },
+    platforms: [...platforms],
+  };
+}
+
+export async function readPatchSeries(path = SERIES_JSON_PATH) {
+  const series = asRecord(JSON.parse(await readFile(path, "utf8")), "patch series");
+  const upstreamCommit = requiredString(series.upstreamCommit, "patch series upstreamCommit");
+  if (!/^[a-f0-9]{40}$/u.test(upstreamCommit)) {
+    throw new TypeError(`patch series upstreamCommit is not a 40-hex sha: ${upstreamCommit}`);
+  }
+  if (!Array.isArray(series.patches) || series.patches.some((name) => typeof name !== "string")) {
+    throw new TypeError("patch series patches must be an array of file names");
+  }
+  if (series.patchsetVersion !== undefined && !/^harness\.\d+$/u.test(series.patchsetVersion)) {
+    throw new TypeError(`patch series patchsetVersion must look like harness.<n>, found ${series.patchsetVersion}`);
+  }
+  if (series.patchsetDigest !== undefined && !/^sha256:[a-f0-9]{64}$/u.test(series.patchsetDigest)) {
+    throw new TypeError("patch series patchsetDigest must be a sha256 digest");
+  }
+  return {
+    upstreamCommit,
+    patches: [...series.patches],
+    ...(series.patchsetVersion === undefined ? {} : { patchsetVersion: series.patchsetVersion }),
+    ...(series.patchsetDigest === undefined ? {} : { patchsetDigest: series.patchsetDigest }),
+  };
+}
+
+export async function writePatchSeries(series, path = SERIES_JSON_PATH) {
+  await writeFile(path, canonicalJson(series), "utf8");
+  return path;
+}
+
+export async function readUpstreamVersion(packageJsonPath = VENDOR_CODING_AGENT_PACKAGE_JSON) {
+  const pkg = asRecord(JSON.parse(await readFile(packageJsonPath, "utf8")), "vendor package");
+  return requiredString(pkg.version, "vendor package version");
+}
+
+export function assertPinConsistent(upstream, series) {
+  if (upstream.commit !== series.upstreamCommit) {
+    throw new Error(
+      `OMP pin mismatch: upstream.json=${upstream.commit}, series.json=${series.upstreamCommit}`,
+    );
+  }
+  if (upstream.entrypoint !== MANAGED_ENTRYPOINT) {
+    throw new Error(`upstream pin entrypoint must be "${MANAGED_ENTRYPOINT}", found "${upstream.entrypoint}"`);
+  }
+  for (const [os, name] of Object.entries(upstream.entrypoints ?? {})) {
+    if (!Object.hasOwn(RUNTIME_ENTRYPOINTS, os) || RUNTIME_ENTRYPOINTS[os] !== name) {
+      throw new Error(`upstream pin entrypoint for ${os} must match the managed table, found "${name}"`);
+    }
+  }
+  for (const platform of upstream.platforms ?? []) {
+    if (!RUNTIME_PLATFORMS.includes(platform)) throw new Error(`upstream pin platform ${platform} is not a supported Runtime platform`);
+  }
+}
+
+export async function computePatchHashes(patchesDirectory, names) {
+  const patchHashes = {};
+  for (const name of names) {
+    if (name.length === 0 || name !== basename(name)) {
+      throw new Error(`unsafe patch name in series: ${name}`);
+    }
+    patchHashes[name] = sha256Hex(await readFile(join(patchesDirectory, name)));
+  }
+  return patchHashes;
+}
+
+export async function buildManifest({
+  upstream,
+  series,
+  upstreamVersion,
+  binaryPath,
+  patchesDirectory,
+  platform,
+  entrypoint = runtimeEntrypointFor(platform),
+  channel = "stable",
+  runtimeIdentity,
+  overlay,
+}) {
+  const managedEntrypoint = runtimeEntrypointFor(platform);
+  if (entrypoint !== managedEntrypoint) {
+    throw new Error(
+      `Managed Runtime entrypoint for ${platform} must be "${managedEntrypoint}"; "juling-harness.exe" is reserved for the desktop application`,
+    );
+  }
+  if (basename(binaryPath) !== entrypoint) {
+    throw new Error(`built binary "${basename(binaryPath)}" does not match managed entrypoint "${entrypoint}"`);
+  }
+  if (channel !== "stable" && channel !== "canary") {
+    throw new Error(`Runtime channel must be "stable" or "canary", found "${channel}"`);
+  }
+  assertPinConsistent(upstream, series);
+
+  const patchsetVersion = derivePatchsetVersion(series);
+  const runtimeVersion = deriveRuntimeVersion(upstreamVersion, series);
+  assertRuntimeIdentity(runtimeIdentity, {
+    runtimeVersion,
+    upstreamVersion,
+    upstreamCommit: upstream.commit,
+  });
+  const entrypointSha256 = sha256Hex(await readFile(binaryPath));
+  const patchHashes = await computePatchHashes(patchesDirectory, series.patches);
+  // The overlay carries the bulk of the Harness source, so provenance has to
+  // cover it too; patchHashes alone would attest to only the seam layer.
+  const overlayDigest = overlay ?? (await overlayHash());
+
+  const provenanceBase = {
+    upstreamVersion,
+    upstreamCommit: upstream.commit,
+    patchsetVersion,
+    patches: [...series.patches],
+    patchHashes,
+    overlayHash: overlayDigest,
+    entrypoint,
+    entrypointSha256,
+  };
+  const capabilityHash = runtimeIdentity.capabilityHash;
+  const commandManifestHash = runtimeIdentity.commandManifestHash;
+
+  return {
+    manifest: {
+      runtimeVersion,
+      upstreamVersion,
+      upstreamCommit: upstream.commit,
+      patchsetVersion,
+      harnessProtocol: { min: HARNESS_PROTOCOL_RANGE.min, max: HARNESS_PROTOCOL_RANGE.max },
+      profile: "limited",
+      capabilityHash,
+      commandManifestHash,
+      platform,
+      entrypoint,
+      channel,
+    },
+    provenance: { ...provenanceBase },
+  };
+}
+
+export async function generateRuntimeArtifact({
+  upstream,
+  series,
+  upstreamVersion,
+  binaryPath,
+  patchesDirectory,
+  platform,
+  entrypoint = runtimeEntrypointFor(platform),
+  channel = "stable",
+  signingKey,
+  keyId,
+  outDirectory,
+  runtimeIdentity,
+  overlay,
+}) {
+  if (signingKey === undefined) throw new Error("A Runtime Ed25519 signing key is required");
+  if (typeof keyId !== "string" || keyId.length === 0) throw new Error("A Runtime signing key id is required");
+  const { manifest, provenance } = await buildManifest({
+    upstream,
+    series,
+    upstreamVersion,
+    binaryPath,
+    patchesDirectory,
+    platform,
+    entrypoint,
+    channel,
+    runtimeIdentity,
+    overlay,
+  });
+  const manifestText = canonicalJson(manifest);
+  const checksums = {
+    algorithm: "sha256",
+    files: {
+      [entrypoint]: sha256Hex(await readFile(binaryPath)),
+      "runtime-manifest.json": sha256Hex(manifestText),
+    },
+  };
+  const checksumsText = canonicalJson(checksums);
+  const signedPayload = Buffer.concat([
+    Buffer.from(manifestText, "utf8"),
+    Buffer.from("\0"),
+    Buffer.from(checksumsText, "utf8"),
+  ]);
+  const signature = {
+    algorithm: "ed25519",
+    keyId,
+    payloadSha256: sha256Hex(signedPayload),
+    signature: signPayload(null, signedPayload, signingKey).toString("base64url"),
+  };
+  const signatureText = canonicalJson(signature);
+
+  await mkdir(outDirectory, { recursive: true });
+  await copyFile(binaryPath, join(outDirectory, entrypoint));
+  await writeFile(join(outDirectory, "runtime-manifest.json"), manifestText, "utf8");
+  await writeFile(join(outDirectory, "checksums.json"), checksumsText, "utf8");
+  await writeFile(join(outDirectory, "runtime-signature.json"), signatureText, "utf8");
+
+  return {
+    manifest,
+    checksums,
+    signature,
+    provenance,
+    manifestPath: join(outDirectory, "runtime-manifest.json"),
+    checksumsPath: join(outDirectory, "checksums.json"),
+    signaturePath: join(outDirectory, "runtime-signature.json"),
+  };
+}
+
+function parseArgs(argv) {
+  const values = {
+    binary: undefined,
+    out: undefined,
+    platform: undefined,
+    entrypoint: undefined,
+    channel: undefined,
+    signingKey: undefined,
+    keyId: undefined,
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const flag = argv[index];
+    const value = argv[index + 1];
+    if (
+      flag === "--binary" ||
+      flag === "--out" ||
+      flag === "--platform" ||
+      flag === "--entrypoint" ||
+      flag === "--channel" ||
+      flag === "--signing-key" ||
+      flag === "--key-id"
+    ) {
+      if (value === undefined) throw new Error(`${flag} requires a value`);
+      const key = flag === "--signing-key" ? "signingKey" : flag === "--key-id" ? "keyId" : flag.slice(2);
+      values[key] = value;
+      index += 1;
+    } else {
+      throw new Error(`unknown argument ${flag}`);
+    }
+  }
+  return values;
+}
+
+async function main(argv) {
+  const args = parseArgs(argv);
+  const platform = args.platform ?? `${process.platform}-${process.arch}`;
+  const entrypoint = args.entrypoint ?? runtimeEntrypointFor(platform);
+  const channel = args.channel ?? "stable";
+  const envSigningKeyPath = args.signingKey ?? process.env.OMP_RUNTIME_SIGNING_KEY;
+  const envKeyId = args.keyId ?? process.env.OMP_RUNTIME_SIGNING_KEY_ID;
+  let signingKey;
+  let keyId;
+  if (envSigningKeyPath !== undefined && envKeyId !== undefined) {
+    signingKey = await readFile(resolve(envSigningKeyPath));
+    keyId = envKeyId;
+  } else {
+    try {
+      const local = await readRuntimeSigningKeys();
+      signingKey = local.privateKey;
+      keyId = local.keyId;
+    } catch {
+      throw new Error("--signing-key or OMP_RUNTIME_SIGNING_KEY is required. Run npm run omp:keys to create a local signing key.");
+    }
+  }
+  const binaryPath = resolve(args.binary ?? defaultBinaryPath());
+  const upstream = await readUpstreamPin();
+  const series = await readPatchSeries();
+  const upstreamVersion = await readUpstreamVersion();
+  const runtimeVersion = deriveRuntimeVersion(upstreamVersion, series);
+  const outDirectory =
+    args.out !== undefined ? resolve(args.out) : defaultArtifactDirectory(platform, runtimeVersion);
+  const runtimeIdentity = await probeRuntimeIdentity({ binaryPath });
+
+  const { manifestPath, checksumsPath, signaturePath, manifest } = await generateRuntimeArtifact({
+    upstream,
+    series,
+    upstreamVersion,
+    binaryPath,
+    patchesDirectory: PATCHES_DIRECTORY,
+    platform,
+    entrypoint,
+    channel,
+    signingKey,
+    keyId,
+    outDirectory,
+    runtimeIdentity,
+  });
+  console.log(`runtimeVersion=${manifest.runtimeVersion}`);
+  console.log(`platform=${manifest.platform} entrypoint=${manifest.entrypoint}`);
+  console.log(`capabilityHash=${manifest.capabilityHash} (verified limited Runtime subset)`);
+  console.log(`commandManifestHash=${manifest.commandManifestHash} (verified limited Runtime subset)`);
+  console.log(`Wrote ${manifestPath}`);
+  console.log(`Wrote ${checksumsPath}`);
+  console.log(`Wrote ${signaturePath}`);
+}
+
+if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

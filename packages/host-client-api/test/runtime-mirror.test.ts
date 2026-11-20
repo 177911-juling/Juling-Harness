@@ -1,0 +1,455 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import type {
+  ClientEvent,
+  CommandRequestId,
+  IdempotencyKey,
+  PublicAuthorityIdentity,
+  ResidentsReadModel,
+  RuntimeInstallState,
+  HarnessRuntimeSettingsGetResult,
+  WorkspaceId,
+} from "@juling-harness/client-contract";
+import type { OperatorStateSnapshot, HarnessOperation, RuntimeEpoch, RuntimeId, SessionId, StateVersion } from "@juling-harness/harness-protocol";
+import { HarnessHostClientFacade, createDefaultHostDiagnosticsFactory } from "../src/index.js";
+import type { HostInvokeOutcome } from "../src/services.js";
+import type { HostBackend, RuntimePublication } from "@juling-harness/harness-host";
+
+const snapshot: OperatorStateSnapshot = {
+  runtimeId: "runtime-1" as RuntimeId,
+  runtimeEpoch: 1 as RuntimeEpoch,
+  stateVersion: 4 as StateVersion,
+  sessionId: "session-1" as SessionId,
+  isStreaming: false,
+  isCompacting: false,
+  activeMode: "plan",
+  approvalMode: "always-ask",
+  pendingMessages: 0,
+  activeCommandIds: [],
+  agentsRevision: 0,
+  jobsRevision: 0,
+  agents: [],
+  jobs: [],
+};
+
+function makeFacade(invocations: HarnessOperation[], install: () => Promise<RuntimeInstallState> = async () => ({ status: "installed", signature: "unknown" }),
+  invokeOverride?: (operation: HarnessOperation) => Promise<HostInvokeOutcome>,
+  onPublication?: (listener: (publication: RuntimePublication) => void) => () => void,
+  registryCapacity?: number): HarnessHostClientFacade {
+  return new HarnessHostClientFacade({
+    authority: { authorityId: "authority-1" as PublicAuthorityIdentity["authorityId"], authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"] },
+    platform: "win32",
+    arch: "x64",
+    backend: {} as HostBackend,
+    capabilityManifest: () => undefined,
+    commandManifest: () => undefined,
+    runtime: {
+      hello: () => ({ runtimeId: "runtime-1", runtimeEpoch: 1, classification: "managed" }),
+      snapshot: () => snapshot,
+      ...(onPublication === undefined ? {} : { onPublication }),
+    },
+    catalog: { list: () => [] },
+    diagnostics: createDefaultHostDiagnosticsFactory(),
+    ...(registryCapacity === undefined ? {} : { registryCapacity }),
+    install,
+    commands: {
+      resume: () => snapshot,
+      drop: () => snapshot,
+      respond: () => snapshot,
+      invoke: (operation): HostInvokeOutcome | Promise<HostInvokeOutcome> => {
+        invocations.push(operation);
+        if (invokeOverride !== undefined) return invokeOverride(operation);
+        switch (operation.kind) {
+          case "runtime.settings.get":
+            return {
+              values: { extendedContext: true },
+            } satisfies HarnessRuntimeSettingsGetResult;
+          case "runtime.settings.set":
+            return { key: operation.key, value: operation.value, persisted: operation.persist };
+          case "mode.plan.review.saveAndQuit":
+            return {
+              saved: true,
+              path: operation.path,
+              exitedPlan: true,
+              newSession: "started",
+              sessionId: "session-2" as SessionId,
+            };
+          default:
+            return snapshot;
+        }
+      },
+    },
+  });
+}
+
+async function waitForReceipt(events: ClientEvent[], requestId: CommandRequestId): Promise<Extract<ClientEvent, { kind: "command.receipt" }>> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const receipt = events.find(
+      (event): event is Extract<ClientEvent, { kind: "command.receipt" }> =>
+        event.kind === "command.receipt" && event.receipt.requestId === requestId,
+    );
+    if (receipt !== undefined) return receipt;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`receipt ${requestId} was not emitted`);
+}
+
+test("Runtime install business failure emits a failed terminal receipt", async () => {
+  const facade = makeFacade([], async () => ({ status: "failed", signature: "verified", message: "Runtime did not start" }));
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  const requestId = "install-failed" as CommandRequestId;
+  try {
+    await facade.command({ commandName: "runtime.install", input: {}, requestId, idempotencyKey: "install-failed" as IdempotencyKey });
+    const { receipt } = await waitForReceipt(events, requestId);
+    assert.equal(receipt.status, "failed");
+    if (receipt.status === "failed") assert.match(receipt.error.message, /did not start/);
+  } finally { await facade.close(); }
+});
+
+test("Runtime install fences concurrent installs and commands until the terminal receipt", async () => {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  let installs = 0;
+  const invokes: HarnessOperation[] = [];
+  const facade = makeFacade(invokes, async () => { installs += 1; await gate; return { status: "installed", signature: "verified" }; });
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  const request = { commandName: "runtime.install" as const, input: {}, requestId: "install-one" as CommandRequestId, idempotencyKey: "install-one" as IdempotencyKey };
+  try {
+    await facade.command(request);
+    await facade.command(request);
+    await assert.rejects(facade.command({ ...request, requestId: "install-two" as CommandRequestId, idempotencyKey: "install-two" as IdempotencyKey }), { code: "UNAVAILABLE" });
+    await assert.rejects(facade.command({ commandName: "runtime.settings.set", input: { key: "extendedContext", value: false, persist: true }, requestId: "settings-during-update" as CommandRequestId, idempotencyKey: "settings-during-update" as IdempotencyKey }), { code: "UNAVAILABLE" });
+    assert.equal(installs, 1);
+    assert.deepEqual(invokes, []);
+    finish();
+    assert.equal((await waitForReceipt(events, request.requestId)).receipt.status, "completed");
+    await facade.command({ commandName: "runtime.settings.set", input: { key: "extendedContext", value: false, persist: true }, requestId: "settings-after-update" as CommandRequestId, idempotencyKey: "settings-after-update" as IdempotencyKey });
+    assert.equal(invokes.length, 1);
+  } finally { finish(); await facade.close(); }
+});
+
+test("Runtime install refuses an earlier command whose result has not reached the snapshot", async () => {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const facade = makeFacade([], undefined, async () => { await gate; return snapshot; });
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  try {
+    await facade.command({ commandName: "runtime.settings.get", input: {}, requestId: "pending" as CommandRequestId, idempotencyKey: "pending" as IdempotencyKey });
+    const install = { commandName: "runtime.install" as const, input: {}, requestId: "install-after-pending" as CommandRequestId, idempotencyKey: "install-after-pending" as IdempotencyKey };
+    await assert.rejects(facade.command(install), { code: "UNAVAILABLE" });
+    finish();
+    await waitForReceipt(events, "pending" as CommandRequestId);
+    await facade.command(install);
+    assert.equal((await waitForReceipt(events, install.requestId)).receipt.status, "completed");
+  } finally { finish(); await facade.close(); }
+});
+
+test("pending commands retain idempotency when the terminal registry is full", async () => {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const invocations: HarnessOperation[] = [];
+  const facade = makeFacade(invocations, undefined, async () => { await gate; return snapshot; }, undefined, 1);
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  const first = {
+    commandName: "runtime.settings.get" as const,
+    input: {},
+    requestId: "capacity-first" as CommandRequestId,
+    idempotencyKey: "capacity-first" as IdempotencyKey,
+  };
+  try {
+    await facade.command(first);
+    await assert.rejects(facade.command({
+      ...first,
+      requestId: "capacity-second" as CommandRequestId,
+      idempotencyKey: "capacity-second" as IdempotencyKey,
+    }), { code: "UNAVAILABLE" });
+    await facade.command(first);
+    assert.equal(invocations.length, 1);
+    finish();
+    assert.equal((await waitForReceipt(events, first.requestId)).receipt.status, "completed");
+    await facade.command(first);
+    assert.equal(invocations.length, 1);
+  } finally { finish(); await facade.close(); }
+});
+
+test("Host maps Runtime mirror commands to HarnessOperation and forwards typed receipts", async () => {
+  const invocations: HarnessOperation[] = [];
+  const facade = makeFacade(invocations);
+  const events: ClientEvent[] = [];
+  const unsubscribe = facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  try {
+    const requests = [
+      {
+        commandName: "runtime.settings.get" as const,
+        input: { keys: ["extendedContext"] as const },
+        requestId: "request-settings-get" as CommandRequestId,
+        idempotencyKey: "idem-settings-get" as IdempotencyKey,
+      },
+      {
+        commandName: "runtime.settings.set" as const,
+        input: { key: "extendedContext" as const, value: false, persist: true },
+        requestId: "request-settings-set" as CommandRequestId,
+        idempotencyKey: "idem-settings-set" as IdempotencyKey,
+      },
+      {
+        commandName: "mode.plan.review.saveAndQuit" as const,
+        input: { path: "plans/plan.md" },
+        requestId: "request-plan-save" as CommandRequestId,
+        idempotencyKey: "idem-plan-save" as IdempotencyKey,
+      },
+    ];
+    for (const request of requests) {
+      const accepted = await facade.command(request);
+      assert.equal(accepted.status, "accepted");
+      const receipt = await waitForReceipt(events, request.requestId);
+      assert.equal(receipt.receipt.status, "completed");
+    }
+    assert.deepEqual(invocations, [
+      { kind: "runtime.settings.get", keys: ["extendedContext"] },
+      { kind: "runtime.settings.set", key: "extendedContext", value: false, persist: true },
+      { kind: "mode.plan.review.saveAndQuit", path: "plans/plan.md" },
+    ]);
+  } finally {
+    unsubscribe();
+    await facade.close();
+  }
+});
+
+test("Runtime mirror dispatch resolves the operation kind from commandName, not from a forged input kind", async () => {
+  const invocations: HarnessOperation[] = [];
+  const facade = makeFacade(invocations);
+  const events: ClientEvent[] = [];
+  const unsubscribe = facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  try {
+    // A forged input `kind` never reaches dispatch: the command dispatches as
+    // its commandName; Runtime validates the resulting operation.
+    const acceptId = "request-forged-kind-ok" as CommandRequestId;
+    await facade.command({
+      commandName: "runtime.settings.set",
+      input: { kind: "runtime.settings.get", key: "extendedContext", value: false, persist: true } as never,
+      requestId: acceptId,
+      idempotencyKey: "idem-forged-kind-ok" as IdempotencyKey,
+    });
+    const accepted = await waitForReceipt(events, acceptId);
+    assert.equal(accepted.receipt.status, "completed");
+    assert.deepEqual(invocations, [
+      { kind: "runtime.settings.set", key: "extendedContext", value: false, persist: true },
+    ]);
+  } finally {
+    unsubscribe();
+    await facade.close();
+  }
+});
+
+test("same-version Runtime recovery replays after a connection fence without lowering the watermark", async () => {
+  let live = true;
+  let available: OperatorStateSnapshot | undefined = snapshot;
+  let publish!: (publication: RuntimePublication) => void;
+  let wake!: (residents: ResidentsReadModel) => void;
+  const facade = new HarnessHostClientFacade({
+    authority: { authorityId: "authority-1" as PublicAuthorityIdentity["authorityId"], authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"] },
+    platform: "win32", arch: "x64", backend: {} as HostBackend,
+    capabilityManifest: () => undefined, commandManifest: () => undefined,
+    runtime: {
+      hello: () => live ? { runtimeId: "runtime-1", runtimeEpoch: 1, classification: "managed" } : undefined,
+      snapshot: () => available,
+      unavailable: () => live ? undefined : { code: "launch-failed", reason: "recovery pending" },
+      onPublication(listener) { publish = listener; return () => undefined; },
+    },
+    residents: {
+      list: () => ({ residents: [], generatedAt: "2026-10-29T00:00:00.000Z" }),
+      onChanged(listener) { wake = listener; return () => undefined; },
+    },
+    catalog: { list: () => [] }, diagnostics: createDefaultHostDiagnosticsFactory(),
+    install: async () => ({ status: "installed", signature: "unknown" }),
+  });
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, event => events.push(event));
+  const publishVersion = (version: number) => publish({
+    commitSeq: version, publishedAt: "2026-10-29T00:00:00.000Z",
+    snapshot: { ...snapshot, stateVersion: version as StateVersion }, terminalOutcomes: [],
+  });
+  const wakeConnection = () => wake({ residents: [], generatedAt: "2026-10-29T00:00:00.000Z" });
+  const countSnapshots = () => events.filter(event => event.kind === "snapshot").length;
+  try {
+    publishVersion(4);
+    publishVersion(4);
+    assert.equal(countSnapshots(), 1);
+    for (const unavailable of [false, true]) {
+      available = undefined;
+      live = !unavailable;
+      wakeConnection(); // May run before the publication via connectionChanged.
+      assert.equal(events.filter(event => event.kind === "runtime.changed").at(-1)?.connection.status, unavailable ? "unavailable" : "connecting");
+      live = true;
+      available = snapshot;
+      wakeConnection(); // The recovery sync must not consume the replay flag.
+      const before = countSnapshots();
+      publishVersion(3);
+      assert.equal(countSnapshots(), before, "stale lower version must not restore a fenced snapshot");
+      publishVersion(4);
+      publishVersion(4);
+      assert.equal(countSnapshots(), before + 1, "exactly one same-version recovery snapshot");
+    }
+    publishVersion(5);
+    publishVersion(4);
+    assert.equal(countSnapshots(), 4, "normal publications remain monotonic and deduped");
+  } finally { await facade.close(); }
+});
+
+test("snapshot dedupe still delivers terminal Runtime receipts", async () => {
+  let publish!: (publication: RuntimePublication) => void;
+  let finish!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  const facade = makeFacade([], undefined, async () => { await gate; return snapshot; }, listener => {
+    publish = listener;
+    return () => undefined;
+  });
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, event => events.push(event));
+  const requestId = "deduped-terminal" as CommandRequestId;
+  try {
+    const publication: RuntimePublication = { commitSeq: 1, publishedAt: "2026-10-29T00:00:00.000Z", snapshot, terminalOutcomes: [] };
+    publish(publication);
+    await facade.command({ commandName: "runtime.settings.get", input: {}, requestId, idempotencyKey: requestId as unknown as IdempotencyKey });
+    publish({ ...publication, terminalOutcomes: [{
+      commandId: "deduped-command" as never, requestId, runtimeId: snapshot.runtimeId, runtimeEpoch: snapshot.runtimeEpoch,
+      operationKind: "runtime.settings.get", requestedAt: publication.publishedAt, terminalAt: publication.publishedAt,
+      status: "failed", errorCode: "UNAVAILABLE", errorMessage: "Runtime disconnected",
+    }] });
+    assert.equal(events.filter(event => event.kind === "snapshot").length, 1);
+    assert.equal((await waitForReceipt(events, requestId)).receipt.status, "failed");
+  } finally { finish(); await facade.close(); }
+});
+
+test("resident lifecycle loss publishes runtime.changed before the broker summary", async () => {
+  let live = true;
+  let publishResidents: ((residents: ResidentsReadModel) => void) | undefined;
+  const facade = new HarnessHostClientFacade({
+    authority: { authorityId: "authority-1" as PublicAuthorityIdentity["authorityId"], authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"] },
+    platform: "win32",
+    arch: "x64",
+    backend: {} as HostBackend,
+    capabilityManifest: () => undefined,
+    commandManifest: () => undefined,
+    runtime: {
+      hello: () => live ? ({ runtimeId: "runtime-1", runtimeEpoch: 1, classification: "managed" }) : undefined,
+      // Preserve the stale controller publication to match the lease-loss
+      // incident: hello is gone before the old snapshot holder is replaced.
+      snapshot: () => snapshot,
+      disconnect: () => live ? undefined : ({ code: "pipe-closed", reason: "Bridge pipe closed" }),
+    },
+    residents: {
+      list: () => ({ residents: [], generatedAt: "2026-08-30T12:00:00.000Z" }),
+      onChanged(listener) {
+        publishResidents = listener;
+        return () => { publishResidents = undefined; };
+      },
+    },
+    catalog: { list: () => [] },
+    diagnostics: createDefaultHostDiagnosticsFactory(),
+    install: async (): Promise<RuntimeInstallState> => ({ status: "installed", signature: "unknown" }),
+  });
+  const events: ClientEvent[] = [];
+  const unsubscribe = facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  try {
+    live = false;
+    publishResidents?.({ residents: [], generatedAt: "2026-08-30T12:00:01.000Z" });
+
+    const runtimeChangedIndex = events.findIndex((event) => event.kind === "runtime.changed");
+    const residentsChangedIndex = events.findIndex((event) => event.kind === "residents.changed");
+    assert.equal(runtimeChangedIndex, 0);
+    assert.ok(residentsChangedIndex > runtimeChangedIndex);
+    const runtimeChanged = events[runtimeChangedIndex];
+    if (runtimeChanged?.kind === "runtime.changed") {
+      assert.equal(runtimeChanged.connection.status, "disconnected");
+      assert.equal(runtimeChanged.connection.disconnectCode, "pipe-closed");
+    }
+  } finally {
+    unsubscribe();
+    await facade.close();
+  }
+});
+
+test("dormant workspace unbinding keeps connected state without emitting false disconnect", async () => {
+  let bound = true;
+  let publishResidents: ((residents: ResidentsReadModel) => void) | undefined;
+  const facade = new HarnessHostClientFacade({
+    authority: { authorityId: "authority-1" as PublicAuthorityIdentity["authorityId"], authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"] },
+    platform: "win32",
+    arch: "x64",
+    backend: {} as HostBackend,
+    capabilityManifest: () => undefined,
+    commandManifest: () => undefined,
+    runtime: {
+      hello: () => bound ? ({ runtimeId: "runtime-1", runtimeEpoch: 1, classification: "managed" }) : undefined,
+      snapshot: () => bound ? snapshot : undefined,
+      disconnect: () => undefined,
+      unavailable: () => undefined,
+    },
+    residents: {
+      list: () => ({
+        residents: [{
+          sessionId: "session-1" as SessionId,
+          workspaceId: "workspace-a" as WorkspaceId,
+          phase: "running",
+          pendingMessages: 0,
+          lastActivityAt: "2026-08-30T12:00:00.000Z",
+        }],
+        generatedAt: "2026-08-30T12:00:00.000Z",
+      }),
+      onChanged(listener) {
+        publishResidents = listener;
+        return () => { publishResidents = undefined; };
+      },
+    },
+    catalog: { list: () => [] },
+    diagnostics: createDefaultHostDiagnosticsFactory(),
+    install: async (): Promise<RuntimeInstallState> => ({ status: "installed", signature: "unknown" }),
+  });
+  const events: ClientEvent[] = [];
+  const unsubscribe = facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  try {
+    // Unbind the active session (e.g. workspace switch to a dormant project without resident).
+    bound = false;
+    publishResidents?.({
+      residents: [{
+        sessionId: "session-1" as SessionId,
+        workspaceId: "workspace-a" as WorkspaceId,
+        phase: "running",
+        pendingMessages: 0,
+        lastActivityAt: "2026-08-30T12:00:00.000Z",
+      }],
+      generatedAt: "2026-08-30T12:00:01.000Z",
+    });
+
+    const runtimeChangedEvents = events.filter((event) => event.kind === "runtime.changed");
+    // No false disconnect event should be emitted.
+    assert.deepEqual(runtimeChangedEvents, []);
+    const bootstrap = await facade.bootstrap();
+    assert.equal(bootstrap.runtime.status, "connected");
+  } finally {
+    unsubscribe();
+    await facade.close();
+  }
+});
+
+test("resume preparation cannot forge the Desktop-resolved execution directory", async () => {
+  const calls: HarnessOperation[] = []; const facade = makeFacade(calls);
+  try {
+    await assert.rejects(facade.command({ commandName: "worktrees.session.resume.prepare", requestId: "resume-private-cwd" as CommandRequestId, idempotencyKey: "resume-private-cwd" as IdempotencyKey, input: { sessionId: "session-1", executionWorkspaceId: "workspace", executionCwd: "C:/untrusted" } as never }), { code: "INVALID_ARGUMENT" });
+    assert.deepEqual(calls, []);
+  } finally { await facade.close(); }
+});
+
+test("in-process and Web facade reject private media grants before dispatch", async () => {
+  const calls: HarnessOperation[] = []; const facade = makeFacade(calls);
+  try {
+    await assert.rejects(facade.command({ commandName: "media.start", requestId: "media-private" as CommandRequestId, idempotencyKey: "media-private" as IdempotencyKey, input: { sessionId: "session-1", request: { type: "image", prompt: "mock" }, inputTransfers: [] } as never }), { code: "INVALID_ARGUMENT" });
+    assert.deepEqual(calls, []);
+  } finally { await facade.close(); }
+});

@@ -1,0 +1,1299 @@
+import { resolveSystemShellTarget } from "./system-files.js";
+import { FileResources } from "./file-resources.js";
+import { OfficeComponent } from "./office-component.js";
+import { registerFileViewerIpc } from "./file-viewer-ipc.js";
+import { installRemoteRuntime } from "./remote/install.js";
+import { RemoteTerminalManager } from "./remote/terminal.js";
+import { RemoteConnectionManager } from "./remote/manager.js";
+import { registerRemoteIpc } from "./remote/ipc.js";
+import { RemoteEnvironmentInstaller } from "./remote/environment-installer.js";
+import { LocalCredentialVault } from "./remote/local-vault.js";
+import { connectRemoteServices } from "./remote/connected-services.js";
+import { timeTravelService } from "./time-travel-service.js";
+import { RuntimeInstaller } from "@juling-harness/runtime-installer";
+import { AGENT_HOME_DIR_NAME, defaultOmpAgentDir, migrateLegacyAgentHome } from "@juling-harness/harness-host";
+import { DesktopPrediction, registerPredictionIpc } from "./prediction.js";
+import { registerSkillshareTokenIpc } from "./chrome-skillshare.js";
+import { DesktopLiveAudio, registerLiveAudioIpc } from "./live-audio.js";
+import { DesktopDictationAudio, registerDictationAudioIpc } from "./dictation-audio.js";
+import { DesktopBrowserObservation, registerBrowserObservationIpc } from "./browser-observation.js";
+import { DesktopManagedBrowser } from "./managed-browser.js";
+import { ManagedBrowserRelay } from "./managed-browser-relay.js";
+import { registerManagedBrowserIpc } from "./managed-browser-ipc.js";
+import { registerComputerCaptureIpc } from "./computer-observation.js";
+import { ComputerFrameStore, registerComputerFrameIpc } from "./computer-frames.js";
+import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
+/**
+ * Electron Main entry for the Juling Harness Windows Desktop shell
+ * (FRONTEND_INTEGRATION.md §9.2).
+ *
+ * Thin production wiring only: the lifecycle is composed by
+ * `createDesktopApplication` (src/composition.ts) over injected Electron
+ * seams; the Host composition and the IPC layer are injected from
+ * src/host-factory.ts and src/ipc.ts. This module imports Electron and
+ * must not be imported by headless tests.
+ *
+ * Secrets policy: Main may hold secrets internally, but nothing here (and
+ * nothing passed to the Renderer) ever carries Bridge tokens, private
+ * endpoints, PIDs, process handles or session/workspace paths — the window
+ * context is just a transport plus a coarse availability status.
+ */
+
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, powerMonitor, powerSaveBlocker, protocol, safeStorage, session, shell, systemPreferences, Tray, type NativeImage, type WebContents } from "electron";
+import { registerServiceDefinitionsIpc } from "./chrome-services.js";
+import { ServiceDefinitionStore } from "./service-definitions.js";
+import { MemoryCredentialStore, localMemoryCredentialProvider } from "./memory-credentials.js";
+import { registerMemoryCredentialIpc } from "./memory-credentials-ipc.js";
+import { activeArtifactLibrary, activeMediaDirectory, activeProfileDirectory } from "./artifact-library.js";
+import { runtimeSocketDirectory } from "./runtime-session.js";
+import { artifactResponse, registerArtifactIpc } from "./chrome-artifacts.js";
+import { graphicAssetResponse } from "./graphic-protocol.js";
+import {
+  WINDOW_BACKGROUND,
+  applyTitleBarOverlay,
+  registerTitleBarOverlayIpc,
+} from "./titlebar-overlay.js";
+import {
+  getDesktopLanguage,
+  initDesktopLanguage,
+  onDesktopLanguageChange,
+  registerDesktopLanguageIpc,
+} from "./desktop-language.js";
+import { desktopText } from "./desktop-language-shared.js";
+import { resolveAppIconPath, resolveAppUserModelId, resolveTrayIconPath } from "./app-icon.js";
+import { APP_MENU_COMMAND_CHANNEL, type AppMenuCommand } from "./app-menu-shared.js";
+import { registerMediaAccessIpc } from "./chrome-media-access.js";
+import { buildApplicationMenuTemplate } from "./platform/app-menu.js";
+import { installDevelopmentTools } from "./development-tools.js";
+import { handleMainWindowClose, moveToApplicationsMarkerPath, moveToApplicationsStrings, relaunchArguments, shouldOfferMoveToApplications } from "./platform/app-lifecycle.js";
+import { startAppNapGuard } from "./platform/app-nap.js";
+import { windowChromeOptions } from "./platform/window-chrome.js";
+import { registerChromeImageIpc } from "./chrome-image.js";
+import { registerChromeNotifyIpc } from "./chrome-notify.js";
+import { registerChromeOpenUrlIpc } from "./chrome-open-url.js";
+import { registerChromeLogsIpc } from "./chrome-logs.js";
+import { registerChromeMetricsIpc } from "./chrome-metrics.js";
+import { registerChromePerformanceIpc } from "./chrome-performance.js";
+import { logRendererPerformance, desktopConversationViews } from "./desktop-performance.js";
+import { CONVERSATION_VIEW_CHANNEL } from "./conversation-views.js";
+import { registerChromeProfileIpc } from "./chrome-profile.js";
+import { resolveProfilePersistRoot } from "./chrome-profile-store.js";
+import { registerPayloadHealthIpc } from "./payload-health.js";
+import { registerChromeAppUpdateIpc } from "./chrome-app-update.js";
+import { registerChromeUpdatesIpc } from "./chrome-updates.js";
+import { UpdateCoordinator } from "./update-coordinator.js";
+import { MAC_APP_ID, macBundlePath } from "./mac-app-installer.js";
+import { macSwapMarkers } from "./mac-app-swap.js";
+import { registerUnifiedUpdatesIpc } from "./unified-updates-ipc.js";
+import { CHROME_UPDATES_CHANNELS } from "./chrome-updates-shared.js";
+import { createUpdatePrefsStore } from "./update-prefs-store.js";
+import {
+  defaultRuntimeKeysDirectory,
+  loadInstallerTrustedKeys,
+  packagedRuntimeInstallLayout,
+} from "./runtime-install.js";
+import { pendingRuntimeArtifact } from "./host-factory.js";
+import { createAppTray, quitBusyDialogStrings, quitBusyMessageBoxOptions } from "./tray.js";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { cpus, homedir, totalmem } from "node:os";
+import { createRequire } from "node:module";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+
+import { createDesktopApplication } from "./composition.js";
+import { completeDesktopRuntimeTrial } from "./runtime-startup.js";
+import { registerDesktopIpc } from "./ipc.js";
+import { screen } from "electron";
+import { registerFloatingWindows } from "./floating-windows.js";
+import {
+  createDevicePermissionHandler,
+  createPermissionCheckHandler,
+  createPermissionRequestHandler,
+  createSecureWindow,
+  installCspHeaders,
+  isTrustedRendererUrl,
+  rendererOriginFor,
+  loadRendererTarget,
+  rendererCspFor,
+  rendererDevServerUrl,
+} from "./security.js";
+import type { DesktopTray, DesktopWindowFactory, DesktopWindowSurface } from "./types.js";
+import { createProductionHostFactory } from "./host-factory.js";
+import { defaultHostLogsDirectory } from "./host-log.js";
+import { TmuxControlManager } from "./tmux/manager.js";
+import { desktopPaths } from "./platform/desktop-paths.js";
+import { applyLoginEnvironment } from "./platform/login-env.js";
+import {
+  externalEditorCommandForPath,
+  launchExternalEditor,
+  listExternalEditorCommands,
+  resolveExternalEditorCommand,
+} from "./external-editor.js";
+import { registerWorkspaceShellIpc } from "./workspace-shell-ipc.js";
+import type {
+  FileOpener,
+  WorkspaceFileActionResult,
+  WorkspaceFileTargetInput,
+  WorkspaceShellEditorResult,
+} from "./workspace-shell-shared.js";
+import { resolveDroppedPaths } from "./dropped-paths.js";
+import { PAYLOAD_DIR, resolveAppResourceLayout } from "./payload-root.js";
+import { resolveRendererEntryFrom } from "./security.js";
+import { AppPayloadInstaller, createSmokeTestRunner, type UnifiedUpdateSnapshot } from "@juling-harness/runtime-installer";
+import { withCodeSignatureCheck } from "./platform/code-signature.js";
+import { planSaveRelativeTarget } from "./plan-save-path.js";
+import { registerPerfProfileIpc } from "./perf-profile-ipc.js";
+import { PerfProfileService } from "./perf-profile.js";
+import { PERF_PROFILE_CHANNELS } from "./perf-profile-shared.js";
+import { registerTerminalIpc } from "./terminal-ipc.js";
+import { TerminalSessionManager, createNodePtySpawner } from "./terminal-pty.js";
+import { TerminalRecordingManager } from "./terminal-recording.js";
+import { MediaUploadManager, registerMediaUploadIpc } from "./media-upload.js";
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: "omp-file", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+  { scheme: "omp-artifact", privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } },
+  { scheme: "omp-graphics", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+]);
+
+/** Developer-only override for the renderer entry (Vite dev server). */
+const RENDERER_DEV_URL = rendererDevServerUrl(app.isPackaged, process.env.OMP_RENDERER_DEV_URL);
+const NODE_PTY_VERSION = (createRequire(import.meta.url)("node-pty/package.json") as { version: string }).version;
+const PROJECT_REPOSITORY_URL = "https://github.com/177911-juling/juling-harness";
+
+/**
+ * macOS: a packaged app run from the disk image or Downloads cannot update
+ * itself, so offer the move once. true when the app is relaunching from
+ * /Applications and this instance must stop.
+ */
+let fileResources: FileResources | undefined;
+let fileViewerIpc: ReturnType<typeof registerFileViewerIpc> | undefined;
+
+async function offerMoveToApplications(): Promise<boolean> {
+  if (process.platform !== "darwin" || !app.isPackaged) return false;
+  const marker = moveToApplicationsMarkerPath(desktopPaths().stateRoot);
+  const offer = shouldOfferMoveToApplications({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    inApplicationsFolder: app.isInApplicationsFolder(),
+    declined: existsSync(marker),
+  });
+  if (!offer) return false;
+  const strings = moveToApplicationsStrings(app.getLocale());
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    message: strings.message,
+    detail: strings.detail,
+    buttons: [strings.move, strings.later],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (response === 0) {
+    try {
+      return app.moveToApplicationsFolder();
+    } catch (error) {
+      console.error(`[juling-harness] move to Applications failed: ${String(error)}`);
+      return false;
+    }
+  }
+  await mkdir(dirname(marker), { recursive: true })
+    .then(() => writeFile(marker, new Date().toISOString(), "utf8"))
+    .catch(() => undefined);
+  return false;
+}
+
+export async function main(): Promise<void> {
+  // One-time `~/.omp` → `~/.juling` agent-home migration. It never throws: a
+  // failed move/copy leaves the legacy tree in place and keeps it as the root.
+  const agentHome = await migrateLegacyAgentHome();
+  if (agentHome.error !== undefined) {
+    console.log(`[juling-harness] agent home migration failed: ${agentHome.error}`);
+  }
+  if (agentHome.root !== join(homedir(), AGENT_HOME_DIR_NAME)) {
+    const legacyAgentDir = join(agentHome.root, "agent");
+    process.env.JULING_CODING_AGENT_DIR = legacyAgentDir;
+    process.env.JULING_AGENT_DIR = legacyAgentDir;
+  }
+  const migrationIndex = process.argv.indexOf("--juling-migrate-runtime");
+  if (migrationIndex !== -1) {
+    const legacyInstallRoot = process.argv[migrationIndex + 1];
+    // Only the Windows installer migrates a legacy per-machine Runtime.
+    if (process.platform !== "win32" || !app.isPackaged || !legacyInstallRoot || !isAbsolute(legacyInstallRoot)) throw new Error("Invalid Runtime migration request");
+    const keys = await loadInstallerTrustedKeys([join(process.execPath, "..", "runtime-keys")], { environment: false });
+    if (!keys) throw new Error("Missing migration trust root");
+    const { migrateLegacyRuntime } = await import("./migrate-runtime.js");
+    await migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot: desktopPaths().runtimesRoot, trustedKeys: keys.trustedKeys });
+    app.exit(0); return;
+  }
+  if (process.argv.includes("--omp-print-abi")) {
+    process.stdout.write(
+      JSON.stringify(
+        {
+          electron: process.versions.electron,
+          modules: process.versions.modules,
+          nodePty: NODE_PTY_VERSION,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    app.exit(0);
+    return;
+  }
+  // A pending desktop update watches for this version's main process.
+  const macBundle = process.platform === "darwin" && app.isPackaged ? macBundlePath(process.execPath) : undefined;
+  const macSwapDirectory = join(desktopPaths().updatesV2Root, "mac-swap");
+  const appImage = process.platform === "linux" && app.isPackaged && process.env.APPIMAGE && isAbsolute(process.env.APPIMAGE) ? process.env.APPIMAGE : undefined;
+  const debInstalled = process.platform === "linux" && app.isPackaged && appImage === undefined && await (await import("./linux-deb-installer.js")).isLinuxDebInstallation(process.execPath, app.getVersion());
+  const linuxSwapDirectory = debInstalled ? join(desktopPaths().updatesV2Root, "deb", "swap") : join(desktopPaths().updatesV2Root, "linux-appimage-swap");
+  const desktopSwap = macBundle !== undefined ? macSwapMarkers(macSwapDirectory, { version: app.getVersion(), bundlePath: macBundle })
+    : appImage !== undefined || debInstalled ? macSwapMarkers(linuxSwapDirectory, { version: app.getVersion(), bundlePath: appImage ?? process.execPath }) : undefined;
+  if (process.platform === "win32") {
+    app.setAppUserModelId(resolveAppUserModelId());
+  }
+  if (process.platform === "linux") app.setDesktopName("juling-harness.desktop");
+  await app.whenReady();
+  initDesktopLanguage(app.getLocale());
+  if (await offerMoveToApplications()) return;
+  // GUI launchers have a minimal PATH; resolve the user's tools before spawning the Host.
+  const loginEnvironment = applyLoginEnvironment({ locale: app.getLocale() });
+
+  const runtimeInstallLayout = packagedRuntimeInstallLayout({
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+  });
+  const keysDirs = [
+    ...(runtimeInstallLayout !== undefined ? [runtimeInstallLayout.keysDirectory] : []),
+    defaultRuntimeKeysDirectory(),
+    join(app.getAppPath(), "packaging", "keys"),
+    join(app.getAppPath(), "..", "packaging", "keys"),
+  ];
+  const loadedKeys = await loadInstallerTrustedKeys(keysDirs, { environment: !app.isPackaged });
+  const trustedKeys = loadedKeys?.trustedKeys ?? {};
+
+  const payloadRoot = resolve(app.getAppPath(), "..", PAYLOAD_DIR);
+  const appPayloadInstaller = new AppPayloadInstaller(payloadRoot, { trustedKeys });
+
+  const appIcon = resolveAppIconPath({ appPath: app.getAppPath(), platform: process.platform });
+  const appNativeIcon = appIcon !== undefined ? nativeImage.createFromPath(appIcon) : undefined;
+  const validAppIcon = appNativeIcon !== undefined && !appNativeIcon.isEmpty() ? appNativeIcon : undefined;
+  // Packaged Mac apps take the Dock icon from the bundle; a dev run shows Electron's otherwise.
+  if (process.platform === "darwin" && !app.isPackaged && validAppIcon !== undefined) app.dock?.setIcon(validAppIcon);
+
+  let updateCoordinator: UpdateCoordinator | undefined;
+  const memoryCredentials = new MemoryCredentialStore(join(app.getPath("userData"), "hindsight-credentials.enc"), {
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value),
+  });
+  const hostFactory = createProductionHostFactory({
+    managedBrowser: true,
+    loginEnvironment,
+    memoryCredentials: localMemoryCredentialProvider(memoryCredentials, "local"),
+    beforeCreate: async () => { await updateCoordinator?.initialize(); },
+    afterCreate: async (composition, workspaceSelected) => {
+      if (!updateCoordinator?.hasRuntimeTrial || !workspaceSelected) return false;
+      return completeDesktopRuntimeTrial(composition,
+        (ready, selected) => updateCoordinator!.completeStartup(ready, selected), workspaceSelected);
+    },
+    openUrl: async (url) => {
+      if (!/^https?:\/\//i.test(url)) throw new Error("refusing to open a non-http login url");
+      await shell.openExternal(url);
+    },
+    revealDirectory: async (absDir) => {
+      const error = await shell.openPath(absDir);
+      if (error.length > 0) throw new Error(error);
+    },
+  });
+  // P0-6: GPU / low-spec probe. `getGPUInfo("basic")` cannot distinguish
+  // hardware from software compositing (its fields are identical), so the
+  // grading reads `app.getGPUFeatureStatus()` and only falls back to the
+  // `getGPUInfo("complete")` renderer string when that status is inconclusive.
+  // Hardware acceleration is never disabled here: Chromium deprecated the
+  // silent SwiftShader fallback, and the answer to software compositing is
+  // fewer draw operations, not less hardware.
+  const perfProfileCachePath = join(desktopPaths().stateRoot, "perf-profile.json");
+  // Chromium publishes its GPU verdict asynchronously: until the first
+  // `gpu-info-update`, `getGPUFeatureStatus()` reports `disabled_software` even
+  // on a hardware-compositing machine (observed here: first snapshot software,
+  // next event hardware). The probe therefore treats the status as unknown
+  // until it settles, and only a settled verdict is cached or broadcast.
+  let gpuStatusSettled = false;
+  const perfProfiles = new PerfProfileService({
+    getGPUFeatureStatus: () => app.getGPUFeatureStatus() as unknown as Readonly<Record<string, string>>,
+    async getGLRenderer() {
+      const info = (await app.getGPUInfo("complete")) as {
+        readonly gpuDevice?: ReadonlyArray<{ readonly glRenderer?: unknown }>;
+      } | null;
+      const renderer = info?.gpuDevice?.[0]?.glRenderer;
+      return typeof renderer === "string" ? renderer : undefined;
+    },
+    cores: () => cpus().length,
+    totalMemoryBytes: () => totalmem(),
+    onBattery: () => powerMonitor.isOnBatteryPower(),
+    now: () => new Date(),
+    async readCache() {
+      return JSON.parse(await readFile(perfProfileCachePath, "utf8")) as unknown;
+    },
+    async writeCache(snapshot) {
+      await mkdir(dirname(perfProfileCachePath), { recursive: true });
+      await writeFile(perfProfileCachePath, `${JSON.stringify(snapshot)}\n`, "utf8");
+    },
+    log: (level, event, detail) => hostFactory.log?.write(level, event, detail),
+    onChanged: (snapshot) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send(PERF_PROFILE_CHANNELS.changed, snapshot);
+      }
+    },
+    gpuStatusSettled: () => gpuStatusSettled,
+  });
+  // The cached snapshot must exist before the first window's preload runs, so
+  // the Renderer can pick its tier for the very first paint.
+  await perfProfiles.load();
+  void perfProfiles.refresh();
+  const settleGpuStatus = (): void => {
+    if (gpuStatusSettled) { void perfProfiles.refresh(true); return; }
+    gpuStatusSettled = true;
+    void perfProfiles.refresh(true);
+  };
+  app.on("gpu-info-update", settleGpuStatus);
+  // Fallback for platforms/windows that never emit `gpu-info-update`.
+  setTimeout(() => { if (!gpuStatusSettled) settleGpuStatus(); }, 2_000).unref?.();
+  powerMonitor.on("on-battery", () => { void perfProfiles.refresh(true); });
+  powerMonitor.on("on-ac", () => { void perfProfiles.refresh(true); });
+  // App bundle and AppImage updates commit once the renderer is ready.
+  let confirmDesktop: (() => Promise<void>) | undefined;
+  if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined || process.platform === "linux" && process.arch === "x64")) {
+    const { PreparedNsisUpdater, electronDifferentialDownload } = await import("./electron-update-adapter.js");
+    const shared = {
+      root: desktopPaths().updatesV2Root,
+      runtimeRoot: runtimeInstallLayout.installDirectory,
+      bundledRuntimeRoot: runtimeInstallLayout.artifactRoot,
+      repo: "177911-juling/juling-harness", platform: `${process.platform}-${process.arch}`, appVersion: app.getVersion(), keys: trustedKeys,
+      prefs: createUpdatePrefsStore({ appDataDirectory: join(app.getPath("appData"), "juling-harness") }),
+      snapshotChanged: (snapshot: UnifiedUpdateSnapshot) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send(CHROME_UPDATES_CHANNELS.changed, snapshot); },
+      isBusy: () => hostFactory.isBusy(), getRestartBlocker: () => fileViewerIpc?.hasDirty() ? desktopText("请先保存或关闭有未保存修改的文件，再重启更新。", "Save or close files with unsaved changes before restarting to update.") : hostFactory.updateRestartBlocker(),
+      beforeQuit: (onShutdownStarted: () => void) => hostFactory.shutdownForUpdate(onShutdownStarted),
+      fetcher: net.fetch.bind(net) as typeof fetch, log: hostFactory.log,
+      restart: () => { app.relaunch({ args: relaunchArguments(process.argv), ...(appImage ? { execPath: appImage } : {}) }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
+    };
+    if (process.platform === "linux") {
+      if (debInstalled) {
+        const { LinuxDebInstaller } = await import("./linux-deb-installer.js");
+        const installer = new LinuxDebInstaller({ target: process.execPath, resourcesPath: process.resourcesPath, swapDirectory: linuxSwapDirectory, pid: process.pid, launchArguments: relaunchArguments(process.argv) });
+        const coordinator = updateCoordinator = new UpdateCoordinator({
+          ...shared, root: join(desktopPaths().updatesV2Root, "deb"), linuxDesktopFormat: "deb",
+          installDesktop: (path, release, rollback, envelope, previous) => installer.install(path, release, rollback, envelope, previous),
+          preflightDesktop: () => installer.preflight(), desktopCommit: "confirmed",
+          desktopInstallOutcome: () => installer.consumeOutcome(), trackAppBaselineWithoutBase: true, desktopRequiresRollbackBase: true,
+        });
+        let confirmed: Promise<void> | undefined;
+        confirmDesktop = () => confirmed ??= (async () => { desktopSwap?.healthy(); await coordinator.confirmDesktopStartup(); })()
+          .catch((error) => console.error("[juling-harness] confirming the Linux deb update failed", error));
+      } else if (appImage === undefined) updateCoordinator = new UpdateCoordinator({ ...shared, manualDesktopDownload: "firstInstall" });
+      else {
+        const { LinuxAppImageInstaller } = await import("./linux-appimage-installer.js");
+        const installer = new LinuxAppImageInstaller({ target: appImage, swapDirectory: linuxSwapDirectory, pid: process.pid, launchArguments: relaunchArguments(process.argv) });
+        const coordinator = updateCoordinator = new UpdateCoordinator({
+          ...shared, initialInstallerPath: appImage,
+          installDesktop: (path, release, rollback) => installer.install(path, release, rollback),
+          preflightDesktop: () => installer.preflight(),
+          desktopCommit: "confirmed", desktopInstallOutcome: () => installer.consumeOutcome(),
+          trackAppBaselineWithoutBase: true,
+        });
+        let confirmed: Promise<void> | undefined;
+        confirmDesktop = () => confirmed ??= (async () => {
+          desktopSwap?.healthy();
+          await coordinator.confirmDesktopStartup();
+          await installer.cleanup(app.getVersion());
+        })().catch((error) => console.error("[juling-harness] confirming the Linux update failed", error));
+      }
+    } else if (macBundle === undefined) {
+      const updater = new PreparedNsisUpdater();
+      updateCoordinator = new UpdateCoordinator({
+        ...shared,
+        initialInstallerPath: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "@juling-harnessdesktop-updater", "installer.exe"),
+        installDesktop: (path) => updater.installPrepared(path),
+      });
+    } else {
+      const { MacAppInstaller } = await import("./mac-app-installer.js");
+      const macInstaller = new MacAppInstaller({ bundlePath: macBundle, swapDirectory: macSwapDirectory, appId: MAC_APP_ID, execPath: process.execPath, pid: process.pid });
+      const coordinator = updateCoordinator = new UpdateCoordinator({
+        ...shared,
+        installDesktop: (path, release) => macInstaller.install(path, release),
+        preflightDesktop: () => macInstaller.preflight(),
+        desktopCommit: "confirmed",
+        desktopInstallOutcome: () => macInstaller.consumeOutcome(),
+        trackAppBaselineWithoutBase: true,
+        activateOptions: { selfCheck: withCodeSignatureCheck(createSmokeTestRunner()) },
+      });
+      let confirmed: Promise<void> | undefined;
+      confirmDesktop = () => confirmed ??= (async () => {
+        desktopSwap?.healthy();
+        await coordinator.confirmDesktopStartup();
+        await macInstaller.cleanup();
+      })().catch((error) => console.error("[juling-harness] confirming the macOS update failed", error));
+    }
+  }
+  const remoteBundle = join(app.getAppPath(), "dist", "remote-host");
+  const remoteHelpers = app.isPackaged ? join(process.resourcesPath, "ssh-askpass") : join(app.getAppPath(), "dist", "ssh-askpass");
+  const remoteInstaller = new RemoteEnvironmentInstaller({ cache: join(desktopPaths().stateRoot, "remote-packages"), repo: "177911-juling/juling-harness", appVersion: app.getVersion(), keys: trustedKeys, fetcher: net.fetch.bind(net) as typeof fetch,
+    mirror: async () => (await createUpdatePrefsStore({ appDataDirectory: desktopPaths().stateRoot }).read()).mirrorPrefix });
+  const remoteVault = new LocalCredentialVault({
+    agentDirectory: () => defaultOmpAgentDir(),
+    brokerFile: async () => join(await runtimeSocketDirectory(activeProfileDirectory()), "auth-broker.json"),
+    runtimeExecutable: async () => {
+      const installer = new RuntimeInstaller(runtimeInstallLayout?.installDirectory ?? join(app.getPath("appData"), "juling-harness", "runtimes"), { trustedKeys });
+      const current = await installer.currentManifest();
+      if (!current) throw new Error(desktopText("请先安装本机 Runtime，以同步模型登录和凭证", "Install the local Runtime first to sync model logins and credentials"));
+      return current.entrypointPath;
+    },
+  });
+  const remoteConnections: RemoteConnectionManager = new RemoteConnectionManager(join(desktopPaths().stateRoot, "ssh-connections.json"), remoteBundle, undefined, remoteHelpers, undefined, {
+    requireApproval: true,
+    prepare: (profile, environment, authentication, signal, progress) => remoteInstaller.prepare(profile, environment, authentication, signal, progress),
+    connected: (id, remote, signal, report) => connectRemoteServices(remoteConnections, id, remote, signal, report, remoteVault, url => session.defaultSession.resolveProxy(url), memoryCredentials, timeTravelService(activeProfileDirectory())),
+  });
+  const remoteTerminals = new RemoteTerminalManager(remoteConnections);
+  const tmux = new TmuxControlManager({ connections: remoteConnections, log: (level, event, detail) => hostFactory.log?.write(level, event, JSON.stringify(detail)) });
+  const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);
+  const mediaUploads = new MediaUploadManager(activeArtifactLibrary);
+  const dictationAudio = new DesktopDictationAudio({
+    directory: activeMediaDirectory,
+    files: () => runtimeMediaFilesForLibrary(activeArtifactLibrary()),
+    socketDirectory: () => runtimeSocketDirectory(activeProfileDirectory()),
+  });
+  const liveAudio = new DesktopLiveAudio({
+    directory: activeMediaDirectory,
+    files: () => runtimeMediaFilesForLibrary(activeArtifactLibrary()),
+    socketDirectory: () => runtimeSocketDirectory(activeProfileDirectory()),
+  });
+  const prediction = new DesktopPrediction({directory:activeMediaDirectory,socketDirectory:()=>runtimeSocketDirectory(activeProfileDirectory()),chooseHistory:async sender=>{const owner=BrowserWindow.fromWebContents(sender as WebContents);const options={title:desktopText("导入提示词历史", "Import prompt history"),filters:[{name:"JSONL history",extensions:["jsonl"]}],properties:["openFile"] as const};const result=owner?await dialog.showOpenDialog(owner,{...options,properties:[...options.properties]}):await dialog.showOpenDialog({...options,properties:[...options.properties]});return result.canceled?undefined:result.filePaths[0];}});
+  const browserObservation = new DesktopBrowserObservation({ directory: activeMediaDirectory, socketDirectory: () => runtimeSocketDirectory(activeProfileDirectory()) });
+  let managedBrowser: DesktopManagedBrowser | undefined;
+  const terminalManager = new TerminalSessionManager({
+    recording: terminalRecordings,
+    spawner: createNodePtySpawner(),
+    // GUI launches on POSIX may start in "/"; open an unbound terminal in the home folder.
+    resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? (process.platform === "win32" ? process.cwd() : homedir()),
+  });
+
+  const editorDialogFilters = (platform: NodeJS.Platform): Array<{ name: string; extensions: string[] }> => {
+    if (platform === "darwin") {
+      return [
+        { name: desktopText("应用程序 (*.app)", "Applications (*.app)"), extensions: ["app"] },
+        { name: desktopText("所有文件", "All Files"), extensions: ["*"] },
+      ];
+    }
+    if (platform === "win32") {
+      return [
+        { name: desktopText("应用程序 (*.exe)", "Applications (*.exe)"), extensions: ["exe"] },
+        { name: desktopText("所有文件", "All Files"), extensions: ["*"] },
+      ];
+    }
+    return [{ name: desktopText("所有文件", "All Files"), extensions: ["*"] }];
+  };
+
+  const showOpenWithPicker = async (title: string): Promise<string | undefined> => {
+    const detected = resolveExternalEditorCommand();
+    // macOS picks .app bundles; a detected CLI shim inside a bundle is not a useful start.
+    const defaultPath = process.platform === "darwin"
+      ? "/Applications"
+      : detected !== undefined && isAbsolute(detected.file) ? detected.file : undefined;
+    const pickerOptions: Electron.OpenDialogOptions = {
+      title,
+      buttonLabel: desktopText("用所选程序打开", "Open with Selected"),
+      properties: ["openFile"],
+      ...(defaultPath === undefined ? {} : { defaultPath }),
+      filters: editorDialogFilters(process.platform),
+    };
+    const owner = BrowserWindow.getFocusedWindow();
+    const picked = owner === null
+      ? await dialog.showOpenDialog(pickerOptions)
+      : await dialog.showOpenDialog(owner, pickerOptions);
+    return picked.canceled ? undefined : picked.filePaths[0];
+  };
+
+  const openInExternalEditor = async (cwd: string): Promise<WorkspaceShellEditorResult> => {
+    const file = await showOpenWithPicker(desktopText("选择用于打开项目的编辑器", "Select an Editor to Open the Project"));
+    if (file === undefined) {
+      return { status: "cancelled" };
+    }
+    await launchExternalEditor(externalEditorCommandForPath(file), cwd);
+    return { status: "opened", editorName: basename(file) };
+  };
+
+  /**
+   * Resolve a Renderer-supplied workspace-relative tree path to its absolute
+   * form, enforcing containment inside the workspace root plus existence and
+   * kind checks. Absolute paths never travel inbound from the Renderer.
+   */
+  const resolveWorkspaceFileTarget = async (cwd: string, target: WorkspaceFileTargetInput): Promise<string> => {
+    const root = resolve(cwd);
+    const absolute = resolve(root, target.path);
+    if (absolute !== root && !absolute.startsWith(root + sep)) {
+      throw new Error(desktopText("目标路径超出工作区范围", "Target path is outside the workspace"));
+    }
+    let info: Awaited<ReturnType<typeof stat>>;
+    try {
+      info = await stat(absolute);
+    } catch {
+      throw new Error(desktopText(
+        `未找到${target.kind === "dir" ? "目录" : "文件"} ${target.path}`,
+        `${target.kind === "dir" ? "Directory" : "File"} not found: ${target.path}`,
+      ));
+    }
+    if ((target.kind === "dir") !== info.isDirectory()) {
+      throw new Error(desktopText(
+        `${target.path} 不是${target.kind === "dir" ? "目录" : "文件"}`,
+        `${target.path} is not a ${target.kind === "dir" ? "directory" : "file"}`,
+      ));
+    }
+    return absolute;
+  };
+
+  const openAbsoluteFile = async (absolute: string): Promise<WorkspaceFileActionResult> => {
+    const error = await shell.openPath(absolute);
+    return error.length > 0 ? { status: "failed", message: error } : { status: "opened" };
+  };
+
+  const openAbsoluteFileWith = async (
+    absolute: string,
+    kind: "file" | "dir",
+    openerId: string,
+  ): Promise<WorkspaceFileActionResult> => {
+    if (openerId === "choose") {
+      if (process.platform === "win32" && kind === "file") {
+        // Native Windows "How do you want to open this file?" dialog.
+        const child = spawn("rundll32.exe", ["shell32.dll,OpenAs_RunDLL", absolute], {
+          detached: true,
+          stdio: "ignore",
+        });
+        await new Promise<void>((resolveSpawn, rejectSpawn) => {
+          let settled = false;
+          const fail = (error: Error): void => {
+            if (settled) return;
+            settled = true;
+            rejectSpawn(error);
+          };
+          child.once("error", fail);
+          child.once("spawn", () => {
+            if (settled) return;
+            settled = true;
+            child.unref();
+            resolveSpawn();
+          });
+        });
+        return { status: "opened" };
+      }
+      const picked = await showOpenWithPicker(
+        kind === "dir"
+          ? desktopText("选择用于打开目录的程序", "Select an Application to Open Directory")
+          : desktopText("选择用于打开文件的程序", "Select an Application to Open File"),
+      );
+      if (picked === undefined) return { status: "cancelled" };
+      await launchExternalEditor(externalEditorCommandForPath(picked), absolute);
+      return { status: "opened" };
+    }
+    const command = listExternalEditorCommands().find((candidate) => candidate.id === openerId);
+    if (command === undefined) {
+      return { status: "failed", message: desktopText("未找到所选编辑器，请确认其已安装", "Selected editor was not found. Make sure it is installed.") };
+    }
+    await launchExternalEditor(command, absolute);
+    return { status: "opened" };
+  };
+
+  const revealAbsoluteFile = async (absolute: string, kind: "file" | "dir"): Promise<WorkspaceFileActionResult> => {
+    if (kind === "dir") {
+      const error = await shell.openPath(absolute);
+      return error.length > 0 ? { status: "failed", message: error } : { status: "opened" };
+    }
+    shell.showItemInFolder(absolute);
+    return { status: "opened" };
+  };
+
+  const listFileOpeners = async (): Promise<ReadonlyArray<FileOpener>> =>
+    listExternalEditorCommands().map((command): FileOpener => ({ id: command.id ?? command.label, name: command.label }));
+
+  // Close-to-tray: closing the window only hides it once the tray exists;
+  // without a tray the close keeps the legacy destroy-and-quit behavior.
+  let trayRef: DesktopTray | null = null;
+  let closeToTrayEnabled = false;
+  let rendererWindow: BrowserWindow | null = null;
+  let graphicRendererDist: string | undefined;
+
+  const createWindow: DesktopWindowFactory = async (context) => {
+    const windowStarted = performance.now();
+    // Payload boot accounting belongs to the instance that acquired the lock.
+    const layout = await resolveAppResourceLayout({
+      appPath: app.getAppPath(),
+      isPackaged: app.isPackaged,
+      bundledVersion: app.getVersion(),
+      // A macOS hot payload would live inside the signed bundle; the bundle is the only layout there.
+      forceBaseline: process.argv.includes("--omp-baseline") || process.platform !== "win32",
+      runtime: {
+        electron: process.versions.electron,
+        modules: process.versions.modules,
+        nodePty: NODE_PTY_VERSION,
+      },
+      platform: `${process.platform}-${process.arch}`,
+      trustedKeys,
+      payloadRoot,
+    });
+
+    const target = resolveRendererEntryFrom(layout.rendererDist, RENDERER_DEV_URL);
+    graphicRendererDist = layout.rendererDist;
+    if (!(await protocol.isProtocolHandled("omp-graphics"))) {
+      protocol.handle("omp-graphics", request => graphicRendererDist === undefined ? new Response(null, { status: 503 }) : graphicAssetResponse(request, graphicRendererDist));
+    }
+    fileResources = new FileResources(id => { const transport = id ? remoteConnections.get(id).transport : context.transport; if (!transport) throw new Error(desktopText("文件服务尚未连接", "File service is not connected")); return transport; });
+    if (!(await protocol.isProtocolHandled("omp-file"))) protocol.handle("omp-file", request => fileResources ? fileResources.response(request, target.kind === "url" ? new URL(target.url).origin : "null") : new Response(null, { status: 503 }));
+    if (!(await protocol.isProtocolHandled("omp-artifact"))) {
+      const origin = target.kind === "url" ? new URL(target.url).origin : "null";
+      protocol.handle("omp-artifact", request => artifactResponse(request, activeArtifactLibrary(), origin));
+    }
+    const allowedOrigin = rendererOriginFor(target);
+    const preloadPath = layout.preloadPath;
+    // Only Harness's own document gets the renderer policy: the session hook also
+    // sees framed responses, and stamping the statistics dashboard with
+    // `frame-ancestors 'none'` is what blanked that page.
+    installCspHeaders(session.defaultSession, rendererCspFor(target), (url) => isTrustedRendererUrl(url, allowedOrigin));
+    // One allow-list for requests, synchronous checks and device access: an
+    // unknown or unused permission is denied instead of approved by default.
+    session.defaultSession.setPermissionRequestHandler(createPermissionRequestHandler(allowedOrigin));
+    session.defaultSession.setPermissionCheckHandler(createPermissionCheckHandler(allowedOrigin));
+    session.defaultSession.setDevicePermissionHandler(createDevicePermissionHandler());
+
+    const window = createSecureWindow({
+      BrowserWindow,
+      windowOptions: {
+        width: 1280,
+        height: 800,
+        show: false,
+        title: "Juling Harness",
+        ...(validAppIcon !== undefined ? { icon: validAppIcon } : appIcon !== undefined ? { icon: appIcon } : {}),
+        backgroundColor: WINDOW_BACKGROUND.light,
+        ...windowChromeOptions(process.platform, "light"),
+      },
+      preloadPath,
+      target,
+      allowedOrigin,
+      deferLoad: true,
+      openExternal: (url) => { void shell.openExternal(url); },
+    });
+    const windowSurface = window as typeof window & DesktopWindowSurface;
+    installDevelopmentTools((window as BrowserWindow).webContents, process.platform !== "darwin" && !app.isPackaged);
+    if (validAppIcon !== undefined && typeof window.setIcon === "function") {
+      window.setIcon(validAppIcon);
+    }
+    // Fixed named channels only; every payload validated at this boundary.
+    // `dispose` removes handlers before Host shutdown on app quit.
+    const floatingWindows = registerFloatingWindows({
+      parent: window as BrowserWindow, ipcMain, allowedOrigin, preloadPath,
+      restoreMainOnLastClose: process.platform === "linux",
+      areas: () => screen.getAllDisplays().map(display => display.workArea),
+      isQuitting: context.isQuitting, openExternal: url => { void shell.openExternal(url); },
+      onWindow: child => desktopConversationViews.registerWindow(child.webContents, false),
+      onVisibility: child => {
+        const visible = child.isVisible() && !child.isMinimized();
+        desktopConversationViews.setVisible(child.webContents, visible);
+        dictationAudio.setVisible(child.webContents.id, visible);
+        if (!visible) { liveAudio.disposeWindow(child.webContents.id); browserObservation.disposeWindow(child.webContents.id); prediction.disposeWindow(child.webContents.id); }
+      },
+      onClosed: contents => { browserObservation.disposeWindow(contents.id); desktopConversationViews.remove(contents); },
+      onWillClose: child => managedBrowser?.detachWindow(child),
+    });
+    let downloadsDirectory: string;
+    try {
+      downloadsDirectory = app.getPath("downloads");
+    } catch {
+      downloadsDirectory = join(activeProfileDirectory(), "browser", "downloads");
+    }
+    managedBrowser = new DesktopManagedBrowser({ directory: join(activeProfileDirectory(), "browser"), downloadsDirectory, windowFor: floatingWindows.windowFor });
+    new ManagedBrowserRelay({ manager: managedBrowser, directory: activeMediaDirectory });
+    window.on("close", () => { if (context.isQuitting()) managedBrowser?.detachWindow(window as BrowserWindow); });
+    const isTrustedSender = (sender: { getURL(): string }) => (sender === window.webContents || floatingWindows.owns(sender)) && isTrustedRendererUrl(sender.getURL(), allowedOrigin);
+    // These fixed IPC methods are local desktop capabilities. Each request already carries its session/workspace; a sibling SSH view cannot disable them.
+    const isTrustedLocalSender = isTrustedSender;
+    const disposeMemoryCredentials = registerMemoryCredentialIpc({ ipcMain, isTrustedSender, store: memoryCredentials, activeTarget: () => remoteConnections.activeId,
+      supportsSync: target => { if (target === null) return true; try { return remoteConnections.get(target).transport.hello?.capabilities?.includes("memory.credentials") === true; } catch { return false; } },
+    });
+    const payloadHealth = registerPayloadHealthIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, status: unknown) => listener({ sender: event.sender }, status));
+        },
+        removeHandler: (channel) => ipcMain.removeHandler(channel),
+      },
+      isTrustedSender,
+      noteBootSuccess: async () => {
+        if (layout.payloadVersion !== undefined) await appPayloadInstaller.noteBootSuccess(layout.payloadVersion);
+        await confirmDesktop?.();
+      },
+    });
+    window.webContents.once("did-finish-load", () => {
+      hostFactory.log?.write("info", "desktop.startup", `stage=window-load elapsedMs=${Math.round(performance.now() - windowStarted)}`);
+      void payloadHealth.didFinishLoad().catch((error) => console.error("[juling-harness] payload health persistence failed", error));
+    });
+    window.webContents.once("render-process-gone", () => payloadHealth.failed());
+    const ipc = registerDesktopIpc({ facade: context.transport, isTrustedSender });
+    const disposePerfProfile = registerPerfProfileIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event) => listener({ sender: event.sender }));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+        on(channel, listener) {
+          ipcMain.on(channel, listener);
+        },
+        removeListener(channel, listener) {
+          ipcMain.removeListener(channel, listener as never);
+        },
+      },
+      isTrustedSender,
+      service: perfProfiles,
+    });
+    const remoteIpc = registerRemoteIpc({ ipc: ipcMain, manager: remoteConnections, isTrusted: isTrustedSender, installRuntime: async id => {
+      const picked = await dialog.showOpenDialog(window, { title: desktopText("选择匹配远端系统的签名 Runtime ZIP", "Select Signed Runtime ZIP Matching the Remote OS"), properties: ["openFile"], filters: [{ name: "Juling Harness Runtime", extensions: ["zip"] }] });
+      if (picked.canceled || !picked.filePaths[0]) return { installed: false };
+      if (remoteTerminals.hasTarget(id) || tmux.hasTarget(id)) throw new Error(desktopText("请先关闭这个 SSH 目标的终端，再安装 Runtime", "Close terminals for this SSH target before installing the Runtime"));
+      await installRemoteRuntime(remoteConnections, id, picked.filePaths[0], trustedKeys);
+      return { installed: true };
+    } });
+    const disposeChrome = registerTitleBarOverlayIpc({ isTrustedSender, hasTitleBarOverlay: sender => sender === window.webContents });
+    const disposeLanguage = registerDesktopLanguageIpc({ isTrustedSender });
+    const disposeNotify = registerChromeNotifyIpc({
+      isTrustedSender,
+    });
+    const disposeOpenUrl = registerChromeOpenUrlIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      openExternal: (url) => shell.openExternal(url),
+    });
+    const disposeMetrics = registerChromeMetricsIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      actions: { appMetrics: () => app.getAppMetrics(), now: () => new Date() },
+    });
+    const disposePerformance = registerChromePerformanceIpc({ ipcMain, isTrustedSender, emit: logRendererPerformance });
+    const disposeMediaAccess = registerMediaAccessIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event) => listener({ sender: event.sender }));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      platform: process.platform,
+      preferences: systemPreferences,
+      openExternal: (url) => shell.openExternal(url),
+    });
+    desktopConversationViews.registerWindow(window.webContents, windowSurface.isVisible() && !windowSurface.isMinimized());
+    const refreshConversationVisibility = () => { const visible = windowSurface.isVisible() && !windowSurface.isMinimized(); desktopConversationViews.setVisible(window.webContents, visible); dictationAudio.setVisible(window.webContents.id, visible); if (!visible) { liveAudio.disposeWindow(window.webContents.id); browserObservation.disposeWindow(window.webContents.id); prediction.disposeWindow(window.webContents.id); } };
+    const resetConversationVisibility = () => desktopConversationViews.reset(window.webContents);
+    const retainDictation = () => dictationAudio.retainWindow(window.webContents.id);
+    const cancelRemotePreparation = () => { void remoteIpc.cancelPending().catch(() => {}); };
+    const cancelRemoteNavigation = (_event: unknown, _url: string, isInPlace: boolean, isMainFrame: boolean) => { if (isMainFrame && !isInPlace) cancelRemotePreparation(); };
+    const releaseBrowserObservation = () => browserObservation.disposeWindow(window.webContents.id);
+    const removeConversationVisibility = () => desktopConversationViews.remove(window.webContents);
+    window.on("show", refreshConversationVisibility);
+    window.on("hide", refreshConversationVisibility);
+    window.on("minimize", refreshConversationVisibility);
+    window.on("restore", refreshConversationVisibility);
+    window.webContents.on("did-start-navigation", resetConversationVisibility);
+    window.webContents.on("render-process-gone", retainDictation);
+    window.webContents.on("render-process-gone", releaseBrowserObservation);
+    window.webContents.on("destroyed", releaseBrowserObservation);
+    window.webContents.on("destroyed", cancelRemotePreparation);
+    window.webContents.on("destroyed", removeConversationVisibility);
+    ipcMain.handle(CONVERSATION_VIEW_CHANNEL, ({ sender }, input: unknown) =>
+      !sender.isDestroyed() && isTrustedLocalSender(sender) && desktopConversationViews.report(sender, input));
+    const logsDirectory = defaultHostLogsDirectory();
+    const disposeLogs = registerChromeLogsIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      actions: {
+        logsDirectory,
+        mkdirLogs: () => mkdir(logsDirectory, { recursive: true }).then(() => undefined),
+        openDirectory: () => shell.openPath(logsDirectory),
+        listBasenames: async () => {
+          const entries = await readdir(logsDirectory, { withFileTypes: true });
+          return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
+        },
+        readFile: (name) => readFile(join(logsDirectory, name), "utf8"),
+        async showSaveDialog(sender, options) {
+          const owner = BrowserWindow.fromWebContents(sender as WebContents);
+          const dialogOptions = {
+            title: desktopText("导出 Host 日志", "Export Host Logs"),
+            defaultPath: options.defaultPath,
+            filters: [{ name: desktopText("文本文件", "Text Files"), extensions: ["txt"] }],
+          };
+          const picked = owner
+            ? await dialog.showSaveDialog(owner, dialogOptions)
+            : await dialog.showSaveDialog(dialogOptions);
+          return { canceled: picked.canceled, ...(picked.filePath === undefined ? {} : { filePath: picked.filePath }) };
+        },
+        writeFile(filePath, text) {
+          return writeFile(filePath, text, "utf8");
+        },
+      },
+    });
+    const disposeServiceDefinitions = registerServiceDefinitionsIpc({ ipcMain, isTrustedSender: isTrustedLocalSender,
+      store: new ServiceDefinitionStore(join(app.getPath("userData"), "service-definitions.enc"), {
+        available: () => safeStorage.isEncryptionAvailable(),
+        encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value),
+      }),
+    });
+    const disposeProfile = registerChromeProfileIpc({ isTrustedSender });
+    const disposeArtifacts = registerArtifactIpc({
+      ipcMain,
+      isTrustedSender: isTrustedLocalSender,
+      library: activeArtifactLibrary,
+      async chooseDirectory(sender) {
+        const owner = BrowserWindow.fromWebContents(sender as WebContents);
+        const options = { title: desktopText("产物保存位置", "Artifact Save Location"), properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory"> };
+        const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+        return result.canceled ? undefined : result.filePaths[0];
+      },
+      async chooseFile(sender, kind) {
+        const owner = BrowserWindow.fromWebContents(sender as WebContents);
+        const extensions = kind === "graphic" ? ["svg", "mermaid", "mmd", "chart", "obj", "ply", "wrl", "x3dv", "stl", "gltf", "glb", "usda", "zip"] : kind === "image" ? ["png", "jpg", "jpeg", "webp", "gif", "svg"] : kind === "audio" ? ["wav", "mp3", "ogg", "opus", "flac"] : kind === "video" ? ["mp4", "webm"] : kind === "recording" ? ["ompcast", "harnesscast"] : ["*"];
+        const options = { title: desktopText("导入文件", "Import File"), properties: ["openFile"] as Array<"openFile">, filters: [{ name: kind, extensions }] };
+        const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+        return result.canceled ? undefined : result.filePaths[0];
+      },
+      async chooseExport(sender, name) {
+        const owner = BrowserWindow.fromWebContents(sender as WebContents);
+        const options = { title: desktopText("另存为", "Save As"), defaultPath: name };
+        const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
+        return result.canceled ? undefined : result.filePath;
+      },
+    });
+    const disposeSkillshareTokens = registerSkillshareTokenIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, directory: activeMediaDirectory });
+    const disposeMediaUploads = registerMediaUploadIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, manager: mediaUploads });
+    const disposeDictationAudio = registerDictationAudioIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, manager: dictationAudio, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
+    const disposeLiveAudio = registerLiveAudioIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, manager: liveAudio, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
+    const disposePrediction = registerPredictionIpc({ipcMain,isTrustedSender: isTrustedLocalSender,manager:prediction,isVisible:sender=>{const owner=BrowserWindow.fromWebContents(sender as WebContents);return !!owner&&owner.isVisible()&&!owner.isMinimized();}});
+    const disposeBrowserObservation = registerBrowserObservationIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, manager: browserObservation, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
+    const disposeManagedBrowser = registerManagedBrowserIpc({ ipcMain, isTrustedSender, isLocal: () => true, manager: managedBrowser });
+    const disposeComputerCapture = registerComputerCaptureIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, directory: activeMediaDirectory, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
+    const disposeComputerFrames = registerComputerFrameIpc({
+      ipcMain,
+      store: new ComputerFrameStore({ directory: activeMediaDirectory, library: activeArtifactLibrary }),
+      isTrustedSender: isTrustedLocalSender,
+      isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); },
+    });
+    const disposeImage = registerChromeImageIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      actions: {
+        copyImageToClipboard(bytes) {
+          const image = nativeImage.createFromBuffer(Buffer.from(bytes));
+          if (image.isEmpty()) return false;
+          clipboard.writeImage(image);
+          return true;
+        },
+        async showSaveDialog(sender, options) {
+          const owner = BrowserWindow.fromWebContents(sender as WebContents);
+          const dialogOptions = {
+            title: desktopText("保存图片", "Save Image"),
+            defaultPath: options.defaultPath,
+            filters: options.filters.map((filter) => ({
+              name: filter.name,
+              extensions: [...filter.extensions],
+            })),
+          };
+          const result = owner
+            ? await dialog.showSaveDialog(owner, dialogOptions)
+            : await dialog.showSaveDialog(dialogOptions);
+          return {
+            canceled: result.canceled === true,
+            ...(typeof result.filePath === "string" ? { filePath: result.filePath } : {}),
+          };
+        },
+        writeFile(filePath, bytes) {
+          return writeFile(filePath, bytes);
+        },
+      },
+    });
+    const disposeTerminal = registerTerminalIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      manager: terminalManager,
+      remote: remoteTerminals,
+      tmux,
+      activeRemote: () => remoteConnections.activeId,
+      resolveWorkspaceCwd: workspaceId => hostFactory.resolveWorkspaceCwd(workspaceId),
+      recordings: terminalRecordings,
+    });
+    fileViewerIpc = registerFileViewerIpc({
+      ipc: ipcMain, trusted: isTrustedSender, resources: fileResources!,
+      office: new OfficeComponent(join(app.getPath("userData"), "components", "office-preview"), trustedKeys),
+      pickExport: async name => { const result = await dialog.showSaveDialog({ defaultPath: name }); return result.canceled ? undefined : result.filePath; },
+      show: sender => {
+        const owner = sender ? BrowserWindow.fromWebContents(sender as WebContents) : null;
+        const targetWindow = owner && !owner.isDestroyed() ? owner : window;
+        if (targetWindow.isMinimized()) targetWindow.restore();
+        targetWindow.show();
+        targetWindow.focus();
+      },
+    });
+    const disposeWorkspaceShell = registerWorkspaceShellIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      actions: {
+        resolveWorkspaceCwd: (workspaceId) => hostFactory.resolveWorkspaceCwd(workspaceId),
+        openInExternalEditor,
+        revealInFileManager: async (cwd) => {
+          const error = await shell.openPath(cwd);
+          if (error.length > 0) throw new Error(error);
+        },
+        resolveDroppedPaths: (cwd, paths) => resolveDroppedPaths(cwd, paths),
+        openFile: async (cwd, target) => openAbsoluteFile(await resolveWorkspaceFileTarget(cwd, target)),
+        openFileWith: async (cwd, target, openerId) => openAbsoluteFileWith(await resolveWorkspaceFileTarget(cwd, target), target.kind, openerId),
+        revealFileInFileManager: async (cwd, target) => revealAbsoluteFile(await resolveWorkspaceFileTarget(cwd, target), target.kind),
+        systemFileOpen: async input => openAbsoluteFile((await resolveSystemShellTarget(input.path)).path),
+        systemFileOpenWith: async input => { const target = await resolveSystemShellTarget(input.path); return openAbsoluteFileWith(target.path, target.kind, input.openerId); },
+        systemFileReveal: async input => { const target = await resolveSystemShellTarget(input.path); return revealAbsoluteFile(target.path, target.kind); },
+        resolveFileAbsolutePath: (cwd, target) => resolveWorkspaceFileTarget(cwd, target),
+        listFileOpeners,
+        async pickPlanSavePath(cwd) {
+          const picked = await dialog.showSaveDialog({
+            title: desktopText("保存计划", "Save Plan"),
+            defaultPath: join(cwd, "PLAN.md"),
+            filters: [{ name: "Markdown", extensions: ["md"] }],
+          });
+          if (picked.canceled || picked.filePath === undefined || picked.filePath.length === 0) {
+            return { status: "cancelled" };
+          }
+          return planSaveRelativeTarget(cwd, picked.filePath);
+        },
+      },
+    });
+    const disposeUpdates = registerChromeUpdatesIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      send: (channel, payload) => {
+        if (!window.webContents.isDestroyed()) {
+          window.webContents.send(channel, payload);
+        }
+      },
+      prefs: createUpdatePrefsStore({ appDataDirectory: join(app.getPath("appData"), "juling-harness") }),
+      stagingRoot: desktopPaths().legacyStagingRoot,
+      trustedKeys,
+      platform: `${process.platform}-${process.arch}`,
+      runtime: { electron: process.versions.electron, modules: process.versions.modules, nodePty: NODE_PTY_VERSION },
+      pendingArtifact: pendingRuntimeArtifact,
+      showOpenDialog: (options) => dialog.showOpenDialog(window, options),
+      appVersion: layout.effectiveVersion,
+      bundledAppVersion: app.getVersion(),
+      ...(layout.payloadVersion === undefined ? {} : { payloadVersion: layout.payloadVersion }),
+      appPayloadInstaller,
+      isBusy: () => hostFactory.isBusy(),
+      relaunch: (options) => app.relaunch(options),
+      openPath: (path) => shell.openPath(path),
+      rollbackRuntime: async () => {
+        await hostFactory.rollbackRuntime();
+        app.relaunch({ args: relaunchArguments(process.argv), ...(appImage ? { execPath: appImage } : {}) });
+        app.quit();
+      },
+      pruneRuntimes: () => hostFactory.pruneRuntimes(),
+      quit: () => app.quit(),
+      getInstalledRuntimeVersion: async () => {
+        const installDir =
+          runtimeInstallLayout?.installDirectory ?? join(app.getPath("appData"), "juling-harness", "runtimes");
+        try {
+          const raw = await readFile(join(installDir, "current.json"), "utf8");
+          const parsed = JSON.parse(raw) as { runtimeVersion?: string };
+          return typeof parsed.runtimeVersion === "string" ? parsed.runtimeVersion : undefined;
+        } catch {
+          return undefined;
+        }
+      },
+    });
+    const disposeUnifiedUpdates = updateCoordinator ? registerUnifiedUpdatesIpc({ ipcMain, isTrustedSender }, updateCoordinator) : undefined;
+    const disposeAppUpdate = registerChromeAppUpdateIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      currentVersion: layout.effectiveVersion,
+    });
+    applyTitleBarOverlay(window, { theme: "light" });
+    rendererWindow = window;
+    // Close hides to the tray (streaming keeps running in background); the
+    // real quit path releases this through `isQuitting`.
+    // macOS always hides to the Dock; a full-screen window leaves its Space first.
+    window.on("close", (event) => handleMainWindowClose(event, {
+      platform: process.platform, quitting: context.isQuitting(), closeToTray: closeToTrayEnabled,
+      hasFloatingWindows: floatingWindows.hasWindows(), requestQuit: () => application.requestQuit(),
+      hide: () => {
+        if (process.platform === "darwin" && window.isFullScreen()) {
+          window.once("leave-full-screen", () => window.hide());
+          window.setFullScreen(false);
+        } else {
+          window.hide();
+        }
+        trayRef?.notifyHiddenToTray?.();
+      },
+    }));
+    window.webContents?.on?.("did-fail-load", (_event: unknown, errorCode: number, errorDescription: string, validatedURL: string) => {
+      console.error(`[juling-harness] renderer failed to load (${errorCode}): ${errorDescription} ${validatedURL}`);
+    });
+    window.webContents?.on?.("console-message", (event) => {
+      if (event.level !== "warning" && event.level !== "error") return;
+      console.error(`[juling-harness] renderer console ${event.sourceId}:${event.lineNumber}: ${event.message}`);
+    });
+    loadRendererTarget(window, target);
+    return {
+      show: () => {
+        if (windowSurface.isMinimized()) windowSurface.restore();
+        if (!windowSurface.isVisible()) windowSurface.show();
+        windowSurface.focus();
+      },
+      focus: () => {
+        if (windowSurface.isMinimized()) windowSurface.restore();
+        windowSurface.focus();
+      },
+      close: () => {
+        windowSurface.close();
+      },
+      dispose: () => {
+        floatingWindows.dispose();
+        disposeUpdates.dispose();
+        disposeUnifiedUpdates?.();
+        updateCoordinator?.dispose();
+        disposeAppUpdate.dispose();
+        payloadHealth.dispose();
+        fileViewerIpc?.dispose(); fileViewerIpc = undefined;
+        disposeWorkspaceShell.dispose();
+        disposeTerminal.dispose();
+        disposeImage.dispose();
+        disposeArtifacts.dispose();
+        disposeMediaUploads.dispose();
+        disposeSkillshareTokens.dispose();
+        disposeDictationAudio.dispose();
+        disposeLiveAudio.dispose();
+        disposePrediction.dispose();
+        disposeBrowserObservation.dispose();
+        disposeManagedBrowser.dispose();
+        disposeComputerCapture.dispose();
+        disposeComputerFrames.dispose();
+        disposeServiceDefinitions.dispose();
+        disposeMemoryCredentials.dispose();
+        disposeLogs.dispose();
+        disposeMetrics.dispose();
+        disposePerformance.dispose();
+        disposePerfProfile.dispose();
+        disposeMediaAccess.dispose();
+        ipcMain.removeHandler(CONVERSATION_VIEW_CHANNEL);
+        window.removeListener("show", refreshConversationVisibility);
+        window.removeListener("hide", refreshConversationVisibility);
+        window.removeListener("minimize", refreshConversationVisibility);
+        window.removeListener("restore", refreshConversationVisibility);
+        window.webContents.removeListener("did-start-navigation", resetConversationVisibility);
+        window.webContents.removeListener("render-process-gone", retainDictation);
+        window.webContents.removeListener("render-process-gone", releaseBrowserObservation);
+        window.webContents.removeListener("destroyed", releaseBrowserObservation);
+        window.webContents.removeListener("destroyed", cancelRemotePreparation);
+        window.webContents.removeListener("destroyed", removeConversationVisibility);
+        removeConversationVisibility();
+        disposeProfile();
+        disposeOpenUrl.dispose();
+        disposeNotify();
+        disposeLanguage();
+        disposeChrome();
+        remoteIpc.dispose();
+        ipc.dispose();
+      },
+    };
+  };
+
+  // App Nap would throttle a turn streaming in a window closed to the Dock.
+  const stopAppNapGuard = process.platform === "darwin"
+    ? startAppNapGuard({ isBusy: () => hostFactory.isBusy(), blocker: powerSaveBlocker })
+    : undefined;
+
+  const application = createDesktopApplication({
+    confirmBeforeQuit: () => fileViewerIpc?.requestClose() ?? Promise.resolve(true),
+    beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await tmux.disposeAll(); await remoteConnections.close(); remoteVault.close(); desktopSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    hostFactory,
+    createWindow,
+    platform: process.platform,
+    ...(process.platform === "darwin"
+      ? {
+          onActivate: (listener: () => void) => {
+            app.on("activate", listener);
+          },
+          onSystemShutdown: (listener: (event: { preventDefault(): void }) => void) => {
+            // Electron passes an event whose preventDefault() delays the shutdown; its typings omit it.
+            const onShutdown = (event: { preventDefault(): void }): void => listener({ preventDefault: () => event.preventDefault() });
+            powerMonitor.on("shutdown", onShutdown as unknown as () => void);
+          },
+        }
+      : {}),
+    requestSingleInstanceLock: () => app.requestSingleInstanceLock(),
+    onSingleInstanceAcquired: () => {
+      desktopSwap?.started(process.pid);
+    },
+    onSecondInstance: (listener) => {
+      app.on("second-instance", listener);
+    },
+    onBeforeQuit: (listener) => {
+      app.on("before-quit", (event: { preventDefault(): void }) => {
+        listener({ preventDefault: () => event.preventDefault() });
+      });
+    },
+    onAllWindowsClosed: (listener) => {
+      app.on("window-all-closed", listener);
+    },
+    createTray: ({ openWindow, requestQuit }) => {
+      // Tray construction can fail on Linux. A successful object still does
+      // not prove visibility; handleMainWindowClose owns the close policy.
+      try {
+        const tray = createAppTray({
+          electron: {
+            createImageFromPath: (iconPath) => nativeImage.createFromPath(iconPath),
+            buildMenu: (template) => Menu.buildFromTemplate([...template]),
+            createTrayFromImage: (image) => {
+              const electronTray = new Tray(image as NativeImage);
+              return {
+                setToolTip: (toolTip: string) => electronTray.setToolTip(toolTip),
+                setContextMenu: (menu: object) => electronTray.setContextMenu(menu as Menu),
+                on: (event: "click", listener: () => void) => electronTray.on(event, listener),
+                displayBalloon: (options: { icon?: object; title: string; content: string }) =>
+                  electronTray.displayBalloon({ ...options, icon: image as NativeImage }),
+                isDestroyed: () => electronTray.isDestroyed(),
+                destroy: () => electronTray.destroy(),
+              };
+            },
+          },
+          iconPath: resolveTrayIconPath({ appPath: app.getAppPath(), platform: process.platform }),
+          persistRoot: resolveProfilePersistRoot(app.getPath("appData")),
+          locale: getDesktopLanguage(),
+          onOpen: openWindow,
+          onQuit: requestQuit,
+        });
+        if (tray === undefined) {
+          console.log("[juling-harness] tray unavailable; window close keeps quit behavior");
+          return undefined;
+        }
+        closeToTrayEnabled = true;
+        trayRef = tray;
+        return tray;
+      } catch (error) {
+        if (process.platform !== "linux") throw error;
+        console.warn(`[juling-harness] tray unavailable: ${String(error)}`);
+        return undefined;
+      }
+    },
+    confirmQuitWhileBusy: async () => {
+      const options = quitBusyMessageBoxOptions(quitBusyDialogStrings(getDesktopLanguage()));
+      const owner = rendererWindow !== null && !rendererWindow.isDestroyed() ? rendererWindow : undefined;
+      const picked = owner !== undefined
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      return picked.response === 1;
+    },
+    quit: () => {
+      app.quit();
+    },
+    log: (message) => {
+      console.log(`[juling-harness] ${message}`);
+    },
+  });
+
+  const applyAppMenu = (locale: string): void => {
+    if (process.platform !== "darwin") return;
+    const sendMenuCommand = (command: AppMenuCommand): void => {
+      const target = rendererWindow;
+      if (target === null || target.isDestroyed()) return;
+      if (!target.isVisible()) target.show();
+      target.webContents.send(APP_MENU_COMMAND_CHANNEL, command);
+    };
+    Menu.setApplicationMenu(Menu.buildFromTemplate(buildApplicationMenuTemplate({
+      isPackaged: app.isPackaged,
+      locale,
+      dispatch: sendMenuCommand,
+      openRepository: () => { void shell.openExternal(PROJECT_REPOSITORY_URL); },
+      requestQuit: () => application.requestQuit(),
+    })));
+  };
+
+  if (process.platform === "darwin") {
+    app.setAboutPanelOptions({ applicationName: "Juling Harness", applicationVersion: app.getVersion(), copyright: "Copyright © 2026 Juling Harness" });
+    applyAppMenu(getDesktopLanguage());
+  }
+
+  onDesktopLanguageChange((locale) => {
+    trayRef?.setLocale?.(locale);
+    applyAppMenu(locale);
+  });
+
+  await application.start();
+  if (application.acquiredLock) updateCoordinator?.startBackground();
+}
+
+main().catch((error: unknown) => {
+  console.error(`[juling-harness] fatal startup failure: ${String(error)}`);
+  app.exit(1);
+});

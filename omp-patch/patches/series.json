@@ -1,0 +1,13 @@
+{
+  "upstreamCommit": "7c49c11aa5bbaf3f418406583096168ad5b8c6dc",
+  "patchsetVersion": "harness.18",
+  "patchsetDigest": "sha256:7da04120b311a176422e52afb9fe1602dfbbb65cf3616e5667e1c8ac8bac9c89",
+  "patches": [
+    "0001-harness-cli-entry.patch",
+    "0002-harness-session-runtime.patch",
+    "0003-harness-modes-and-pause.patch",
+    "0004-harness-extensibility.patch",
+    "0005-juling-identity.patch",
+    "0006-stats-dashboard.patch"
+  ]
+}

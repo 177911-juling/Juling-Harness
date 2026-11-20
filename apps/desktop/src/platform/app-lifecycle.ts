@@ -1,0 +1,71 @@
+/**
+ * Platform lifecycle policies, kept pure for tests.
+ */
+import { join } from "node:path";
+
+/**
+ * Arguments for `app.relaunch`: keep the user's, drop a stale restart flag and
+ * the `-psn_*` process serial number older macOS adds to Finder launches.
+ */
+export function relaunchArguments(argv: readonly string[]): string[] {
+  return argv
+    .slice(1)
+    .filter((arg) => arg !== "--omp-restarted" && !arg.startsWith("-psn_"))
+    .concat("--omp-restarted");
+}
+
+/** A native close must not destroy the renderer before the quit/save gates run.
+ * Hidden browser parking windows mean window-all-closed is not a reliable quit signal. */
+export function handleMainWindowClose(event: { preventDefault(): void }, options: {
+  platform: NodeJS.Platform; quitting: boolean; closeToTray: boolean; hasFloatingWindows: boolean;
+  hide(): void; requestQuit(): void;
+}): void {
+  if (options.quitting) return;
+  event.preventDefault();
+  // Linux can create a Tray object even when no desktop host displays it.
+  // Only the Windows tray and macOS Dock guarantee a way back to a hidden window.
+  if (options.platform === "darwin" || (options.platform === "win32" && options.closeToTray) || options.hasFloatingWindows) options.hide();
+  else options.requestQuit();
+}
+
+export const MOVE_TO_APPLICATIONS_DECLINED_FILE = "move-to-applications-declined";
+
+export function moveToApplicationsMarkerPath(stateRoot: string): string {
+  return join(stateRoot, MOVE_TO_APPLICATIONS_DECLINED_FILE);
+}
+
+/**
+ * A packaged Mac app run from the disk image, Downloads or an App Translocation
+ * mount cannot update itself in place; offer the move once until declined.
+ */
+export function shouldOfferMoveToApplications(input: {
+  readonly platform: NodeJS.Platform;
+  readonly isPackaged: boolean;
+  readonly inApplicationsFolder: boolean;
+  readonly declined: boolean;
+}): boolean {
+  return input.platform === "darwin" && input.isPackaged && !input.inApplicationsFolder && !input.declined;
+}
+
+export interface MoveToApplicationsStrings {
+  readonly message: string;
+  readonly detail: string;
+  readonly move: string;
+  readonly later: string;
+}
+
+export function moveToApplicationsStrings(locale: string): MoveToApplicationsStrings {
+  return locale.toLowerCase().startsWith("zh")
+    ? {
+        message: "将 Juling Harness 移到“应用程序”文件夹？",
+        detail: "从磁盘映像或“下载”文件夹运行时无法自动更新。移动后应用会重新打开。",
+        move: "移到“应用程序”",
+        later: "暂不移动",
+      }
+    : {
+        message: "Move Juling Harness to the Applications folder?",
+        detail: "Juling Harness can't update itself while it runs from a disk image or the Downloads folder. It reopens after the move.",
+        move: "Move to Applications",
+        later: "Not Now",
+      };
+}

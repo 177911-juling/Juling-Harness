@@ -1,0 +1,138 @@
+export type GcCategory = "blobs" | "archive" | "wal" | "stale";
+export interface GcPolicy {
+	coldDays: number;
+	keepGlobal: number;
+	keepPerWorkspace: number;
+	staleDays: number;
+	staleKeep: number;
+}
+/** Explicit native replay stripping, separate from the four storage cleanup categories. */
+export interface GcStripOptions {
+	/** Omit to inherit the native gc.stripAfterDays setting. */
+	idleDays?: number;
+}
+export interface GcStripSummary {
+	idleDays: number;
+	/** Native GC covers main transcripts, their child transcripts and archived transcripts. */
+	scope: "sessions-and-archives";
+	/** Top-level sessions scanned; candidates also include child and archived transcripts. */
+	scannedSessions: number;
+	candidates: number;
+	changed: number;
+	records: number;
+	/** Native scan's planned replay-byte removal in JSONL, uncompressed for archives; not reclaimed disk bytes. */
+	bytes: number;
+	skippedActive: number;
+}
+export interface GcSummary {
+	applied: boolean;
+	checkedAt: number;
+	policy: GcPolicy;
+	rows: Array<{ category: GcCategory; candidates: number; changed: number; bytes: number; skippedActive: number }>;
+	strip?: GcStripSummary;
+	errors: string[];
+}
+export interface GcPreview {
+	token: string;
+	expiresAt: number;
+	summary: GcSummary;
+}
+export interface GcStatus {
+	phase: "idle" | "previewing" | "applying" | "complete" | "failed";
+	preview?: GcPreview;
+	summary?: GcSummary;
+	error?: string;
+}
+export interface SessionExportResult {
+	format: "archive" | "html";
+	members: number;
+	warnings: string[];
+	id: string;
+	createdAt: number;
+	asset: { artifactId: string; kind: "export"; name: string; mimeType: string; bytes: number; sha256: string };
+}
+export interface SessionExportStatus {
+	phase: "idle" | "exporting" | "complete" | "failed";
+	result?: SessionExportResult;
+	error?: string;
+}
+export interface NativeConnectionCheck {
+	checkedAt: number;
+	checks: Array<{ id: "bridge" | "session" | "model"; status: "ok" | "warning" | "error"; detail: string }>;
+}
+export interface AutoCompressionStatus {
+	enabled: boolean;
+	ranAt?: number;
+	log: string;
+}
+export type MaintenanceOperation =
+	| { kind: "maintenance.compression.auto.status"; sessionId: string }
+	| { kind: "maintenance.gc.preview"; sessionId: string; categories: GcCategory[]; strip?: GcStripOptions }
+	| { kind: "maintenance.gc.apply"; sessionId: string; token: string }
+	| { kind: "maintenance.gc.status"; sessionId: string }
+	| { kind: "maintenance.session.export"; sessionId: string; format?: "archive" | "html" }
+	| { kind: "maintenance.export.status"; sessionId: string }
+	| { kind: "maintenance.connection.check"; sessionId: string };
+export interface MaintenanceResultMap {
+	"maintenance.compression.auto.status": AutoCompressionStatus;
+	"maintenance.gc.preview": GcPreview;
+	"maintenance.gc.apply": GcSummary;
+	"maintenance.gc.status": GcStatus;
+	"maintenance.session.export": SessionExportResult;
+	"maintenance.export.status": SessionExportStatus;
+	"maintenance.connection.check": NativeConnectionCheck;
+}
+export const MAINTENANCE_OPERATION_KINDS = [
+	"maintenance.compression.auto.status",
+	"maintenance.gc.preview",
+	"maintenance.gc.apply",
+	"maintenance.gc.status",
+	"maintenance.session.export",
+	"maintenance.export.status",
+	"maintenance.connection.check",
+] as const;
+export const MAINTENANCE_READ_KINDS = [
+	"maintenance.gc.preview",
+	"maintenance.gc.status",
+	"maintenance.export.status",
+	"maintenance.connection.check",
+] as const;
+export function isMaintenanceKind(kind: string): kind is MaintenanceOperation["kind"] {
+	return (MAINTENANCE_OPERATION_KINDS as readonly string[]).includes(kind);
+}
+const CATEGORIES = ["blobs", "archive", "wal", "stale"];
+function record(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid maintenance data");
+	return value as Record<string, unknown>;
+}
+function text(value: unknown, limit = 1024): void {
+	if (typeof value !== "string" || !value.length || value.length > limit || value.includes("\0"))
+		throw new Error("Invalid maintenance text");
+}
+export function validateMaintenanceOperation(value: unknown): void {
+	const row = record(value);
+	if (
+		row.format !== undefined &&
+		(row.kind !== "maintenance.session.export" || !["archive", "html"].includes(row.format as string))
+	)
+		throw new Error("Invalid export format");
+	if (typeof row.kind !== "string" || !isMaintenanceKind(row.kind)) throw new Error("Unknown maintenance command");
+	text(row.sessionId, 128);
+	if (row.kind === "maintenance.gc.preview") {
+		if (
+			!Array.isArray(row.categories) ||
+			(!row.categories.length && row.strip === undefined) ||
+			row.categories.length > 4 ||
+			new Set(row.categories).size !== row.categories.length ||
+			row.categories.some(cat => !CATEGORIES.includes(cat as string))
+		)
+			throw new Error("Choose cleanup categories");
+		if (row.strip !== undefined) {
+			const strip = record(row.strip);
+			if (strip.idleDays !== undefined && (!Number.isFinite(strip.idleDays) || (strip.idleDays as number) < 0))
+				throw new Error("Replay stripping requires a non-negative idle day count");
+		}
+	} else if (row.categories !== undefined || row.strip !== undefined) throw new Error("Unexpected categories");
+	if (row.kind === "maintenance.gc.apply") text(row.token, 128);
+	else if (row.token !== undefined) throw new Error("Unexpected cleanup token");
+}

@@ -1,0 +1,62 @@
+import { connectTcp } from "./network-proxy.js";
+import { NetworkStreams } from "./network-stream.js";
+import { localNetworkConnect } from "./local-network.js";
+import { attachRemote } from "./deploy.js";
+import type { LocalCredentialVault } from "./local-vault.js";
+import type { LiveRemote, RemoteConnectionManager } from "./manager.js";
+import type { RemoteConnectionStatus } from "./shared.js";
+import { RemoteConnectionError } from "./errors.js";
+import type { MemoryCredentialStore } from "../memory-credentials.js";
+import type { TimeTravelService } from "../time-travel-service.js";
+import { desktopText } from "../desktop-language-shared.js";
+
+export async function connectRemoteServices(manager: RemoteConnectionManager, id: string, remote: LiveRemote, signal: AbortSignal, report: (patch: Partial<RemoteConnectionStatus>) => void, vault: LocalCredentialVault, resolveProxy: (url: string) => Promise<string>, memoryCredentials?: MemoryCredentialStore, timeTravel?: TimeTravelService): Promise<() => void> {
+  const profile = manager.profile(id);
+  const attachment = (remote as LiveRemote & { attachment: { key: string; sequence: number } }).attachment;
+  const transport = await attachRemote(profile, remote.environment, remote, signal, manager.authentication(id), attachment, true);
+  let closed = false;
+  const streams = new NetworkStreams(transport.peer, async destination => {
+    if (destination.service === "broker") { const endpoint = new URL((await vault.networkEndpoint()).url); return connectTcp(endpoint.hostname, Number(endpoint.port || 80)); }
+    return localNetworkConnect(destination, profile.localProxyUrl, resolveProxy);
+  });
+  const offRoute = transport.peer.onEvent(event => {
+    const value = event as { channel?: string; route?: "remote" | "local" };
+    if (value?.channel === "network-route" && value.route) report({ networkRoute: value.route, networkMessage: value.route === "local" ? desktopText("正在通过本机联网", "Routing network via local machine") : desktopText("正在通过远端联网", "Routing network via remote machine") });
+  });
+  const synchronize = async () => {
+    if (closed) return;
+    await remote.transport.peer.request("provisioning.apply", await vault.snapshot());
+  };
+  let syncing = Promise.resolve();
+  let memorySync = Promise.resolve();
+  let timeTravelSync = Promise.resolve();
+  const supportsTimeTravel = remote.transport.hello?.capabilities?.includes("timeTravel.settings") === true;
+  const synchronizeTimeTravel = () => {
+    report({ timeTravelSync: "pending" });
+    timeTravelSync = timeTravelSync.catch(() => {}).then(async () => {
+      if (closed || !timeTravel) return;
+      await remote.transport.peer.request("timeTravel.settings.sync", await timeTravel.settings());
+      if (!closed) report({ timeTravelSync: "synced" });
+    }).catch(() => { if (!closed) report({ timeTravelSync: "error" }); });
+    return timeTravelSync;
+  };
+  const offTimeTravel = supportsTimeTravel ? timeTravel?.subscribe(synchronizeTimeTravel) : undefined;
+  const synchronizeMemory = async () => {
+    if (!closed && memoryCredentials && remote.transport.hello?.capabilities?.includes("memory.credentials")) {
+      await remote.transport.peer.request("memory.credentials.replace", await memoryCredentials.list(`ssh:${id}`));
+    }
+  };
+  const offMemory = memoryCredentials?.subscribe(target => {
+    if (target === `ssh:${id}`) memorySync = memorySync.catch(() => {}).then(synchronizeMemory).catch(() => { if (!closed) report({ networkMessage: desktopText("Hindsight 凭据同步失败，请重新连接", "Failed to sync Hindsight credentials; please reconnect") }); });
+  });
+  const off = vault.follow(() => { syncing = syncing.catch(() => {}).then(synchronize).catch(() => { if (!closed) report({ networkMessage: desktopText("模型配置同步失败，请重新连接以同步最新配置", "Failed to sync model configuration; please reconnect to sync the latest settings") }); }); });
+  try {
+    await remote.transport.peer.request("network.configure", { mode: profile.networkMode ?? "remote-first" });
+    await synchronize();
+    if (timeTravel && supportsTimeTravel) await synchronizeTimeTravel();
+    else if (timeTravel) report({ timeTravelSync: "unsupported" });
+    await synchronizeMemory().catch(() => { report({ networkMessage: desktopText("Hindsight 凭据同步失败，请检查加密存储", "Failed to sync Hindsight credentials; please check encrypted storage") }); });
+    transport.onDisconnect(() => { if (!closed) remote.transport.peer.close(new RemoteConnectionError("network", desktopText("本机联网通道已断开，需要重新同步", "Local network channel disconnected; resynchronization required"))); });
+  } catch (error) { closed = true; offTimeTravel?.(); offMemory?.(); off(); offRoute(); streams.close(); await transport.close(); throw error; }
+  return () => { closed = true; offTimeTravel?.(); offMemory?.(); off(); offRoute(); streams.close(); void transport.close(); };
+}

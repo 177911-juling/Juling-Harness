@@ -1,0 +1,258 @@
+import { describe, expect, test } from "bun:test";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { HarnessBridgeDispatcher } from "@oh-my-pi/pi-coding-agent/harness/bridge-dispatcher";
+import type {
+	HarnessEventEnvelope,
+	HarnessReceipt,
+	HarnessRequest,
+	HarnessSnapshotResponse,
+} from "@oh-my-pi/pi-coding-agent/harness/bridge-protocol";
+import { parseConversationTranscriptPage } from "@oh-my-pi/pi-coding-agent/harness/conversation-protocol";
+import { HarnessInteractionGateway } from "@oh-my-pi/pi-coding-agent/harness/services/interaction-port";
+import { HarnessLiveService } from "@oh-my-pi/pi-coding-agent/harness/services/live-service";
+import { HarnessLoopService } from "@oh-my-pi/pi-coding-agent/harness/services/loop-service";
+import { HarnessPauseService } from "@oh-my-pi/pi-coding-agent/harness/services/pause-service";
+import { HarnessSessionTranscriptService } from "@oh-my-pi/pi-coding-agent/harness/services/session-transcript-service";
+import { HarnessStateProjector } from "@oh-my-pi/pi-coding-agent/harness/state-projector";
+import type { HarnessHostRuntime } from "@oh-my-pi/pi-coding-agent/harness/harness-host-mode";
+import { TempDir } from "@oh-my-pi/pi-utils";
+
+class FakeSession {
+	isStreaming = false;
+	isCompacting = false;
+	queuedMessageCount = 0;
+	followUpCalls = 0;
+
+	getAgentId(): string {
+		return "Main";
+	}
+
+	async followUp(): Promise<void> {
+		this.followUpCalls += 1;
+		this.queuedMessageCount += 1;
+	}
+}
+
+function transcriptFixture(
+	manager: SessionManager,
+	agentConversation?: { read: (args: { agentId: string; cursor?: string; limit?: number }) => Promise<unknown> },
+) {
+	const session = new FakeSession();
+	const transcript = new HarnessSessionTranscriptService(() => ({
+		runtimeEpoch: 7,
+		sessionId: manager.getSessionId(),
+		sessionManager: manager,
+	}));
+	const runtime = {
+		runtimeId: "runtime-transcript-dispatch",
+		runtimeEpoch: 7,
+		sessionId: manager.getSessionId(),
+		session,
+		sessionManager: manager,
+		services: {
+			workbench: { views: { cancelClose: () => {} } },
+			live: new HarnessLiveService(),
+			pause: new HarnessPauseService(),
+			loop: new HarnessLoopService({
+				action: () => "prompt",
+				isBlocked: () => false,
+				isVibeActive: () => false,
+				submitPrompt: () => {},
+				compact: () => {},
+				reset: () => {},
+				nowMs: Date.now,
+				setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
+				clearTimer: timer => clearTimeout(timer as NodeJS.Timeout),
+			}),
+			modes: { state: () => ({}), onChange: () => () => {} },
+			tree: { getTree: () => ({ leafId: null, roots: [] }), navigate: async () => ({}), cancelReanswer: () => {} },
+			fork: { fork: async () => ({ forked: true, sessionId: manager.getSessionId() }) },
+			commands: {
+				manifest: () => ({ hash: "sha256:test-commands", commands: [] }),
+				manifestHash: () => "sha256:test-commands",
+			},
+			btw: { onChange: () => () => {}, settle: async () => {} },
+			interaction: new HarnessInteractionGateway(),
+			tan: { start: async () => ({}) },
+			omfg: { generate: async () => ({}) },
+			agents: { onChange: () => () => {}, list: () => [] },
+			jobs: { list: () => [] },
+			transcript,
+			...(agentConversation === undefined ? {} : { agentConversation }),
+		},
+	} as unknown as HarnessHostRuntime;
+	const projector = new HarnessStateProjector(runtime);
+	const frames: Array<{
+		frameId: string;
+		body: HarnessReceipt | HarnessEventEnvelope | ReturnType<HarnessStateProjector["response"]>;
+	}> = [];
+	const dispatcher = new HarnessBridgeDispatcher(runtime, projector, (frameId, body) => {
+		frames.push({ frameId, body });
+	});
+	const request = (requestId: string, operation: HarnessRequest["operation"]): HarnessRequest => ({
+		type: "harness.request",
+		requestId,
+		runtimeEpoch: 7,
+		operation,
+	});
+	return { session, projector, frames, dispatcher, request, transcript, runtime };
+}
+
+describe("session.transcript.read dispatcher", () => {
+	test("prediction drafts bypass replay, terminal receipts and worker revival", async () => {
+		const manager = SessionManager.inMemory();
+		const { runtime, projector, frames, dispatcher, request } = transcriptFixture(manager);
+		let calls = 0;
+		let revivals = 0;
+		Object.assign(runtime, {
+			ensureWorkerLive: async () => {
+				revivals++;
+			},
+		});
+		Object.assign(runtime.services, {
+			prediction: {
+				query: async (input: { version: number }) => {
+					calls++;
+					return { version: input.version, suffix: "test", engine: "ngram" };
+				},
+			},
+		});
+		const before = projector.response("before").terminalReceipts.length;
+		for (let i = 0; i < 2; i++) {
+			await dispatcher.dispatch(
+				request("same-id", {
+					kind: "prediction.query",
+					sessionId: manager.getSessionId(),
+					version: i,
+					before: "PRIVATE UNSENT",
+					prefix: "",
+				}),
+			);
+			await Bun.sleep(0);
+		}
+		expect(calls).toBe(2);
+		expect(revivals).toBe(0);
+		expect(frames).toHaveLength(2);
+		expect(projector.response("after").terminalReceipts).toHaveLength(before);
+		expect(projector.snapshot().activeCommandIds).toEqual([]);
+		expect(JSON.stringify(frames)).not.toContain("PRIVATE UNSENT");
+		dispatcher.dispose();
+	});
+	test("reads the active branch without a lease, pending command, or remembered receipt", async () => {
+		using tempDir = TempDir.createSync("@juling-harness-transcript-dispatch-");
+		const manager = SessionManager.create(tempDir.path(), tempDir.path());
+		manager.appendMessage({ role: "user", content: "hello", timestamp: Date.now() });
+		const { projector, frames, dispatcher, request, session } = transcriptFixture(manager);
+		session.isStreaming = true;
+		session.isCompacting = true;
+		const beforeVersion = projector.stateVersion;
+		const beforeReceipts = projector.response("before").terminalReceipts.length;
+
+		await dispatcher.dispatch(request("read-one", { kind: "session.transcript.read", limit: 10 }));
+		expect(frames).toHaveLength(1);
+		expect(frames[0]!.frameId.startsWith("receipt-accepted:")).toBe(false);
+		const receipt = frames[0]!.body as HarnessReceipt;
+		expect(receipt.status).toBe("completed");
+		const page = parseConversationTranscriptPage(receipt.result);
+		expect(page.items).toHaveLength(1);
+		expect(page.items[0]).toMatchObject({ kind: "message", role: "user" });
+		expect(projector.stateVersion).toBe(beforeVersion);
+		expect(projector.response("after").terminalReceipts).toHaveLength(beforeReceipts);
+		expect(projector.snapshot().activeCommandIds).toEqual([]);
+
+		await dispatcher.dispatch(request("read-one", { kind: "session.transcript.read", limit: 10 }));
+		expect(frames).toHaveLength(2);
+		expect((frames[1]!.body as HarnessReceipt).status).toBe("completed");
+		expect(frames[1]!.frameId.startsWith("receipt-replay:")).toBe(false);
+
+		session.isStreaming = false;
+		session.isCompacting = false;
+		await dispatcher.dispatch(request("enqueue-after-read", { kind: "queue.enqueue", text: "next" }));
+		expect(session.followUpCalls).toBe(1);
+		expect((frames.at(-1)!.body as HarnessReceipt).status).toBe("completed");
+	});
+
+	test("snapshot messagesCursor is the service head cursor and rejects a stale epoch", async () => {
+		using tempDir = TempDir.createSync("@juling-harness-transcript-snapshot-");
+		const manager = SessionManager.create(tempDir.path(), tempDir.path());
+		const { projector, frames, dispatcher, request, transcript } = transcriptFixture(manager);
+		const snapshot = projector.response("snap") as HarnessSnapshotResponse;
+		expect(snapshot.messagesCursor).toBe(transcript.headCursor());
+		await dispatcher.dispatch({
+			type: "harness.request",
+			requestId: "stale-read",
+			runtimeEpoch: 6,
+			operation: { kind: "session.transcript.read" },
+		});
+		expect((frames.at(-1)!.body as HarnessReceipt).error).toMatchObject({ code: "RUNTIME_EPOCH_STALE" });
+		await dispatcher.dispatch(request("missing-session-not-used", { kind: "session.transcript.read" }));
+		expect((frames.at(-1)!.body as HarnessReceipt).status).toBe("completed");
+	});
+});
+
+describe("agent.conversation.read dispatcher", () => {
+	test("reads concurrently without a lease, pending command, or remembered receipt", async () => {
+		using tempDir = TempDir.createSync("@juling-harness-agent-convo-dispatch-");
+		const manager = SessionManager.create(tempDir.path(), tempDir.path());
+		const childPage = {
+			runtimeEpoch: 7,
+			sessionId: "child-sess",
+			branchLeafId: "leaf-1",
+			items: [
+				{
+					kind: "message" as const,
+					itemId: "child-1",
+					parentId: null,
+					createdAt: "2026-08-17T00:00:00.000Z",
+					role: "user" as const,
+					content: [{ type: "text" as const, text: "hello" }],
+				},
+			],
+			headCursor: "head",
+			hasMoreBefore: false,
+		};
+		const { projector, frames, dispatcher, request } = transcriptFixture(manager, {
+			read: async () => childPage,
+		});
+		const beforeVersion = projector.stateVersion;
+		const beforeReceipts = projector.response("before").terminalReceipts.length;
+		await dispatcher.dispatch(
+			request("child-read", { kind: "agent.conversation.read", agentId: "agent-019fcb01", limit: 10 }),
+		);
+		expect(frames).toHaveLength(1);
+		expect(frames[0]!.frameId.startsWith("receipt-accepted:")).toBe(false);
+		const receipt = frames[0]!.body as HarnessReceipt;
+		expect(receipt.status).toBe("completed");
+		expect(receipt.result).toMatchObject({ sessionId: "child-sess" });
+		expect(projector.stateVersion).toBe(beforeVersion);
+		expect(projector.response("after").terminalReceipts).toHaveLength(beforeReceipts);
+		expect(projector.snapshot().activeCommandIds).toEqual([]);
+		await dispatcher.dispatch(
+			request("child-read", { kind: "agent.conversation.read", agentId: "agent-019fcb01", limit: 10 }),
+		);
+		expect(frames).toHaveLength(2);
+		expect((frames[1]!.body as HarnessReceipt).status).toBe("completed");
+		expect(frames[1]!.frameId.startsWith("receipt-replay:")).toBe(false);
+	});
+
+	test("maps missing agents to COMMAND_BLOCKED without accepting a command", async () => {
+		using tempDir = TempDir.createSync("@juling-harness-agent-convo-missing-");
+		const manager = SessionManager.create(tempDir.path(), tempDir.path());
+		const { HarnessAgentConversationError } =
+			await import("@oh-my-pi/pi-coding-agent/harness/services/agent-conversation-service");
+		const { projector, frames, dispatcher, request } = transcriptFixture(manager, {
+			read: async () => {
+				throw new HarnessAgentConversationError("AGENT_NOT_FOUND", "missing");
+			},
+		});
+		const beforeVersion = projector.stateVersion;
+		await dispatcher.dispatch(request("missing", { kind: "agent.conversation.read", agentId: "missing" }));
+		const receipt = frames.at(-1)!.body as HarnessReceipt;
+		expect(receipt.status).not.toBe("accepted");
+		expect(receipt.error).toMatchObject({
+			code: "COMMAND_BLOCKED",
+			details: { reason: "AGENT_NOT_FOUND" },
+		});
+		expect(projector.stateVersion).toBe(beforeVersion);
+	});
+});

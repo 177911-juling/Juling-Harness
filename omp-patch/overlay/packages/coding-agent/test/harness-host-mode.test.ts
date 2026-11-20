@@ -1,0 +1,555 @@
+import { beforeEach } from "bun:test";
+import { resetSettingsForTest } from "../src/config/settings";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { afterEach, describe, expect, test } from "bun:test";
+import * as path from "node:path";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import {
+	createHarnessHostRuntime,
+	runHarnessHostMode,
+	type HarnessBridgeLifecycle,
+	type HarnessHostRuntime,
+} from "@oh-my-pi/pi-coding-agent/harness/harness-host-mode";
+import { TempDir } from "@oh-my-pi/pi-utils";
+
+function fakeSession(
+	sessionId = "session-test",
+	options: { getSessionFile?: () => string | null; sessionChangeListeners?: Array<() => void> } = {},
+): AgentSession {
+	const sessionChangeListeners = options.sessionChangeListeners ?? [];
+	return {
+		sessionManager: {
+			getSessionId: () => sessionId,
+			getCwd: () => process.cwd(),
+			getSessionFile: options.getSessionFile ?? (() => null),
+			ensureOnDisk: async () => {},
+			flush: async () => {},
+		},
+		settings: Settings.isolated({ "loop.mode": "prompt" }),
+		isStreaming: false,
+		isCompacting: false,
+		hasPostPromptWork: false,
+		getVibeModeState: () => undefined,
+		getPlanModeState: () => undefined,
+		getGoalModeState: () => undefined,
+		prompt: async () => {},
+		compact: async () => {},
+		resetSessionContext: async () => {},
+		ensureOnDisk: async () => {},
+		flush: async () => {},
+		dispose: async () => {},
+		subscribe: () => () => {},
+		setBeforeNextUserTurn: () => {},
+		registerSessionChangeCallback: (callback: () => void) => {
+			sessionChangeListeners.push(callback);
+			return () => {
+				const index = sessionChangeListeners.indexOf(callback);
+				if (index >= 0) sessionChangeListeners.splice(index, 1);
+			};
+		},
+	} as unknown as AgentSession;
+}
+
+function statsSession(
+	sessionId: string,
+	stats: { tokens: number; requests: number; tools: number; cost: number },
+): AgentSession {
+	return {
+		...fakeSession(sessionId),
+		getSessionStats: () => ({
+			tokens: { total: stats.tokens },
+			assistantMessages: stats.requests,
+			toolCalls: stats.tools,
+			cost: stats.cost,
+		}),
+	} as unknown as AgentSession;
+}
+
+function silentBridge(): HarnessBridgeLifecycle {
+	return {
+		async start() {},
+		async stop() {},
+	};
+}
+
+async function writeTranscript(filePath: string, sessionId: string, text: string): Promise<void> {
+	const lines = [
+		JSON.stringify({ type: "session", id: sessionId, timestamp: "2026-08-17T00:00:00.000Z", cwd: "/tmp" }),
+		JSON.stringify({
+			type: "message",
+			id: "m1",
+			parentId: null,
+			timestamp: "2026-08-17T00:00:01.000Z",
+			message: { role: "user", content: text, timestamp: Date.parse("2026-08-17T00:00:01.000Z") },
+		}),
+	];
+	await Bun.write(filePath, `${lines.join("\n")}\n`);
+}
+
+async function waitForListedAgent(runtime: HarnessHostRuntime, agentId: string, includePersisted = true) {
+	const deadline = Date.now() + 2_000;
+	while (Date.now() < deadline) {
+		const row = runtime.services.agents.list({ includePersisted }).find(agent => agent.agentId === agentId);
+		if (row) return row;
+		await Bun.sleep(10);
+	}
+	throw new Error(`Agent "${agentId}" did not appear in the Harness roster`);
+}
+
+describe("harness-host runtime", () => {
+	afterEach(() => {
+		AgentRegistry.resetGlobalForTests();
+	});
+
+	test("an empty session is resumable before the Bridge reports it ready", async () => {
+		using directory = TempDir.createSync("@juling-harness-empty-resume-");
+		const manager = SessionManager.create(directory.path(), path.join(directory.path(), "sessions"));
+		const id = manager.getSessionId();
+		const file = manager.getSessionFile()!;
+		const session = { ...fakeSession(id), sessionManager: manager } as unknown as AgentSession;
+		try {
+			await runHarnessHostMode(session, { runtimeEpoch: 1 }, async () => {}, {
+				createBridge: () => ({
+					async start(runtime) {
+						expect(runtime.sessionId).toBe(id);
+						expect(await Bun.file(file).exists()).toBe(true);
+					},
+					async stop() {},
+				}),
+			});
+		} finally {
+			await manager.close();
+		}
+		const resumed = await SessionManager.open(file);
+		try {
+			expect(resumed.getSessionId()).toBe(id);
+			expect(resumed.buildSessionContext().messages).toEqual([]);
+		} finally {
+			await resumed.close();
+		}
+	});
+
+	test("binds the TUI and Bridge lifecycle to one session identity", async () => {
+		const session = fakeSession();
+		let bridgeRuntime: HarnessHostRuntime | undefined;
+		let tuiRuntime: HarnessHostRuntime | undefined;
+		let stopCalls = 0;
+		const bridge: HarnessBridgeLifecycle = {
+			async start(runtime) {
+				bridgeRuntime = runtime;
+			},
+			async stop() {
+				stopCalls++;
+			},
+		};
+
+		await runHarnessHostMode(
+			session,
+			{ endpoint: "juling-harness-test", tokenFile: "C:\\temp\\juling-harness.token", runtimeEpoch: 7 },
+			async runtime => {
+				tuiRuntime = runtime;
+			},
+			{ createBridge: () => bridge, createRuntimeId: () => "runtime-test" },
+		);
+
+		expect(bridgeRuntime).toBe(tuiRuntime);
+		expect(tuiRuntime?.runtimeId).toBe("runtime-test");
+		expect(tuiRuntime?.runtimeEpoch).toBe(7);
+		expect(tuiRuntime?.sessionId).toBe("session-test");
+		expect(tuiRuntime?.session).toBe(session);
+		expect(tuiRuntime?.sessionManager).toBe(session.sessionManager);
+		expect(tuiRuntime?.bridgeConfig).toEqual({
+			endpoint: "juling-harness-test",
+			tokenFile: "C:\\temp\\juling-harness.token",
+			runtimeEpoch: 7,
+		});
+		expect(stopCalls).toBe(1);
+	});
+
+	test("installs and invalidates the Remote UI factory through the session setter", async () => {
+		const setCalls: Array<{ hasUI: boolean; kind: string }> = [];
+		const session = fakeSession();
+		const bridge: HarnessBridgeLifecycle = {
+			async start() {},
+			async stop() {},
+		};
+		await runHarnessHostMode(
+			session,
+			{ endpoint: "juling-harness-test", tokenFile: "C:\\temp\\juling-harness.token", runtimeEpoch: 7 },
+			async () => {},
+			{
+				createBridge: () => bridge,
+				createRuntimeId: () => "runtime-test",
+				setToolUIContext: (uiContext, hasUI) => {
+					setCalls.push({ hasUI, kind: typeof uiContext === "function" ? "factory" : "context" });
+				},
+			},
+		);
+		expect(setCalls).toEqual([
+			{ hasUI: true, kind: "factory" },
+			{ hasUI: false, kind: "context" },
+		]);
+	});
+
+	test("stops the Bridge lifecycle when TUI startup fails", async () => {
+		let stopCalls = 0;
+		const bridge: HarnessBridgeLifecycle = {
+			async start() {},
+			async stop() {
+				stopCalls++;
+			},
+		};
+
+		await expect(
+			runHarnessHostMode(
+				fakeSession(),
+				{ runtimeEpoch: 1 },
+				async () => {
+					throw new Error("TUI failed");
+				},
+				{ createBridge: () => bridge },
+			),
+		).rejects.toThrow("TUI failed");
+		expect(stopCalls).toBe(1);
+	});
+
+	test("fails closed when the default Bridge configuration is incomplete", async () => {
+		await expect(runHarnessHostMode(fakeSession(), {}, async () => {})).rejects.toThrow(
+			"requires --bridge-endpoint, --bridge-token-file, and --bridge-runtime-epoch",
+		);
+	});
+
+	test("creates one immutable runtime identity from the supplied session", () => {
+		const session = fakeSession("session-one");
+		const runtime = createHarnessHostRuntime(session, { runtimeEpoch: 11 }, () => "runtime-one");
+
+		expect(runtime).toEqual(
+			expect.objectContaining({
+				runtimeId: "runtime-one",
+				runtimeEpoch: 11,
+				sessionId: "session-one",
+				session,
+				sessionManager: session.sessionManager,
+			}),
+		);
+	});
+
+	test("registers parked child transcripts before the Bridge handshake", async () => {
+		using tempDir = TempDir.createSync("@juling-harness-persisted-subagents-");
+		const parentFile = path.join(tempDir.path(), "parent.jsonl");
+		const childFile = path.join(tempDir.path(), "parent", "ToolTestA.jsonl");
+		await writeTranscript(parentFile, "parent-sess", "parent");
+		await writeTranscript(childFile, "child-sess", "extract notes");
+		const session = fakeSession("session-test", { getSessionFile: () => parentFile });
+		await runHarnessHostMode(
+			session,
+			{ endpoint: "juling-harness-test", tokenFile: "C:\\temp\\juling-harness.token", runtimeEpoch: 7 },
+			async runtime => {
+				const listed = runtime.services.agents.list({ includePersisted: true });
+				const row = listed.find(agent => agent.agentId === "ToolTestA");
+				expect(row?.status).toBe("parked");
+				const page = await runtime.services.agentConversation.read({ agentId: "ToolTestA" });
+				expect(page.sessionId).toBe("child-sess");
+				expect(page.items.some(item => item.kind === "message")).toBe(true);
+			},
+			{ createBridge: silentBridge, createRuntimeId: () => "runtime-persisted" },
+		);
+	});
+
+	test("keeps a tombstoned child readable as aborted", async () => {
+		using tempDir = TempDir.createSync("@juling-harness-persisted-tombstone-");
+		const parentFile = path.join(tempDir.path(), "parent.jsonl");
+		const childFile = path.join(tempDir.path(), "parent", "ToolTestA.jsonl");
+		await writeTranscript(parentFile, "parent-sess", "parent");
+		await writeTranscript(childFile, "child-sess", "killed worker notes");
+		await Bun.write(`${childFile}.tombstone`, "");
+		const session = fakeSession("session-test", { getSessionFile: () => parentFile });
+		await runHarnessHostMode(
+			session,
+			{ endpoint: "juling-harness-test", tokenFile: "C:\\temp\\juling-harness.token", runtimeEpoch: 7 },
+			async runtime => {
+				const listed = runtime.services.agents.list({ includePersisted: true });
+				const row = listed.find(agent => agent.agentId === "ToolTestA");
+				expect(row?.status).toBe("aborted");
+				const page = await runtime.services.agentConversation.read({ agentId: "ToolTestA" });
+				expect(page.sessionId).toBe("child-sess");
+				expect(page.items.some(item => item.kind === "message")).toBe(true);
+			},
+			{ createBridge: silentBridge, createRuntimeId: () => "runtime-tombstone" },
+		);
+	});
+
+	test("rescans child transcripts after an in-process session change", async () => {
+		using tempDir = TempDir.createSync("@juling-harness-persisted-switch-");
+		const firstParent = path.join(tempDir.path(), "first.jsonl");
+		const secondParent = path.join(tempDir.path(), "second.jsonl");
+		await writeTranscript(firstParent, "first-sess", "first");
+		await writeTranscript(path.join(tempDir.path(), "first", "ToolTestA.jsonl"), "child-a", "first child");
+		await writeTranscript(secondParent, "second-sess", "second");
+		await writeTranscript(path.join(tempDir.path(), "second", "ToolTestB.jsonl"), "child-b", "second child");
+		let sessionFile = firstParent;
+		const sessionChangeListeners: Array<() => void> = [];
+		const session = fakeSession("session-test", {
+			getSessionFile: () => sessionFile,
+			sessionChangeListeners,
+		});
+		await runHarnessHostMode(
+			session,
+			{ endpoint: "juling-harness-test", tokenFile: "C:\\temp\\juling-harness.token", runtimeEpoch: 7 },
+			async runtime => {
+				expect(
+					runtime.services.agents.list({ includePersisted: true }).some(agent => agent.agentId === "ToolTestA"),
+				).toBe(true);
+				sessionFile = secondParent;
+				for (const listener of sessionChangeListeners) listener();
+				const row = await waitForListedAgent(runtime, "ToolTestB");
+				expect(row.status).toBe("parked");
+				const page = await runtime.services.agentConversation.read({ agentId: "ToolTestB" });
+				expect(page.sessionId).toBe("child-b");
+			},
+			{ createBridge: silentBridge, createRuntimeId: () => "runtime-switch" },
+		);
+	});
+
+	test("keeps the last measured usage of a parked agent as a frozen span", async () => {
+		const registry = AgentRegistry.global();
+		const createdAt = Date.now() - 600_000;
+		const lastActivity = createdAt + 480_000;
+		registry.register({
+			id: "ToolTestA",
+			displayName: "ToolTestA",
+			kind: "sub",
+			session: statsSession("child-sess", { tokens: 12_600, requests: 9, tools: 14, cost: 0.51 }),
+			status: "running",
+			createdAt,
+			lastActivity,
+		});
+		const runtime = createHarnessHostRuntime(fakeSession(), { runtimeEpoch: 1 }, () => "runtime-usage");
+		const running = runtime.services.agents.list({}).find(agent => agent.agentId === "ToolTestA");
+		expect(running?.usage).toMatchObject({
+			tokens: 12_600,
+			requests: 9,
+			tools: 14,
+			durationMs: 480_000,
+			durationKind: "active",
+		});
+
+		// Parking disposes the session, so live stats vanish; the roster must still
+		// report what the agent actually spent instead of dropping to `usage —`.
+		// `setStatus` stamps `lastActivity`, so the span ends at park time and then
+		// stops moving — the clock must not keep climbing on later reads.
+		expect(registry.detachSession("ToolTestA")).toBe(true);
+		expect(registry.setStatus("ToolTestA", "parked")).toBe(true);
+		const parked = runtime.services.agents.list({}).find(agent => agent.agentId === "ToolTestA");
+		expect(parked?.hasLiveSession).toBe(false);
+		expect(parked?.usage).toMatchObject({
+			tokens: 12_600,
+			requests: 9,
+			tools: 14,
+			cost: 0.51,
+			durationKind: "span",
+		});
+		expect(parked?.usage?.durationMs).toBeGreaterThanOrEqual(480_000);
+		await Bun.sleep(25);
+		const later = runtime.services.agents.list({}).find(agent => agent.agentId === "ToolTestA");
+		expect(later?.usage?.durationMs).toBe(parked?.usage?.durationMs);
+		expect(later?.updatedAt).toBe(parked?.updatedAt);
+	});
+
+	test("keeps held input resident, then recycles the main Worker without replacing the Runtime identity", async () => {
+		using tempDir = TempDir.createSync("@juling-harness-main-worker-");
+		const sessionFile = path.join(tempDir.path(), "main.jsonl");
+		let disposed = 0;
+		let revived = 0;
+		let held = true;
+		const initialListeners = new Set<unknown>();
+		const nextListeners = new Set<unknown>();
+		const initial = {
+			...fakeSession("session-main", { getSessionFile: () => sessionFile }),
+			get hasHeldQueuedMessages() {
+				return held;
+			},
+			subscribe: (listener: unknown) => {
+				initialListeners.add(listener);
+				return () => {
+					initialListeners.delete(listener);
+				};
+			},
+			dispose: async () => {
+				disposed += 1;
+			},
+		} as unknown as AgentSession;
+		const next = {
+			...fakeSession("session-main", { getSessionFile: () => sessionFile }),
+			subscribe: (listener: unknown) => {
+				nextListeners.add(listener);
+				return () => {
+					nextListeners.delete(listener);
+				};
+			},
+			dispose: async () => {
+				disposed += 1;
+			},
+		} as unknown as AgentSession;
+		let observed: HarnessHostRuntime | undefined;
+		await runHarnessHostMode(
+			initial,
+			{ endpoint: "juling-harness-test", tokenFile: "C:\\temp\\juling-harness.token", runtimeEpoch: 17 },
+			async runtime => {
+				observed = runtime;
+				const listener = () => {};
+				const unsubscribe = runtime.session.subscribe(listener);
+				await Bun.sleep(60);
+				expect(runtime.workerResidency?.()).toBe("active");
+				expect(disposed).toBe(0);
+				held = false;
+				await Bun.sleep(60);
+				expect(runtime.workerResidency?.()).toBe("dormant");
+				expect(disposed).toBe(1);
+				await runtime.ensureWorkerLive?.();
+				revived += 1;
+				expect(runtime.workerResidency?.()).toBe("active");
+				expect(runtime.workerGeneration?.()).toBe(2);
+				expect(nextListeners.has(listener)).toBe(true);
+				unsubscribe();
+				expect(nextListeners.has(listener)).toBe(false);
+			},
+			{
+				createBridge: silentBridge,
+				recreateSession: async () => next,
+				workerIdleSleepMs: 10,
+				workerIdleRecycleMs: 20,
+			},
+		);
+		expect(observed?.runtimeId).toBeDefined();
+		expect(observed?.runtimeEpoch).toBe(17);
+		expect(revived).toBe(1);
+		expect(disposed).toBe(2);
+	});
+
+	test("keeps reserved message ids aligned across harness-injected users, skipped assistant turns, and worker revival", async () => {
+		using tempDir = TempDir.createSync("@juling-harness-revive-projector-");
+		const initialManager = SessionManager.create(tempDir.path(), tempDir.path());
+		await initialManager.ensureOnDisk();
+		const sessionFile = initialManager.getSessionFile()!;
+
+		const reservedUser = initialManager.reserveMessageId("user");
+		initialManager.appendMessage({ role: "user", content: "synthetic nudge", synthetic: true, timestamp: 1 });
+		initialManager.appendMessage({
+			role: "user",
+			content: "peer steer",
+			steering: true,
+			attribution: "agent",
+			timestamp: 2,
+		});
+		const persistedUser = initialManager.appendMessage({
+			role: "user",
+			content: "real operator prompt",
+			timestamp: 3,
+		});
+		expect(persistedUser).toBe(reservedUser);
+
+		initialManager.reserveMessageId("assistant");
+		initialManager.discardReservedMessageId("assistant");
+		const reservedAssistant = initialManager.reserveMessageId("assistant");
+		const persistedAssistant = initialManager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "persisted reply" }],
+			api: "openai-completions",
+			provider: "openai",
+			model: "test-model",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: 4,
+		});
+		expect(persistedAssistant).toBe(reservedAssistant);
+		await initialManager.flush();
+
+		const initialListeners = new Set<(event: unknown) => void>();
+		const nextListeners = new Set<(event: unknown) => void>();
+		const revivedManager = await SessionManager.open(sessionFile);
+		try {
+			const initial = {
+				...fakeSession(initialManager.getSessionId(), { getSessionFile: () => sessionFile }),
+				sessionManager: initialManager,
+				activeToolExecutionUpdates: () => [],
+				subscribe: (listener: (event: unknown) => void) => {
+					initialListeners.add(listener);
+					return () => initialListeners.delete(listener);
+				},
+				dispose: async () => {
+					await initialManager.close();
+				},
+			} as unknown as AgentSession;
+			const next = {
+				...fakeSession(revivedManager.getSessionId(), { getSessionFile: () => sessionFile }),
+				sessionManager: revivedManager,
+				activeToolExecutionUpdates: () => [],
+				subscribe: (listener: (event: unknown) => void) => {
+					nextListeners.add(listener);
+					return () => nextListeners.delete(listener);
+				},
+				dispose: async () => {
+					await revivedManager.close();
+				},
+			} as unknown as AgentSession;
+
+			const liveIds: string[] = [];
+			let persistedRevivedUser = "";
+			await runHarnessHostMode(
+				initial,
+				{ endpoint: "juling-harness-test", tokenFile: "C:\\temp\\juling-harness.token", runtimeEpoch: 19 },
+				async runtime => {
+					runtime.services.conversation?.onEvent(event => {
+						if (event.kind === "conversation.message.completed") liveIds.push(event.messageId);
+					});
+					if (runtime.workerResidency?.() !== "dormant") {
+						const { promise, resolve } = Promise.withResolvers<void>();
+						const stop = runtime.onWorkerStateChange?.(() => {
+							if (runtime.workerResidency?.() !== "dormant") return;
+							stop?.();
+							resolve();
+						});
+						await promise;
+					}
+					expect(runtime.workerResidency?.()).toBe("dormant");
+					await runtime.ensureWorkerLive?.();
+					expect(runtime.workerResidency?.()).toBe("active");
+					const revivedUser = { role: "user" as const, content: "after revival", timestamp: Date.now() };
+					for (const listener of nextListeners) {
+						listener({ type: "agent_start" });
+						listener({ type: "message_start", message: revivedUser });
+						listener({ type: "message_end", message: revivedUser });
+					}
+					persistedRevivedUser = revivedManager.appendMessage(revivedUser);
+					const page = runtime.services.transcript.read({ limit: 50 });
+					expect(page.items.at(-1)?.itemId).toBe(persistedRevivedUser);
+				},
+				{
+					createBridge: silentBridge,
+					recreateSession: async () => next,
+					workerIdleSleepMs: 1,
+					workerIdleRecycleMs: 2,
+				},
+			);
+			expect(liveIds).toEqual([persistedRevivedUser]);
+		} finally {
+			await initialManager.close().catch(() => {});
+			await revivedManager.close().catch(() => {});
+		}
+	});
+});
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
+});

@@ -1,0 +1,68 @@
+name: Prepare signed Runtimes
+
+on:
+  workflow_call:
+    inputs:
+      platforms:
+        type: string
+        default: all
+      runtime_channel:
+        type: string
+        default: stable
+      rebuild_runtime:
+        type: boolean
+        default: false
+      warm_cache:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Native platforms to prepare
+        type: choice
+        options: [all, win32-x64, win32-arm64, linux-x64, linux-arm64, darwin-x64, darwin-arm64]
+        default: all
+      warm_cache:
+        description: Warm native compilation only, preserving existing signed Runtime bytes
+        type: boolean
+        default: true
+      rebuild_runtime:
+        description: Rebuild native addons and Runtime even when matching artifacts exist
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  BUN_VERSION: "1.4.4"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.runtime_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: plan
+        env:
+          RUNTIME_PLATFORMS: ${{ inputs.platforms || 'all' }}
+        run: node scripts/release-plan.mjs
+
+  runtime:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    uses: ./.github/workflows/runtime-platform.yml
+    with:
+      target: ${{ matrix.target }}
+      runner: ${{ matrix.os }}
+      runtime_channel: ${{ inputs.runtime_channel || 'stable' }}
+      rebuild_runtime: ${{ inputs.rebuild_runtime || false }}
+      warm_cache: ${{ inputs.warm_cache || false }}
+    secrets: inherit
