@@ -52,6 +52,15 @@ function withSelector(providerId: string, models: ModelCatalogEntry[]): ModelCat
 export function getModelPresets(zh = isZh()): ReadonlyArray<ModelPresetGroup> {
   return [
     {
+      group: zh ? "Gateway / 聚合" : "Gateway / Aggregators",
+      items: [
+        { id: "commandcode", name: "Command Code", desc: zh ? "原生 OpenAI / Anthropic 路由" : "Native OpenAI / Anthropic routing", api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
+        { id: "openrouter", name: "OpenRouter", desc: zh ? "一个 Key 访问多家模型" : "Access multiple providers with one key", api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
+        { id: "github-copilot", name: "GitHub Copilot", desc: zh ? "Copilot 订阅额度" : "Copilot subscription quota", api: "openai-responses", auth: ["oauth"], oauth: true },
+        { id: "litellm", name: "LiteLLM", desc: zh ? "自托管统一模型代理" : "Self-hosted unified model proxy", api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },
+      ],
+    },
+    {
       group: zh ? "官方 / 主流" : "Official / Major",
       items: [
         { id: "muse-code", name: "Muse Code", desc: zh ? "Muse Spark 订阅与账号模型发现" : "Muse Spark subscription and account model discovery", api: "openai-responses", auth: ["oauth"], oauth: true },
@@ -64,15 +73,6 @@ export function getModelPresets(zh = isZh()): ReadonlyArray<ModelPresetGroup> {
         { id: "groq", name: "Groq", desc: zh ? "高速推理（Llama / Mixtral）" : "High-speed inference (Llama / Mixtral)", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.groq.com/openai/v1" },
         { id: "deepseek", name: "DeepSeek", desc: zh ? "DeepSeek V / R 系列" : "DeepSeek V / R series", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.deepseek.com/v1" },
         { id: "moonshot", name: "Moonshot / Kimi", desc: zh ? "Kimi K 系列模型" : "Kimi K series models", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.moonshot.cn/v1" },
-      ],
-    },
-    {
-      group: zh ? "Gateway / 聚合" : "Gateway / Aggregators",
-      items: [
-        { id: "commandcode", name: "Command Code", desc: zh ? "原生 OpenAI / Anthropic 路由" : "Native OpenAI / Anthropic routing", api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
-        { id: "openrouter", name: "OpenRouter", desc: zh ? "一个 Key 访问多家模型" : "Access multiple providers with one key", api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
-        { id: "github-copilot", name: "GitHub Copilot", desc: zh ? "Copilot 订阅额度" : "Copilot subscription quota", api: "openai-responses", auth: ["oauth"], oauth: true },
-        { id: "litellm", name: "LiteLLM", desc: zh ? "自托管统一模型代理" : "Self-hosted unified model proxy", api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },
       ],
     },
     {

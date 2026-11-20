@@ -1557,6 +1557,21 @@ describe("P1/P2 model-config adapter surfaces", () => {
 });
 
 describe("provider presets", () => {
+  test("gateway and aggregator presets come before official providers", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-preset-order-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const service = createOmpModelsService({ agentDir: dir });
+      const model = await service.get();
+      const groups = model.presets.map((group) => group.group);
+      assert.match(groups[0] ?? "", /Gateway \/ 聚合|Gateway \/ Aggregators/u);
+      assert.match(groups[1] ?? "", /官方 \/ 主流|Official \/ Popular/u);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("xAI paid API preset uses OpenAI Responses", async () => {
     const dir = await mkdtemp(join(tmpdir(), "omp-models-xai-preset-"));
     try {

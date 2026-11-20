@@ -104,7 +104,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [providerBaseline, setProviderBaseline] = useState<Draft | null>(null);
   const [roleBaseline, setRoleBaseline] = useState<ModelRoleRecord | null>(null);
   const [editExisting, setEditExisting] = useState(false);
-  const [presetOpen, setPresetOpen] = useState(false);
+  const [presetOpen, setPresetOpen] = useState(true);
   const [presetQuery, setPresetQuery] = useState("");
   const [presetSel, setPresetSel] = useState<string | null>(null);
   const [roleId, setRoleId] = useState<string | null>(null);
@@ -1899,7 +1899,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                 </span>
                 <span className="spacer" />
                 <button type="button" className="btn outline" disabled={preview} data-tip={preview ? (marks ? t("common.demo") : t("common.unavailable")) : undefined} onClick={() => void refresh()}><Icon name="refresh" extra="sm" />{t("modelConfig.refreshStatus")}</button>
-                <button type="button" className="btn primary" onClick={() => { setModelEdit(null); setEditor(blankDraft()); setEditExisting(false); setPresetOpen(false); setPresetSel(null); setConfirmDelete(false); setTestResult(null); }}><Icon name="plus" extra="sm" />{t("modelConfig.addProvider")}</button>
+                <button type="button" className="btn primary" onClick={() => { setModelEdit(null); setEditor(blankDraft()); setEditExisting(false); setPresetOpen(true); setPresetSel(null); setConfirmDelete(false); setTestResult(null); }}><Icon name="plus" extra="sm" />{t("modelConfig.addProvider")}</button>
               </div>
               {!data && !loadError ? (
                 <div className="pv-list is-pending" role="status">

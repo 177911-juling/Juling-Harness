@@ -467,6 +467,21 @@ describe("ModelConfigPage 自动获取模型", () => {
     expect(client.command).not.toHaveBeenCalled();
   });
 
+  it("opens preset templates by default with gateway providers first", async () => {
+    window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
+    render(
+      <PreviewModeProvider switchEnabled>
+        <ModelConfigPage client={fakeClient()} />
+      </PreviewModeProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "添加供应商" }));
+    const toggle = await screen.findByRole("button", { name: /从预设模板创建/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const labels = [...document.querySelectorAll(".preset-group-label")].map((node) => node.textContent ?? "");
+    expect(labels[0]).toContain("Gateway / 聚合");
+    expect(labels[1]).toContain("官方 / 主流");
+  });
+
   it("uses fixtures and never calls the Host in preview mode", async () => {
     const { client } = await openEditor({ preview: true });
     fireEvent.click(screen.getByRole("button", { name: /自动获取模型/ }));

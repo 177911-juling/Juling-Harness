@@ -219,6 +219,16 @@ function hasWebSearchCredential(
 
 const presetGroups = (): ReadonlyArray<ModelPresetGroup> => [
   {
+    group: hostText("Gateway / 聚合", "Gateway / Aggregators"),
+    items: [
+      { id: "modular", name: "Modular Cloud", desc: hostText("Modular Cloud 模型与原生推理参数", "Modular Cloud models and native reasoning parameters"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.modular.com/v1" },
+      { id: "commandcode", name: "Command Code", desc: hostText("原生 OpenAI / Anthropic 路由、模型发现与价格", "Native OpenAI / Anthropic routing, discovery, and pricing"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
+      { id: "openrouter", name: "OpenRouter", desc: hostText("一个 Key 访问多家模型", "Access multiple providers with one key"), api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
+      { id: "github-copilot", name: "GitHub Copilot", desc: hostText("Copilot 订阅额度", "Copilot subscription quota"), api: "openai-responses", auth: ["oauth"], oauth: true },
+      { id: "litellm", name: "LiteLLM", desc: hostText("自托管统一模型代理", "Self-hosted unified model proxy"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },
+    ],
+  },
+  {
     group: hostText("官方 / 主流", "Official / Popular"),
     items: [
       { id: "mistral", name: "Mistral", desc: hostText("Mistral Vibe 浏览器登录或 API Key", "Mistral Vibe browser login or API key"), api: "openai-completions", auth: ["oauth", "api-key"], oauth: true, endpoint: "https://api.mistral.ai/v1" },
@@ -234,16 +244,6 @@ const presetGroups = (): ReadonlyArray<ModelPresetGroup> => [
       { id: "groq", name: "Groq", desc: hostText("高速推理（Llama / Mixtral）", "High-speed inference (Llama / Mixtral)"), api: "openai-completions", auth: ["api-key"], endpoint: "https://api.groq.com/openai/v1" },
       { id: "deepseek", name: "DeepSeek", desc: hostText("DeepSeek V / R 系列", "DeepSeek V / R series"), api: "openai-completions", auth: ["api-key"], endpoint: "https://api.deepseek.com/v1" },
       { id: "moonshot", name: "Moonshot / Kimi", desc: hostText("Kimi K 系列模型", "Kimi K series models"), api: "openai-completions", auth: ["api-key"], endpoint: "https://api.moonshot.cn/v1" },
-    ],
-  },
-  {
-    group: hostText("Gateway / 聚合", "Gateway / Aggregators"),
-    items: [
-      { id: "modular", name: "Modular Cloud", desc: hostText("Modular Cloud 模型与原生推理参数", "Modular Cloud models and native reasoning parameters"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.modular.com/v1" },
-      { id: "commandcode", name: "Command Code", desc: hostText("原生 OpenAI / Anthropic 路由、模型发现与价格", "Native OpenAI / Anthropic routing, discovery, and pricing"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
-      { id: "openrouter", name: "OpenRouter", desc: hostText("一个 Key 访问多家模型", "Access multiple providers with one key"), api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
-      { id: "github-copilot", name: "GitHub Copilot", desc: hostText("Copilot 订阅额度", "Copilot subscription quota"), api: "openai-responses", auth: ["oauth"], oauth: true },
-      { id: "litellm", name: "LiteLLM", desc: hostText("自托管统一模型代理", "Self-hosted unified model proxy"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },
     ],
   },
   {
