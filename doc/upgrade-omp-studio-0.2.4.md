@@ -518,7 +518,9 @@ website/shared/media/icon-512.webp
 - 验证：`npm run check -- --all`（含 305 个渲染测试文件与全部 Desktop/Host/协议测试）、
   `npm run build`、`npm run test:tooling`（Bun 1.4.4 + Python 3.12）均通过；
   `npm run omp:verify:patches` 从干净 vendor 全链通过，`runtime:verify-source` 通过。
-- 尚未重建签名 Runtime 二进制（`npm run omp:build:host`）：源码、补丁与身份已对齐
-  `18.20.2-harness.18`，发布前需按 Release 流程构建并签名新的 `juling.exe`。
+- 签名 Runtime 已构建：`packages/runtime-installer/dist/artifacts/win32-x64/18.20.2-harness.18/`
+  （`juling.exe`、manifest、checksums、signature；`--version` 报 `juling/18.20.2`，`--smoke-test` 通过）。
+  构建注意：`BUN_EXE` 不能位于含中文的路径（仓库在 `G:\源码`，Bun 的 `--compile` 复制自身会 ENOENT）；
+  本次使用 ASCII 路径下的 Bun 1.4.4 副本。
 - 仍需人工 GUI 验收：Agent Hub 指挥台 / 消息、模型拉取筛选、工作区恢复、六语切换、统计面板、
   Windows/macOS/Linux 更新流程（见 §5 Phase 6 清单）。
