@@ -81,7 +81,7 @@ export function getModelPresets(zh = isZh()): ReadonlyArray<ModelPresetGroup> {
       group: zh ? "本地" : "Local",
       items: [
         { id: "ollama", name: "Ollama", desc: zh ? "本地模型服务，自动发现已拉取模型" : "Local model server with automatic pulled model discovery", api: "openai-completions", auth: ["none"], local: true, popular: true, endpoint: "http://localhost:11434/v1", discovery: "ollama" },
-        { id: "lm-studio", name: "LM Harness", desc: zh ? "本地 OpenAI 兼容服务" : "Local OpenAI-compatible server", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:1234/v1", discovery: "lm-studio" },
+        { id: "lm-studio", name: "LM Studio", desc: zh ? "本地 OpenAI 兼容服务" : "Local OpenAI-compatible server", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:1234/v1", discovery: "lm-studio" },
         { id: "llama.cpp", name: "llama.cpp", desc: zh ? "llama-server OpenAI 兼容接口" : "llama-server OpenAI-compatible endpoint", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:8080/v1", discovery: "llama.cpp" },
       ],
     },
@@ -171,7 +171,7 @@ export function createPreviewModelConfig(zh = isZh()): ModelConfigReadModel {
       models: [m("auto", "OpenRouter Auto", 200000, 32000, { img: true, reason: true, status: "unavailable" })],
     }),
     provider({
-      id: "lm-studio", name: "LM Harness", source: "runtime", status: "offline",
+      id: "lm-studio", name: "LM Studio", source: "runtime", status: "offline",
       statusDetail: zh ? "本地服务未运行" : "Local service offline", api: "openai-completions",
       endpointUrl: "http://localhost:1234/v1", local: true, enabled: true,
       auth: { type: "none", hasSecret: false },
