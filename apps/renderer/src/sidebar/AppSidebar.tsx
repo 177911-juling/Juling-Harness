@@ -72,7 +72,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const zh = resolvedLanguage === "zh";
   const { preview, marks } = usePreviewMode();
   const appUpdate = useAppUpdate();
-  const effectiveUpdate = preview ? getPreviewAppUpdate(zh) : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
+  const effectiveUpdate = preview && marks ? getPreviewAppUpdate(zh) : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
   const hasUpdate = effectiveUpdate?.available === true;
   const dock = useOptionalDock();
   const hasDockCards = !dock || dock.layout.left.panels.length > 0;

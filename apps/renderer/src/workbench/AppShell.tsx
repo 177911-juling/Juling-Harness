@@ -151,7 +151,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const modelConnection = useModelConnection(modelClient);
   const appUpdate = useAppUpdate();
   const { profile } = useOperatorProfile();
-  const effectiveUpdate = previewMode.preview ? getPreviewAppUpdate(zh) : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
+  const effectiveUpdate = previewMode.preview && previewMode.marks ? getPreviewAppUpdate(zh) : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
   const [showAppUpdateDialog, setShowAppUpdateDialog] = useState(false);
   const [localAppVersion, setLocalAppVersion] = useState<string | null>(null);
   useEffect(() => {
@@ -2978,7 +2978,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
                 <div className="modal-body">
                   <dl className="about-list">
                     <div className="about-row"><dt>{t("common.product")}</dt><dd>Juling Harness</dd></div>
-                    <div className="about-row"><dt>{t("appUpdate.currentVersion")}</dt><dd>{(previewMode.preview ? getPreviewAppUpdate(zh).currentVersion : localAppVersion ?? appUpdate.state.updateInfo?.currentVersion) || "—"}</dd></div>
+                    <div className="about-row"><dt>{t("appUpdate.currentVersion")}</dt><dd>{(previewMode.preview && previewMode.marks ? getPreviewAppUpdate(zh).currentVersion : localAppVersion ?? appUpdate.state.updateInfo?.currentVersion) || "—"}</dd></div>
                     <div className="about-row"><dt>Client contract</dt><dd>v{CLIENT_CONTRACT_VERSION}</dd></div>
                     <div className="about-row"><dt>Runtime</dt><dd>{runtime?.status ?? t("common.unavailable")}{runtime?.classification ? ` · ${runtime.classification}` : ""}</dd></div>
                     {runtime?.runtimeVersion ? <div className="about-row"><dt>{t("common.runtimeVersion")}</dt><dd>{runtime.runtimeVersion}</dd></div> : null}

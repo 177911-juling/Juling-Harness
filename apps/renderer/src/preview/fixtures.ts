@@ -756,8 +756,8 @@ export function getPreviewAppUpdate(zh = isZh()): PreviewAppUpdate {
 - **Full bilingual UI support**: Complete Chinese and English update guidance across dialogs and badges.
 - **Performance & reliability**: Improved Runtime Bridge handshake and IPC responsiveness.`,
     publishedAt: "2026-08-20T00:00:00Z",
-    htmlUrl: `https://github.com/177911-juling/juling-harness/releases/tag/v${version}`,
-    downloadUrl: `https://github.com/177911-juling/juling-harness/releases/download/v${version}/${assetName}`,
+    htmlUrl: `https://github.com/177911-juling/Juling-Harness/releases/tag/v${version}`,
+    downloadUrl: `https://github.com/177911-juling/Juling-Harness/releases/download/v${version}/${assetName}`,
     assetName,
     assetSize: 89452000,
     ...(PLATFORM === "linux" ? { requiresSystemAuthorization: true } : {}),
