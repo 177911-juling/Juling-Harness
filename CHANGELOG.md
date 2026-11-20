@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Release workflow supports artifact-only client builds without publishing a release.
+
 ### Changed
 
 - 新建对话欢迎区顶部的 π 图标替换为应用 Logo。

@@ -26,6 +26,10 @@ on:
         type: boolean
         description: Force a Runtime rebuild even when its sources are unchanged
         default: false
+      publish_release:
+        type: boolean
+        description: Publish an immutable release; disable to upload client artifacts only
+        default: true
       include_macos:
         type: boolean
         description: Include macOS arm64 for Runtime-only releases (always included for desktop)
@@ -63,7 +67,7 @@ jobs:
           REQUEST_KIND: ${{ inputs.release_kind || (startsWith(github.ref_name, 'runtime-v') && 'runtime') || 'desktop' }}
           INCLUDE_MACOS: ${{ github.event_name == 'push' || inputs.include_macos }}
           INCLUDE_LINUX: ${{ github.event_name == 'push' || inputs.include_linux }}
-          CHECK_RELEASE: "true"
+          CHECK_RELEASE: ${{ github.event_name == 'push' || inputs.publish_release }}
           RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release-plan.mjs
@@ -89,7 +93,7 @@ jobs:
 
   publish:
     needs: [prepare, build]
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    if: ${{ !cancelled() && needs.build.result == 'success' && (github.event_name == 'push' || inputs.publish_release) }}
     runs-on: ubuntu-latest
     environment: release
     permissions:

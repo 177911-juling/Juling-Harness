@@ -150,11 +150,14 @@ platforms and the full signing/publishing chain still need runner acceptance.
 | `runtime_channel` | Stable, or canary for Runtime-only releases |
 | `runtime_min_app_version` | Tested desktop compatibility floor; blank uses the workspace version |
 | `rebuild_runtime` | Rebuild the Runtime even when its inputs are unchanged |
+| `publish_release` | Publish a new immutable release; disable to build and upload all client artifacts without publishing |
 | `include_macos` | Include macOS Apple Silicon for Runtime-only releases; desktop always includes it |
 | `include_linux` | Include Linux x64 for Runtime-only releases; desktop always includes it |
 
 Desktop releases always build Windows x64, Windows ARM64, macOS Apple Silicon,
-and Linux x64, whether started from a tag or manually. Publication waits for
+and Linux x64, whether started from a tag or manually. With `publish_release`
+disabled, the same matrix runs without the published-version guard or publish
+job, and candidates remain available as workflow artifacts. Publication waits for
 all four desktop targets and the remote environments. Runtime-only releases never
 become Latest; canary releases are prereleases. Desktop releases use stable
 Runtime. Versions are unique across channels, and published assets are immutable.
