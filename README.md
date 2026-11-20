@@ -159,14 +159,19 @@ Windows 也可以直接运行 `启动预览版.cmd`（演示数据）或 `启动
 
 ## 文档
 
-- [快速开始](docs/getting-started.md)
-- [架构说明](docs/architecture.md)
-- [工作台停靠](docs/workbench-docking.md)
-- [文件浏览器](docs/file-browser.md) · [文件查看器](docs/file-viewer.md)
-- [内置浏览器](docs/browser.md) · [SSH 工作区](docs/ssh-workspaces.md)
-- [Time Travel](docs/time-travel.md)
-- [更新与验签](docs/updates.md) · [Linux 客户端](docs/linux.md)
-- [本地化](docs/localization.md)
+| 文档 | 内容 |
+|---|---|
+| [快速开始](docs/getting-started.md) | 安装、首次启动、连接 Runtime 与基础工作流 |
+| [架构说明](docs/architecture.md) | 分层、Harness Bridge、Runtime overlay 与接缝补丁 |
+| [工作台停靠](docs/workbench-docking.md) | 停靠区域、拖拽吸附、标签组与布局恢复 |
+| [文件浏览器](docs/file-browser.md) | 项目外文件、固定目录与 SSH 浏览 |
+| [文件查看器](docs/file-viewer.md) | 编辑、Diff、查找与多格式预览 |
+| [内置浏览器](docs/browser.md) | 原生网页、人机交接与 Console / Network |
+| [SSH 工作区](docs/ssh-workspaces.md) | 远端 Runtime、文件、Git 与终端 |
+| [Time Travel](docs/time-travel.md) | 回合检查点、代码与对话恢复 |
+| [更新与验签](docs/updates.md) | 差分下载、签名校验、重启安装与回滚 |
+| [Linux 客户端](docs/linux.md) | deb / AppImage 安装与应用内更新 |
+| [本地化](docs/localization.md) | 六语界面、跨进程同步与回退链 |
 
 ---
 
