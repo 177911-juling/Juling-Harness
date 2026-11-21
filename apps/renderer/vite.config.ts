@@ -41,6 +41,7 @@ export default defineConfig({
       { find: "@oh-my-pi/pi-tui/charts/chart-svg", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/charts/chart-svg.ts", import.meta.url)) },
       { find: "@oh-my-pi/pi-tui/html-form/data", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/html-form/data.ts", import.meta.url)) },
       { find: "@oh-my-pi/pi-tui/html-form/model", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/html-form/parse.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-utils/dom", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/utils/src/dom.ts", import.meta.url)) },
     ],
   },
   server: { cors: { origin: ["null", /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/] } },
