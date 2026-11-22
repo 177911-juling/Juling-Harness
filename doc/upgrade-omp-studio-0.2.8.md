@@ -1,6 +1,6 @@
 # OMP Studio 0.2.8 升级分析与执行方案
 
-> 状态：**应用层已执行；Runtime 19.0.1 重定基待网络恢复**。
+> 状态：**已执行并验证**：应用层合入 0.2.8，Runtime 重定基到 OMP 19.0.1（`19.0.1-harness.7`）。
 > 分析日期：2026-11-22；执行日期：2026-11-22。
 > 上游输入：`G:\源码\omp-studio-0.2.8`（无 `.git`，按文件对比）。
 > 基线：本仓库 `c08f52a3`（`upstream: projected omp-studio v0.2.4 (studio->harness, lf)`）。
@@ -15,7 +15,20 @@
 | Phase 2 合并 | ✅ | 140 个重叠文件；82 个冲突按域解决 |
 | Phase 3 Runtime | ✅ | vendor 切到 `f40f335…`（OMP 19.0.1）；overlay 312 文件三方合并；0001–0004 取上游、0005/0006 重放；`series.json` = `19.0.1-harness.7` |
 | Phase 4 i18n/预览/文档 | ✅ | 六语补齐 0.2.8 新增键；文档与版本号更新到 `1.1.0` |
-| Phase 5 验证 | ⏳ | `check --all`、`build`、`test:tooling` 待重跑；`omp:verify:patches` 与 `runtime:verify-source` 见下 |
+| Phase 5 验证 | ✅ | `check --all`、`check --production`、`build`、`test:tooling`、`omp:verify:patches`、`runtime:verify-source` 全绿；记录见下 |
+
+### 验证记录
+
+| 命令 | 结果 |
+|---|---|
+| `npm run check -- --all` | 28 个编译/测试步骤全绿，`all checks passed in 210.7s` |
+| `npm run check -- --production` | 架构、类型、核心测试、Vite 生产包与远端 Host 产物全绿 |
+| `npm run build` | 渲染层、桌面主进程、`remote-host` 产物构建成功 |
+| `npm run test:tooling` | 157 项：156 通过、0 失败、1 跳过（overlay 已应用） |
+| `npm run omp:verify:patches` | overlay 312 文件 + 6 个接缝补丁 apply/typecheck/Bun 套件通过，`smoke-test: ok`，vendor 还原干净 |
+| `npm run runtime:verify-source` | `Verified OMP source commit f40f335845f0b136453d12fec8d6057011082766` |
+
+提交：`ee2c2120` 应用层合并 → `b3f01c2b` 收尾 → `1bb79063` Runtime 重定基 → `8d171710` vendor pin。
 
 **Runtime 现为 `19.0.1-harness.7`。** 反汇编、Plan 正文保存、会话本地目录（`resource.local.ensureDir`）
 等 13 个能力随 OMP 19.0.1 生效；`disassembler.*` 设置取代原 `ida.*`。
@@ -201,7 +214,7 @@ OMP 18 → 19 的接缝改动已按 §4.1 / 附录 C 落位：
 - 桌面新增依赖：`qrcode`、`ws`、`@peculiar/x509`、`@peculiar/asn1-schema`、`asn1js`、`reflect-metadata`
   （手机访问的证书、扫码与 WebSocket）。新增 devDeps：`@types/qrcode`、`@types/ws`。
 - 渲染层新增依赖：`@juling-harness/transport-web`（手机页复用 browser transport）。
-- `packages/transport-web` 新增 `./browser` 子路径导出；本地目前只有 `browser-client.ts`，未声明导出。
+- `packages/transport-web` 新增 `./browser` 子路径导出，本地已声明并供手机页与浏览器端复用。
 - `packaging/electron-builder.yml` 增加 `afterPack: ./scripts/audit-mobile-certificate.mjs`，
   并新增该脚本与证书打包检查。
 - 新增入口：`apps/renderer/mobile.html`、`mobile-access-harness.html`、`runtime-migration-harness.html`；
