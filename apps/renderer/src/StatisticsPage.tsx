@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HarnessClient } from "@juling-harness/client-contract";
 import { usePreviewMode } from "./preview/PreviewContext";
-import { PREVIEW_STATS_TOTALS } from "./preview/fixtures";
+import { StatsPreviewSurface } from "./preview/StatsPreviewSurface";
 import { useI18n } from "./i18n";
 import { hostErrorMessage } from "./hostError";
 
@@ -24,7 +24,7 @@ type Phase = "loading" | "ready" | "unavailable";
  * aggregates and says so.
  */
 export function StatisticsPage({ client }: { client: HarnessClient }) {
-  const { preview, marks } = usePreviewMode();
+  const { preview } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [phase, setPhase] = useState<Phase>("loading");
@@ -110,26 +110,7 @@ export function StatisticsPage({ client }: { client: HarnessClient }) {
     void client.command("usage.openDashboard", {});
   }, [client]);
 
-  if (preview) {
-    const demo = PREVIEW_STATS_TOTALS;
-    return (
-      <div className="stats-page">
-        {marks ? (
-          <p className="stats-demo-note">
-            {zh
-              ? "统计面板由本机 Juling Runtime 提供，需关闭预览后查看；下面是演示汇总。"
-              : "The statistics panel is served by the local Juling Runtime. Turn preview off to view it; demo aggregates follow."}
-          </p>
-        ) : null}
-        <div className="stats-demo">
-          <div className="stats-demo-cell"><span className="l">Tokens</span><span className="v">{demo.tokens.toLocaleString()}</span></div>
-          <div className="stats-demo-cell"><span className="l">{zh ? "请求" : "Requests"}</span><span className="v">{demo.requests.toLocaleString()}</span></div>
-          <div className="stats-demo-cell"><span className="l">{zh ? "错误" : "Errors"}</span><span className="v">{demo.errors.toLocaleString()}</span></div>
-          <div className="stats-demo-cell"><span className="l">{zh ? "API 等价估算" : "API-equivalent"}</span><span className="v">{`$${demo.costEstimate.toFixed(2)}`}</span></div>
-        </div>
-      </div>
-    );
-  }
+  if (preview) return <StatsPreviewSurface />;
 
   if (phase === "unavailable") {
     return (

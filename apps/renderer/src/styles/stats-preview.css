@@ -1,0 +1,129 @@
+/* 统计页 · 预览模式演示面板
+   真实模式整页内嵌原生 `juling stats`；预览模式不伪造该服务，用同一套分区结构
+   渲染 fixtures。所有数值来自 statsPreview.ts，切换范围/分区只改本地状态。 */
+.stats-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+.sp-head {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-16);
+  padding: var(--sp-14) var(--sp-24);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+}
+.sp-brand { display: flex; align-items: center; gap: var(--sp-8); font-size: var(--fs-14); font-weight: var(--fw-semibold); }
+.sp-mark { width: 10px; height: 10px; border-radius: 3px; background: var(--accent); }
+.sp-chip {
+  font-size: var(--fs-11); font-weight: var(--fw-medium);
+  color: var(--success, #16a34a);
+  padding: 2px var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+}
+.sp-ranges { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: var(--r-6); }
+.sp-range {
+  border: 0; background: transparent; color: var(--text-3);
+  font: inherit; font-size: var(--fs-11); padding: var(--sp-4) var(--sp-8);
+  border-radius: var(--r-4); cursor: pointer;
+}
+.sp-range.on { background: var(--surface-active); color: var(--text); font-weight: var(--fw-medium); }
+
+.sp-body { display: flex; align-items: stretch; min-height: 0; }
+.sp-nav {
+  flex: 0 0 208px;
+  padding: var(--sp-16) var(--sp-12);
+  border-right: 1px solid var(--border);
+}
+.sp-nav h2 {
+  margin: var(--sp-12) 0 var(--sp-4);
+  font-size: var(--fs-11); font-weight: var(--fw-medium); color: var(--text-3);
+  text-transform: none; letter-spacing: 0;
+}
+.sp-nav-item {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8);
+  width: 100%; border: 0; background: transparent; color: var(--text-2);
+  font: inherit; font-size: var(--fs-12); text-align: left;
+  padding: var(--sp-6) var(--sp-8); border-radius: var(--r-6); cursor: pointer;
+}
+.sp-nav-item.on { background: var(--surface-active); color: var(--text); font-weight: var(--fw-medium); }
+.sp-nav-item kbd { font-family: var(--font-ui); font-size: var(--fs-11); color: var(--text-3); }
+
+.sp-main { flex: 1 1 auto; min-width: 0; padding: var(--sp-20) var(--sp-24) var(--sp-32); }
+.sp-main h1 { margin: 0; font-size: var(--fs-18); font-weight: var(--fw-semibold); }
+.sp-lead { margin: var(--sp-4) 0 var(--sp-16); color: var(--text-3); font-size: var(--fs-12); }
+
+.sp-kpis {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  border: 1px solid var(--border); border-radius: var(--r-8); overflow: hidden;
+}
+.sp-kpis.secondary { margin-top: var(--sp-12); }
+.sp-kpi {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: var(--sp-12) var(--sp-14);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.sp-kpi-label { font-size: var(--fs-11); color: var(--text-3); }
+.sp-kpi strong { font-size: var(--fs-18); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.sp-kpi-note { font-size: var(--fs-11); color: var(--text-3); }
+
+.sp-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-12); margin-top: var(--sp-12); }
+.sp-card {
+  min-width: 0;
+  padding: var(--sp-14);
+  border: 1px solid var(--border); border-radius: var(--r-8);
+  background: var(--surface);
+}
+.sp-card h2 {
+  display: flex; align-items: baseline; gap: var(--sp-8);
+  margin: 0 0 var(--sp-10); font-size: var(--fs-13); font-weight: var(--fw-semibold);
+}
+.sp-card h2 span { font-size: var(--fs-11); font-weight: var(--fw-regular); color: var(--text-3); }
+
+.sp-bars { display: flex; align-items: flex-end; gap: 3px; height: 148px; margin: 0; padding: 0; list-style: none; }
+.sp-bars li { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: var(--sp-4); min-width: 0; height: 100%; }
+.sp-bars i {
+  display: block; width: 100%; max-width: 22px; min-height: 3px;
+  background: var(--accent); border-radius: 2px 2px 0 0; opacity: 0.9;
+}
+.sp-bars span { font-size: 9px; color: var(--text-3); white-space: nowrap; transform: rotate(-38deg); transform-origin: center; }
+
+.sp-mix { display: flex; height: 10px; border-radius: var(--r-full); overflow: hidden; background: var(--surface-2); }
+.sp-mix i[data-i="0"] { background: var(--text-3); }
+.sp-mix i[data-i="1"] { background: var(--accent); }
+.sp-mix i[data-i="2"] { background: var(--warning, #d97706); }
+.sp-mix i[data-i="3"] { background: var(--success, #16a34a); }
+.sp-legend { margin: var(--sp-10) 0 0; padding: 0; list-style: none; display: grid; gap: var(--sp-4); }
+.sp-legend li { display: flex; align-items: center; gap: var(--sp-6); font-size: var(--fs-11); color: var(--text-2); }
+.sp-legend li i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.sp-legend li i[data-i="0"] { background: var(--text-3); }
+.sp-legend li i[data-i="1"] { background: var(--accent); }
+.sp-legend li i[data-i="2"] { background: var(--warning, #d97706); }
+.sp-legend li i[data-i="3"] { background: var(--success, #16a34a); }
+.sp-legend b { margin-left: auto; font-weight: var(--fw-medium); color: var(--text); }
+
+.sp-sources { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-6); }
+.sp-sources li { display: grid; grid-template-columns: 1fr auto auto 44px; gap: var(--sp-8); align-items: baseline; font-size: var(--fs-11); color: var(--text-2); }
+.sp-sources b { font-weight: var(--fw-medium); color: var(--text); font-variant-numeric: tabular-nums; }
+.sp-sources em { font-style: normal; text-align: right; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+.sp-table { width: 100%; border-collapse: collapse; font-size: var(--fs-11); }
+.sp-table th {
+  text-align: left; font-weight: var(--fw-medium); color: var(--text-3);
+  padding: var(--sp-6) var(--sp-8); border-bottom: 1px solid var(--border);
+}
+.sp-table td { padding: var(--sp-6) var(--sp-8); border-bottom: 1px solid var(--border); color: var(--text-2); vertical-align: middle; }
+.sp-table tr:last-child td { border-bottom: 0; }
+.sp-table td strong { display: block; color: var(--text); font-weight: var(--fw-medium); }
+.sp-table td small { color: var(--text-3); }
+.sp-table.wide td { font-variant-numeric: tabular-nums; }
+.sp-ok { color: var(--success, #16a34a); }
+.sp-bad { color: var(--danger, #dc2626); }

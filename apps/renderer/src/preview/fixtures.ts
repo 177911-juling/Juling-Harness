@@ -814,18 +814,6 @@ export function getPreviewUpdates(zh = isZh()) {
 export const PREVIEW_UPDATES = getPreviewUpdates();
 
 /**
- * Statistics panel demo aggregates. The real page embeds the local `omp stats`
- * dashboard, which preview mode must not fabricate — these numbers stand in for
- * that panel so the surface is not empty while preview is on.
- */
-export const PREVIEW_STATS_TOTALS = {
-  tokens: 1_045_409_258,
-  requests: 10_443,
-  errors: 239,
-  costEstimate: 1_121.8,
-} as const;
-
-/**
  * Preview-mode Juling Logs rows for one session: runtime attach, snapshot, session
  * open, the first prompt, a plan review whose approval lease expires, then the
  * rejected `interaction.respond` receipt that follows it. Cursors are contiguous
