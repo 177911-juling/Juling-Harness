@@ -11,7 +11,7 @@
 
 | संस्करण | अंतर्निहित रनटाइम | प्लेटफ़ॉर्म | लाइसेंस |
 |:--:|:--:|:--:|:--:|
-| **1.0.1** | OMP **18.20.2** · `harness.18` | Windows · macOS · Linux | MIT |
+| **1.1.0** | OMP **18.20.2** · `harness.18` | Windows · macOS · Linux | MIT |
 
 <p align="center">
   <img src="docs/readme/app-workbench.png" width="100%" alt="Juling Harness वर्कबेंच: बातचीत, टूल कार्ड, सबएजेंट और कॉन्टेक्स्ट पैनल" />

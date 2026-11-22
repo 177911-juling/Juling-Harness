@@ -133,7 +133,7 @@ test("an entrypoint whose bytes changed is hashed again and rejected", async () 
 
     // Same length, so only the modification time can reveal the replacement.
     await writeFile(join(temporary, "installed", "versions", "v1", "juling.exe"), "B".repeat(content.length));
-    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
+    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for juling\.exe/u);
     assert.equal(installer.verificationStats().contentHashes, 2);
   } finally {
     await rm(temporary, { recursive: true, force: true });
@@ -169,7 +169,7 @@ test("evidence older than the trust window is re-hashed even when the stat ident
     assert.equal(installer.verificationStats().contentHashes, 1);
 
     clock.now += 2_000;
-    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
+    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for juling\.exe/u);
     assert.equal(installer.verificationStats().contentHashes, 2);
   } finally {
     await rm(temporary, { recursive: true, force: true });
@@ -229,8 +229,8 @@ test("a failed verification is never recorded", async () => {
   try {
     const { installer, entrypoint } = await installedRuntime(temporary);
     await writeFile(entrypoint, "tampered-before-first-lookup");
-    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
-    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
+    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for juling\.exe/u);
+    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for juling\.exe/u);
     const stats = installer.verificationStats();
     assert.equal(stats.contentHashes, 2);
     assert.equal(stats.cacheHits, 0);

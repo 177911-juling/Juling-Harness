@@ -4,7 +4,7 @@ import { chmod, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile 
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
-import { RuntimeInstaller, RuntimeInstallationReferencedError, type RuntimeInstallerOptions } from "../src/index.js";
+import { RuntimeInstaller, RuntimeInstallationReferencedError, runtimeEntrypointFor, type RuntimeInstallerOptions } from "../src/index.js";
 
 const passingSelfCheck = { run: async () => undefined };
 const { privateKey: signingKey, publicKey } = generateKeyPairSync("ed25519");
@@ -36,7 +36,7 @@ async function artifact(
 ): Promise<string> {
   const directory = join(parent, `artifact-${version}`);
   await mkdir(directory);
-  const entrypoint = platform.startsWith("win32-") ? "juling.exe" : "omp";
+  const entrypoint = runtimeEntrypointFor(platform);
   await writeFile(join(directory, entrypoint), content);
   const manifest = `${JSON.stringify({
       runtimeVersion: version,
@@ -102,11 +102,11 @@ test("rollback rejects a corrupt previous entrypoint and preserves current.json 
     await installer.activate("v1", { selfCheck: passingSelfCheck });
     await installer.activate("v2", { selfCheck: passingSelfCheck });
     const pointer = await readFile(join(root, "current.json"));
-    await writeFile(join(root, "versions", "v1", "omp.exe"), "tampered-after-install");
+    await writeFile(join(root, "versions", "v1", "juling.exe"), "tampered-after-install");
 
     await assert.rejects(
       () => installer.rollback({ selfCheck: passingSelfCheck }),
-      /Checksum mismatch for omp\.exe/u,
+      /Checksum mismatch for juling\.exe/u,
     );
     assert.deepEqual(await readFile(join(root, "current.json")), pointer);
     assert.deepEqual((await readdir(join(root, "versions"))).sort(), ["v1", "v2"]);
@@ -134,7 +134,7 @@ test("managed launch lookup rejects an executable changed after activation", asy
   await installer.install(await artifact(temporary, "v1"));
   await installer.activate("v1", { selfCheck: passingSelfCheck });
   await writeFile(join(root, "versions", "v1", "juling.exe"), "replaced executable");
-  await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
+  await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for juling\.exe/u);
 });
 
 test("same-version reinstall repairs corrupt bytes without losing the rollback pointer", async () => {

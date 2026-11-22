@@ -77,6 +77,6 @@ it("still opens a linked file when the file scope preference cannot be read", as
   vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new DOMException("blocked", "SecurityError"); });
   render(source.ui());
   const pane = await screen.findByTestId("source-file");
-  fireEvent.click(within(pane).getByRole("button", { name: "打开相对链接" }));
+  fireEvent.click(within(pane).getByRole("link", { name: "打开相对链接" }));
   await waitFor(() => expect(Object.values(source.source.getSnapshot().layout.fileViews).some(file => file.path === "linked.md")).toBe(true));
 });

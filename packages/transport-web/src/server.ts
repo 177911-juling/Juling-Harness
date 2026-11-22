@@ -136,10 +136,8 @@ export class LoopbackWebAdapter {
         const sid = token(32), csrf = token(24);
         const s: Session = { contexts: new Map(), connections: new Set(), csrf, expiresAt: this.now() + this.#options.sessionTtlMs, scope: { scope: "all" }, outstanding: 0, revoked: false };
         this.#sessions.set(sid, s);
-        if (this.#options.mobile) {
-          s.expiry = setTimeout(() => void this.revoke(sid, s), this.#options.sessionTtlMs);
-          s.expiry.unref();
-        }
+        s.expiry = setTimeout(() => void this.revoke(sid, s), this.#options.sessionTtlMs);
+        s.expiry.unref();
         return json(res, 200, { csrf, expiresAt: s.expiresAt }, { "set-cookie": `harness_session=${encodeURIComponent(sid)}; HttpOnly; SameSite=Strict; Path=/${this.#options.mobile ? "; Secure" : ""}` });
       }
       if (path === "/api/v1/session" && req.method === "GET" && this.#options.mobile) {

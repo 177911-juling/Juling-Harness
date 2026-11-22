@@ -4,6 +4,19 @@
 
 这是 **功能 → 文件** 的地图，不是架构愿景。协议形状以类型为准，不在这里复述。搬家后改这一份，不要在 `AGENTS.md` 复制表格。
 
+## OMP Studio 0.2.5–0.2.8 应用层入口
+
+| 功能 | Renderer / 预览 | Desktop / Host / 协议 |
+| --- | --- | --- |
+| 手机访问 | `settings/MobileAccessSettings.tsx`、`mobile/{entry.tsx,mobile.css}`、`mobile.html`、`preview/fixtures.ts` 的 `PREVIEW_MOBILE_ACCESS` | `apps/desktop/src/mobile-{access,access-ipc,certificate,scope}.ts`、`transport-web` 的 mobile 模式与 `./browser` 导出、`preload.ts` 的 `julingHarnessMobileAccess` |
+| WSL 2 工作区 | `workspaces/{ExecutionTargets,ExecutionTargetPicker,SshPasswordDialog,SshPreparationDialog,sshParts}.tsx`、`preview/environmentCardPreview.ts` | `apps/desktop/src/remote/{wsl,wsl-paths,file-transfer,channel}.ts`、`platform/{path-probe,windows-volumes}.ts`、`workspace-shell-*` |
+| 会话引用 | `composer/{SessionReferences,SessionReferenceDialog,sessionReference}.tsx`、`preview` 会话 fixture | Host `history.locate`、`SessionHistoryMatch`（`client-contract/src/read-models.ts`） |
+| 已归档批量删除 | `history/{DeleteSessionDialog,useArchivedHistory,sessionDeletion}.tsx` | Host `session.deleteArchived`、`session-delete-service.ts`、`session-purge-maintenance.ts` |
+| 活动图标 / Advisor 批次 | `conversation/{ActivityGlyph,activityGlyphDrawing}.ts`、`conversation/advisorTranscript`、`preview/conversationFixtures.ts` | 会话事件投影（overlay `conversation-live-projector`、Host `session-archive-reader`） |
+| 表格 / Office 预览 | `files/{SpreadsheetPane,spreadsheet.worker,OfficePane,logDisplay}.tsx`、`fileTypes.ts` | `apps/desktop/src/{office-component,file-io,file-resources,file-viewer-shared}.ts` |
+| 统一反汇编 | `capabilities/Disassembler*`、`preview/disassemblerPreview.ts` | 协议 `contracts/disassembler.ts`；overlay `disassembler-protocol.ts`、`services/disassembler-service.ts`（在 OMP 19.0.1 Runtime 上启用；当前 pin 为空态） |
+| Plan 编辑 / 会话文件浮窗 | `deck/{PlanWorkspace,PlanSourceEditor,planDocument}.tsx`、`conversation/{SpillLink,markdownSource,toolOutputTail}`、`capabilities/{LocalFilesPane,ResourcesPane,ResourceTextView}.tsx` | 协议 `plan-review.ts`、`local-resources.ts`；overlay `services/resource-service.ts`（在 OMP 19.0.1 Runtime 上启用；当前 pin 隐藏） |
+
 ## OMP 18.19.0 适配入口
 
 | 功能 | Renderer / 预览 | Runtime / 协议 |

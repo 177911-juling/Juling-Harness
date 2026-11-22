@@ -2,7 +2,7 @@
 
 Juling Harness is the desktop workbench for Juling Runtime (OMP 18.20.2). It keeps conversations, subagents, tool calls, files, terminals, a browser and model configuration in one window, and every capability travels over the typed Harness Bridge instead of terminal scraping or synthetic keystrokes. It is built for long-running, multi-task coding work where several agents and sessions need to stay visible at once.
 
-Version 1.0.1 ships for Windows x64 and ARM64, macOS on Apple Silicon, and Linux x64. Every installer contains a signed Runtime and the native terminal, so end users do not need Node, Bun or Rust. You still need an OMP-compatible model provider: Harness reads the same `models.yml` and login flow as the OMP CLI and does not embed API keys.
+Version 1.1.0 ships for Windows x64 and ARM64, macOS on Apple Silicon, and Linux x64. Every installer contains a signed Runtime and the native terminal, so end users do not need Node, Bun or Rust. You still need an OMP-compatible model provider: Harness reads the same `models.yml` and login flow as the OMP CLI and does not embed API keys.
 
 ## Install
 

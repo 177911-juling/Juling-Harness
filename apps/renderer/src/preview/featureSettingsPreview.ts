@@ -65,7 +65,7 @@ export const PREVIEW_FEATURE_SETTINGS: FeatureSettingRow[] = [
   { key: "bash.gitGuard", value: false, source: "default" },
   { key: "worktree.onStart", value: "off", source: "default" },
   { key: "worktree.onExit", value: "keep", source: "default" },
-  { key: "composer.predictions", value: true, source: "default" },
+  { key: "composer.predictions", value: false, source: "default" },
   { key: "speech.speed", value: 1, source: "default" },
   { key: "tts.localSpeed", value: 1, source: "default" },
   { key: "gc.compress", value: false, source: "default" },

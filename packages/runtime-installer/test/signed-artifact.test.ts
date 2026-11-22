@@ -280,7 +280,7 @@ test("verifySignedArtifact rejects file checksum mismatch", async () => {
         requireCovered: (m) => ["runtime-manifest.json", m.entrypoint],
         trustedKeys,
       }),
-    /Checksum mismatch for omp\.exe/u,
+    /Checksum mismatch for juling\.exe/u,
   );
 });
 
