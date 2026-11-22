@@ -37,13 +37,13 @@ async function artifact(root, name, version = identity.runtimeVersion, marker = 
     capabilityHash: "fixture",
     commandManifestHash: "fixture",
     platform: identity.platform,
-    entrypoint: "omp.exe",
+    entrypoint: "juling.exe",
     channel: "stable",
   });
-  const checksums = JSON.stringify({ algorithm: "sha256", files: { "omp.exe": sha256(executable), "runtime-manifest.json": sha256(manifest) } });
+  const checksums = JSON.stringify({ algorithm: "sha256", files: { "juling.exe": sha256(executable), "runtime-manifest.json": sha256(manifest) } });
   const payload = Buffer.concat([Buffer.from(manifest), Buffer.from("\0"), Buffer.from(checksums)]);
   await Promise.all([
-    writeFile(join(directory, "omp.exe"), executable),
+    writeFile(join(directory, "juling.exe"), executable),
     writeFile(join(directory, "runtime-manifest.json"), manifest),
     writeFile(join(directory, "checksums.json"), checksums),
     writeFile(join(directory, "runtime-signature.json"), JSON.stringify({ algorithm: "ed25519", keyId: "test-key", payloadSha256: sha256(payload), signature: sign(null, payload, privateKey).toString("base64url") })),
@@ -59,7 +59,7 @@ test("production preview accepts only an intact signed Runtime for the required 
   const trusted = { "test-key": key };
   assert.equal((await matchingPreviewArtifact(valid, identity, trusted)).manifest.runtimeVersion, identity.runtimeVersion);
   await assert.rejects(matchingPreviewArtifact(stale, identity, trusted), /does not match series/);
-  await writeFile(join(valid, "omp.exe"), "changed after signing");
+  await writeFile(join(valid, "juling.exe"), "changed after signing");
   await assert.rejects(matchingPreviewArtifact(valid, identity, trusted), /Checksum mismatch/);
 });
 

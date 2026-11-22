@@ -13,7 +13,7 @@ This repository implements the pre-frontend backend foundation described by the 
 - `packages/runtime-installer`: Ed25519 artifact verification, checksum verification, stable/canary channels, versioned installation, atomic activation, rollback, uninstall protection, and reference-aware retention.
 - `omp-patch`: pinned upstream identity plus the Harness fork covering `harness-host`, session-origin classification, authenticated Bridge transport, snapshot recovery, Runtime arbitration, shared session controls, loop/tree/fork modes, Remote InteractionPort Ask re-answer, Plan-role model transitions, remote agent/job operations, graceful shutdown, a fail-closed Live control plane, canonical command-manifest conformance, conversation/transcript projection, and session telemetry. See `omp-patch/README.md` for the overlay/seam split and the capability history.
 
-The Windows artifacts keep separate names: `omp.exe` is the patched CLI/Runtime, while `juling-harness.exe` remains reserved for the future desktop application. No renderer, desktop shell, or GUI Pause Bar is integrated by this phase.
+The Windows artifacts keep separate names: `juling.exe` is the patched CLI/Runtime, while `juling-harness.exe` remains reserved for the future desktop application. No renderer, desktop shell, or GUI Pause Bar is integrated by this phase.
 
 WP-013 is implemented on the Host side: generic request/receipt correlation, Runtime command-id rebinding, fsync-backed ledger recovery, terminal-receipt-tail reconciliation, Host `commitSeq` publications, automatic `outcome_unknown` fencing after disconnect/process exit, and a concrete Node child-process port with containment, readiness, and graceful-shutdown gates.
 
@@ -21,7 +21,7 @@ WP-014 and the backend half of WP-020 provide Host and Runtime control leases, g
 
 The Live backend exposes `live.start`/`live.stop`, lifecycle projection, shutdown ordering, and an injectable media-session boundary. Without the future desktop audio sideband, `live.start` fails closed with `CAPABILITY_UNAVAILABLE`; it never reports a fake active session. Tree Ask re-answer and Plan-role model switching are now stable Runtime capabilities. The Runtime remains truthfully graded `limited` only for frontend-owned Live media and the undefined Loop token-limit semantic; count/time Loop limits are supported.
 
-Production artifacts must be regenerated with the release Ed25519 private key. Packaging now probes the just-built `omp.exe`, verifies its authenticated command manifest, snapshot smoke check, and graceful shutdown, and writes those live hashes into the signed installation manifest; stale or reconstructed command hashes fail closed. The repository intentionally contains no production signing key and will not accept unsigned artifacts.
+Production artifacts must be regenerated with the release Ed25519 private key. Packaging now probes the just-built `juling.exe`, verifies its authenticated command manifest, snapshot smoke check, and graceful shutdown, and writes those live hashes into the signed installation manifest; stale or reconstructed command hashes fail closed. The repository intentionally contains no production signing key and will not accept unsigned artifacts.
 
 The test runtime under `packages/harness-host/test/support` is only a protocol/host fixture. It must never be packaged or classified as a Full Parity Runtime.
 

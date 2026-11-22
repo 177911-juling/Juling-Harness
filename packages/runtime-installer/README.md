@@ -7,11 +7,11 @@ channel metadata, and reference-safe retention.
 ## Artifact contract (WP-002)
 
 `scripts/runtime-artifact.mjs` (run by `npm run omp:build:host` after the
-`omp.exe` build and `--smoke-test` succeed, or standalone via
+`juling.exe` build and `--smoke-test` succeed, or standalone via
 `npm run omp:artifact`) emits a complete installable artifact per build into
 `packages/runtime-installer/dist/artifacts/<platform>/<runtimeVersion>/`:
 
-- the built entrypoint binary (`omp.exe`);
+- the built entrypoint binary (`juling.exe`);
 
 - `runtime-manifest.json` — `RuntimeInstallationManifest` fields from
   `@juling-harness/harness-protocol`: `runtimeVersion`, `upstreamVersion`,
@@ -19,10 +19,10 @@ channel metadata, and reference-safe retention.
   `capabilityHash`, `commandManifestHash`, `platform`, `entrypoint`.
   The `channel` field is either `stable` or `canary`.
   `platform` is `<os>-<arch>` (for example `win32-x64`); the contract has no
-  separate `arch` field. The managed Runtime CLI is always `omp.exe`;
+  separate `arch` field. The managed Runtime CLI is always `juling.exe`;
   `juling-harness.exe` is rejected because it is reserved for the desktop app.
 - `checksums.json` — `sha256` digests covering every artifact file
-  (`omp.exe` and `runtime-manifest.json`).
+  (`juling.exe` and `runtime-manifest.json`).
 - `runtime-signature.json` — Ed25519 signature over the exact manifest bytes,
   a NUL separator, and the exact checksum bytes. The checksum manifest is thus
   signed without creating a circular checksum for the signature file.
@@ -70,7 +70,7 @@ self-check fails:
 
 Tests inject fake runners/spawn functions and never execute untrusted files.
 An opt-in real end-to-end check is `npm run omp:e2e:install` (requires a
-generated artifact and the built package; runs the real `omp.exe
+generated artifact and the built package; runs the real `juling.exe
 --smoke-test`).
 
 Artifact generation requires `OMP_RUNTIME_SIGNING_KEY` (a PEM/DER Ed25519
@@ -86,6 +86,6 @@ the two newest stable versions and all referenced versions.
 npm run typecheck -w @juling-harness/runtime-installer
 npm test -w @juling-harness/runtime-installer
 npm run omp:test:metadata        # light metadata tests for scripts/runtime-artifact.mjs
-npm run omp:build:host           # build omp.exe + smoke + generate artifact metadata
+npm run omp:build:host           # build juling.exe + smoke + generate artifact metadata
 npm run omp:e2e:install          # opt-in real E2E (install + activate + real self-check)
 ```

@@ -141,7 +141,7 @@
 
    - 使用已有本地开发签名密钥；若不存在，运行 `npm run omp:keys` 生成本地密钥，禁止备份或提交私钥。
    - 执行 `npm run omp:build:host`。
-   - 构建必须通过 `omp.exe --version`、`--smoke-test`、Harness Hello、command manifest、graceful shutdown 和签名制品生成。
+   - 构建必须通过 `juling.exe --version`、`--smoke-test`、Harness Hello、command manifest、graceful shutdown 和签名制品生成。
    - 运行 `npm run omp:e2e:install`，验证签名、checksum、安装、激活与回滚路径。
 
 5. 最终身份断言：

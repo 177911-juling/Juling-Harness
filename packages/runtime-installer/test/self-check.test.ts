@@ -33,11 +33,11 @@ test("smoke-test runner spawns the entrypoint with --smoke-test and resolves on 
   const calls: SpawnCall[] = [];
   const child = fakeChild();
   const runner = createSmokeTestRunner({ spawn: recordingSpawn(calls, child), env: { TEST_ENV: "1" } });
-  const completed = runner.run("C:\\runtimes\\v1\\omp.exe");
+  const completed = runner.run("C:\\runtimes\\v1\\juling.exe");
   assert.equal(calls.length, 1);
   const call = calls[0];
   assert.ok(call);
-  assert.equal(call.command, "C:\\runtimes\\v1\\omp.exe");
+  assert.equal(call.command, "C:\\runtimes\\v1\\juling.exe");
   assert.deepEqual(call.args, ["--smoke-test"]);
   assert.deepEqual(call.options.stdio, ["ignore", "pipe", "pipe"]);
   assert.equal(call.options.windowsHide, true);

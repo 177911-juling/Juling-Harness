@@ -1,6 +1,6 @@
 {
   "name": "@juling-harness/renderer",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Shared Juling Harness renderer: pure-browser React surface over the semantic HarnessClient contract",
@@ -25,10 +25,10 @@
     "@fontsource/inter": "5.2.5",
     "@fontsource/jetbrains-mono": "5.2.5",
     "@fontsource/space-grotesk": "5.2.5",
-    "@juling-harness/client": "1.0.1",
-    "@juling-harness/client-contract": "1.0.1",
-    "@juling-harness/harness-protocol": "1.0.1",
-    "@juling-harness/transport-desktop": "1.0.1",
+    "@juling-harness/client": "1.1.0",
+    "@juling-harness/client-contract": "1.1.0",
+    "@juling-harness/harness-protocol": "1.1.0",
+    "@juling-harness/transport-desktop": "1.1.0",
     "@lezer/highlight": "^1.2.3",
     "@tanstack/react-virtual": "^3.14.10",
     "@xterm/addon-fit": "^0.11.0",
@@ -48,10 +48,11 @@
     "three": "0.186.1",
     "x_ite": "16.4.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "@juling-harness/transport-web": "1.1.0"
   },
   "devDependencies": {
-    "@juling-harness/testkit": "1.0.1",
+    "@juling-harness/testkit": "1.1.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.1.0",

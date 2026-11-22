@@ -37,7 +37,7 @@
 |---|---|---|---|---|---|
 | 1 | **mermaid 3.25 MB 被首屏 `modulepreload`**：Vite 的 `__vitePreload` helper 未被 `manualChunks` 显式归属，Rollup 把它并进了 mermaid chunk，entry 因此静态依赖整个 chunk | `apps/renderer/dist/index.html` 预加载 6 个 chunk；`dist/assets/index-*.js` 首行 `import{_ as ..}from"./mermaid-*.js"`，mermaid chunk 末尾 `export{Kt as _,..}`，`Kt` 就是 preload helper | 首屏需解析的 JS 6.76 MiB 里 46% 是绝大多数会话永远用不到的图表引擎；HDD/低配机上是纯等待 | 首屏 JS **−3.1 MiB（−47%）** | 一行 `manualChunks` 改动，低 |
 | 2 | **窗口在 Host + Runtime 完全就绪后才创建**：`hostFactory.create()`（含 Runtime 探针 + 会话启动 + 4 次全文件哈希 + `whoami`/`icacls` 子进程）跑完才 `createWindow()` | `apps/desktop/src/composition.ts:184→192`；启动链路见 §3.1；实测 dev-unpackaged 形态窗口 771 ms 可见、可交互 1.4 s，真实安装态 Host 段另有 1.9–4.0 s | 点图标后先「什么都没发生」，再一次性出窗；这段是纯串行 | 冷启动关键路径 **−40%~65%** | 中：引入 lazy facade + `host-ready`，中 |
-| 3 | **每次启动现场跑一遍完整 Runtime 探针，并把 173.8 MB 的 `omp.exe` 完整 SHA-256 至少 4 次** | `packages/harness-host/src/runtime-resolver.ts:319/350/359`；`packages/runtime-installer/src/installer.ts:363`；`apps/desktop/src/update-coordinator.ts:107`；实测 `omp.exe` 165.8 MiB，本机 sha256 中位 **90 ms**（快盘快 CPU） | 探针起停 0.65–1.95 s + 哈希 0.36 s（本机）；HDD/Defender 机器上哈希放大 3–10× | **−1~3 s**（低配更明显） | 中高：需安全评审，缓存签名证据 |
+| 3 | **每次启动现场跑一遍完整 Runtime 探针，并把 173.8 MB 的 `juling.exe` 完整 SHA-256 至少 4 次** | `packages/harness-host/src/runtime-resolver.ts:319/350/359`；`packages/runtime-installer/src/installer.ts:363`；`apps/desktop/src/update-coordinator.ts:107`；实测 `juling.exe` 165.8 MiB，本机 sha256 中位 **90 ms**（快盘快 CPU） | 探针起停 0.65–1.95 s + 哈希 0.36 s（本机）；HDD/Defender 机器上哈希放大 3–10× | **−1~3 s**（低配更明显） | 中高：需安全评审，缓存签名证据 |
 | 4 | **首屏 7 个 query 查两遍**：`bootstrap` 后 6 个 `allSettled`，紧接着 `resyncRuntimeModel` 又查 7 个（含 `history.list` 目录扫描） | `apps/renderer/src/App.tsx:9169-9176` 与 `:9209-9218` + `:498-518` | 首屏「数据齐」多付一次最慢 query 的 RTT | 少 7 次往返 | 低 |
 | 5 | **一次击键触发 3–4 棵巨型子树重渲 + 1 次 IPC**：`setComposerDraftsBySession` 落在 AppShell（33 个 `useState`），Sidebar/Topbar/WorkbenchCanvas 均无 `memo`；`draft` 变化还会调用 `conversationViewLeases.block()` → 跨进程 IPC | `composer/ChipComposer.tsx:500/176-211`、`App.tsx:5958/6531`、`App.tsx:4397-4402`、`conversation/conversationViews.ts:20-37` | 中文/长文输入延迟；4x 降速下单键 30–80 ms，直接破帧 | 击键主线程 **−60~80%** | 中小，草稿语义要重设计 |
 | 6 | **零懒加载**：全库仅 1 处 `React.lazy`；`App.tsx` 静态 import 129 个本地模块，包含全部页面；xterm(326 KiB)/codemirror(387 KiB) 被静态链拖进启动图 | `App.tsx:85-89,141-142,151`；`TerminalPane.tsx:14-16`；`ModelConfigPage.tsx:52`；`SubagentsPanel.tsx:21` | 首屏 parse/compile 多付 713 KiB 用不到的 vendor + 页面代码 | 首屏 JS **−0.7 MB**（xterm/codemirror）**+ entry −0.4~0.6 MB** | 小-中，注意模块级 intent setter |
@@ -153,9 +153,9 @@ Electron main 加载
 │   │   ├─ privateEndpoint.createCurrentUserOnly()
 │   │   │     └─ whoami.exe + icacls.exe 子进程                  host-factory.ts:387-423
 │   │   ├─ backend.resolve() → 探针 Runtime #1
-│   │   │     ├─ sha256(omp.exe) 173.8MB                        runtime-resolver.ts:319
+│   │   │     ├─ sha256(juling.exe) 173.8MB                        runtime-resolver.ts:319
 │   │   │     ├─ spawn → hello → snapshot → manifest → shutdown  runtime-resolver.ts:350/768-808
-│   │   │     └─ sha256(omp.exe) 再来一次                        runtime-resolver.ts:359
+│   │   │     └─ sha256(juling.exe) 再来一次                        runtime-resolver.ts:359
 │   │   └─ runtimeSession.start() → Runtime #2
 │   │         └─ currentManifest() → 再次校验 173.8MB 入口文件    runtime-session.ts:1323
 │   └─ await createWindow()                                    composition.ts:192
@@ -194,7 +194,7 @@ Electron main 加载
 ### 3.3 S2【P0】启动期重复验证：探针 + 4 次全文件哈希
 
 - 探针：`resolveRuntime` 每次启动都会 spawn 一个完整 Runtime、等 hello、请求 snapshot 与 commandManifest、再 `shutdown()` 等退出（grace 10 s），且**不缓存结论**（`runtime-resolver.ts:296-380`、`:642-837`）。
-- 哈希：`fingerprintExecutable` 是**整文件流式 sha256**（`:231-235`）；启动路径上至少 4 次：探针前后各 1 次、`runtimeSession.launch` 的 `currentManifest()` 1 次、`updateCoordinator.initialize()` 1 次。实测 `omp.exe` 165.8 MiB，本机 sha256 中位 90 ms（`node:crypto`，NVMe）→ 本机 ~0.36 s，但这是**快机快盘**；HDD + Defender 实时扫描下 4×173 MB 的顺序读可达 2–5 s。
+- 哈希：`fingerprintExecutable` 是**整文件流式 sha256**（`:231-235`）；启动路径上至少 4 次：探针前后各 1 次、`runtimeSession.launch` 的 `currentManifest()` 1 次、`updateCoordinator.initialize()` 1 次。实测 `juling.exe` 165.8 MiB，本机 sha256 中位 90 ms（`node:crypto`，NVMe）→ 本机 ~0.36 s，但这是**快机快盘**；HDD + Defender 实时扫描下 4×173 MB 的顺序读可达 2–5 s。
 
 修法（VS Code `product.json`/`--status` 思路：信任安装时证据，而不是每次启动重验）：
 1. `activate()` 成功时把探针证据（hello 关键字段 + commandManifest 哈希 + exe sha256 + platform/arch + runtimeVersion）写成签名文件；
@@ -581,7 +581,7 @@ renderer 的 22 个 `setInterval` 中只有 2 处按 `document.hidden` 门控（
 | 实测探针（可复现） | `scripts/perf-audit/{startup-probe,idle-probe,throttle-probe,prepare-packaged-form}.mjs`、`scripts/perf-audit/lib/{collect.mjs,main-hook.cjs}`、`scripts/perf-audit/README.md` |
 | 首屏体积/预加载 | `apps/renderer/dist/index.html`、CDP Network 复测（7 个 script = 7,083,976 B），mermaid chunk = 3,246,999 B |
 | 首屏 gzip 体积 | `gzip -9` 实测：index 661 KB / vendor 207 KB / mermaid 874 KB / codemirror 129 KB / xterm 84 KB / react 60 KB（合计 1.95 MiB） |
-| Runtime 体积与哈希 | `%APPDATA%\juling-harness\runtimes\versions\18.0.11-harness.5\omp.exe` = 173,815,296 B；本机 sha256 中位 90 ms（3 次 86/92/90 ms） |
+| Runtime 体积与哈希 | `%APPDATA%\juling-harness\runtimes\versions\18.0.11-harness.5\juling.exe` = 173,815,296 B；本机 sha256 中位 90 ms（3 次 86/92/90 ms） |
 | 本机启动区段 | `%APPDATA%\juling-harness\logs\host-2026-10-2*.log` 的 `runtime.resolve` / `runtime.launch.begin` / `runtime.handshake.ok` / `runtime.launch.ready` |
 | 分支审查（合并前） | `outputs/perf-audit/branch-desktop-review.md`、`branch-renderer-review.md`、`branch-verify.md` |
 | 合并后复测原始数据 | `outputs/perf-audit/bench/raw/after2-startup.json`、`after2/after3-idle.json`、`after2/after4/after6-throttle*.json`；基线在 `raw/baseline-20261029/` |

@@ -36,7 +36,7 @@ async function artifact(
 ): Promise<string> {
   const directory = join(parent, `artifact-${version}`);
   await mkdir(directory);
-  const entrypoint = platform.startsWith("win32-") ? "omp.exe" : "omp";
+  const entrypoint = platform.startsWith("win32-") ? "juling.exe" : "omp";
   await writeFile(join(directory, entrypoint), content);
   const manifest = `${JSON.stringify({
       runtimeVersion: version,
@@ -120,7 +120,7 @@ test("activation verifies installed bytes before running any executable", async 
   const root = join(temporary, "installed");
   const installer = runtimeInstaller(root);
   await installer.install(await artifact(temporary, "v1"));
-  await writeFile(join(root, "versions", "v1", "omp.exe"), "tampered-after-install");
+  await writeFile(join(root, "versions", "v1", "juling.exe"), "tampered-after-install");
   let executed = false;
   await assert.rejects(() => installer.activate("v1", { selfCheck: { run: async () => { executed = true; } } }), /Checksum mismatch/u);
   assert.equal(executed, false);
@@ -133,7 +133,7 @@ test("managed launch lookup rejects an executable changed after activation", asy
   const installer = runtimeInstaller(root);
   await installer.install(await artifact(temporary, "v1"));
   await installer.activate("v1", { selfCheck: passingSelfCheck });
-  await writeFile(join(root, "versions", "v1", "omp.exe"), "replaced executable");
+  await writeFile(join(root, "versions", "v1", "juling.exe"), "replaced executable");
   await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
 });
 
@@ -149,9 +149,9 @@ test("same-version reinstall repairs corrupt bytes without losing the rollback p
   const pointer = await readFile(join(root, "current.json"), "utf8");
   await installer.install(source); // A healthy duplicate is idempotent.
   assert.equal(await readFile(join(root, "current.json"), "utf8"), pointer);
-  await writeFile(join(root, "versions", "v2", "omp.exe"), "broken");
+  await writeFile(join(root, "versions", "v2", "juling.exe"), "broken");
   await installer.install(source);
-  assert.equal(await readFile(join(root, "versions", "v2", "omp.exe"), "utf8"), "omp-v2");
+  assert.equal(await readFile(join(root, "versions", "v2", "juling.exe"), "utf8"), "omp-v2");
   assert.equal(await readFile(join(root, "current.json"), "utf8"), pointer);
   await installer.activate("v2", { selfCheck: passingSelfCheck });
   assert.equal((await installer.current())?.previousRuntimeVersion, "v1");
@@ -166,7 +166,7 @@ test("repair preserves referenced installations unless maintenance has stopped t
   const source = await artifact(temporary, "v1");
   await installer.install(source);
   await installer.install(source); // Healthy referenced copies need no replacement.
-  const entrypoint = join(root, "versions", "v1", "omp.exe");
+  const entrypoint = join(root, "versions", "v1", "juling.exe");
   await writeFile(entrypoint, "broken");
   await assert.rejects(() => installer.install(source), RuntimeInstallationReferencedError);
   assert.equal(await readFile(entrypoint, "utf8"), "broken");
@@ -183,10 +183,10 @@ test("a corrupt repair source never changes the installed bytes or active pointe
   await installer.install(source);
   await installer.activate("v1", { selfCheck: passingSelfCheck });
   const pointer = await readFile(join(root, "current.json"), "utf8");
-  await writeFile(join(root, "versions", "v1", "omp.exe"), "installed-broken");
-  await writeFile(join(source, "omp.exe"), "source-broken");
+  await writeFile(join(root, "versions", "v1", "juling.exe"), "installed-broken");
+  await writeFile(join(source, "juling.exe"), "source-broken");
   await assert.rejects(() => installer.install(source), /Checksum mismatch/u);
-  assert.equal(await readFile(join(root, "versions", "v1", "omp.exe"), "utf8"), "installed-broken");
+  assert.equal(await readFile(join(root, "versions", "v1", "juling.exe"), "utf8"), "installed-broken");
   assert.equal(await readFile(join(root, "current.json"), "utf8"), pointer);
 });
 
@@ -207,7 +207,7 @@ test("prune preserves broken current, previous and externally referenced version
 test("WP-003 rejects a checksum mismatch", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "juling-harness-installer-bad-"));
   const source = await artifact(temporary, "bad");
-  await writeFile(join(source, "omp.exe"), "tampered");
+  await writeFile(join(source, "juling.exe"), "tampered");
   await assert.rejects(() => runtimeInstaller(join(temporary, "installed")).install(source), /Checksum mismatch/u);
 });
 
@@ -253,7 +253,7 @@ test("WP-062 currentManifest reports the active installation read-only", async (
   assert.equal(installed.record.runtimeVersion, "v1");
   assert.equal(installed.manifest.runtimeVersion, "v1");
   assert.equal(installed.manifest.profile, "full-parity-v1");
-  assert.equal(installed.entrypointPath, join(temporary, "installed", "versions", "v1", "omp.exe"));
+  assert.equal(installed.entrypointPath, join(temporary, "installed", "versions", "v1", "juling.exe"));
   assert.equal((await installer.current())?.runtimeVersion, "v1");
 });
 
@@ -282,7 +282,7 @@ test("WP-003 activation self-check runs on the installed entrypoint before curre
     selfCheck: { run: async (entrypointPath) => { checked.push(entrypointPath); } },
   });
   assert.equal(checked.length, 1);
-  assert.equal(checked[0], join(temporary, "installed", "versions", "v1", "omp.exe"));
+  assert.equal(checked[0], join(temporary, "installed", "versions", "v1", "juling.exe"));
   assert.equal((await installer.current())?.runtimeVersion, "v1");
 });
 
@@ -309,7 +309,7 @@ test("WP-003 failed activation self-check preserves current and quarantines the 
   const quarantineName = quarantined[0];
   assert.ok(quarantineName);
   await readFile(join(temporary, "installed", "versions", quarantineName, "runtime-manifest.json"));
-  await readFile(join(temporary, "installed", "versions", quarantineName, "omp.exe"));
+  await readFile(join(temporary, "installed", "versions", quarantineName, "juling.exe"));
 });
 
 test("WP-003 self-check failure never quarantines a Runtime referenced by current.json", async () => {
@@ -327,7 +327,7 @@ test("WP-003 self-check failure never quarantines a Runtime referenced by curren
   );
 
   assert.equal((await installer.current())?.runtimeVersion, "v1");
-  await readFile(join(temporary, "installed", "versions", "v1", "omp.exe"));
+  await readFile(join(temporary, "installed", "versions", "v1", "juling.exe"));
   assert.deepEqual(
     (await readdir(join(temporary, "installed", "versions"))).filter((name) => name.startsWith(".quarantine-")),
     [],
@@ -339,7 +339,7 @@ test("WP-003 requires checksums for the manifest and entrypoint", async () => {
   const source = await artifact(temporary, "missing-manifest-checksum");
   const digest = createHash("sha256").update("omp-missing-manifest-checksum").digest("hex");
   const manifest = await readFile(join(source, "runtime-manifest.json"), "utf8");
-  const checksums = `${JSON.stringify({ algorithm: "sha256", files: { "omp.exe": digest } })}\n`;
+  const checksums = `${JSON.stringify({ algorithm: "sha256", files: { "juling.exe": digest } })}\n`;
   await writeFile(join(source, "checksums.json"), checksums);
   await writeSignature(source, manifest, checksums);
   await assert.rejects(
@@ -355,7 +355,7 @@ test("SEC-005 rejects a symlinked Runtime entrypoint", async (context) => {
   await mkdir(source);
   await writeFile(outside, "external-binary");
   try {
-    await symlink(outside, join(source, "omp.exe"), "file");
+    await symlink(outside, join(source, "juling.exe"), "file");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EPERM") {
       context.skip("Windows developer mode is required to create a file symlink");
@@ -373,14 +373,14 @@ test("SEC-005 rejects a symlinked Runtime entrypoint", async (context) => {
     capabilityHash: "capability-fixture",
     commandManifestHash: "command-fixture",
     platform: "win32-x64",
-    entrypoint: "omp.exe",
+    entrypoint: "juling.exe",
     channel: "stable",
   })}\n`;
   await writeFile(join(source, "runtime-manifest.json"), manifest);
   const checksums = `${JSON.stringify({
       algorithm: "sha256",
       files: {
-        "omp.exe": createHash("sha256").update("external-binary").digest("hex"),
+        "juling.exe": createHash("sha256").update("external-binary").digest("hex"),
         "runtime-manifest.json": createHash("sha256").update(manifest).digest("hex"),
       },
     })}\n`;
@@ -443,14 +443,14 @@ test("prepareStaging runs on the private staged copy before it is verified and p
   assert.equal(seen[0]!.published, false);
   assert.equal(dirname(seen[0]!.directory), join(root, "versions"));
   assert.match(basename(seen[0]!.directory), /^\.staging-v1-[0-9a-f]+$/u);
-  assert.equal(await readFile(join(root, "versions", "v1", "omp.exe"), "utf8"), "omp-v1");
+  assert.equal(await readFile(join(root, "versions", "v1", "juling.exe"), "utf8"), "omp-v1");
 });
 
 test("a staging fix-up that changes bytes fails verification and publishes nothing", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "juling-harness-installer-prepare-tamper-"));
   const root = join(temporary, "installed");
   const installer = runtimeInstaller(root, {
-    prepareStaging: async (directory) => { await writeFile(join(directory, "omp.exe"), "changed"); },
+    prepareStaging: async (directory) => { await writeFile(join(directory, "juling.exe"), "changed"); },
   });
   const source = await artifact(temporary, "v1");
   await assert.rejects(() => installer.install(source));

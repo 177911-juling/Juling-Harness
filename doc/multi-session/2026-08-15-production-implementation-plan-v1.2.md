@@ -127,8 +127,8 @@ Harness Session Broker
   |- RuntimeScheduler
   |- ClientAttachmentManager
   `- Observability
-       -> RuntimeBinding A -> HarnessBridgeClient A -> omp.exe A
-       -> RuntimeBinding B -> HarnessBridgeClient B -> omp.exe B
+       -> RuntimeBinding A -> HarnessBridgeClient A -> juling.exe A
+       -> RuntimeBinding B -> HarnessBridgeClient B -> juling.exe B
        -> Session C dormant
 ```
 

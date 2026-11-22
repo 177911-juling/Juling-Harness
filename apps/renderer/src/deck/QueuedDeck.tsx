@@ -10,6 +10,7 @@ import { NO_ASK_ANSWER, type AskHeader, type DeckAskAnswer, type DeckAskQuestion
 import type { SlideDir } from "../pageTransition";
 import type { FormSubmitValue } from "@juling-harness/harness-protocol";
 import { FormCard } from "./FormCard";
+import { QuestionHeightHandle } from "./QuestionHeightHandle";
 import type { FormSession } from "./FormSession";
 import { useI18n } from "../i18n/I18nContext";
 
@@ -102,6 +103,8 @@ export function QueuedDeck({
   onPlanExpandedChange,
   planOriginRef,
   onCurrentKind,
+  readAskDraft,
+  skipSignal,
   onAskSubmit,
   onAskCancel,
   onFormRespond,
@@ -119,6 +122,8 @@ export function QueuedDeck({
   readonly planExpanded?: boolean;
   readonly onPlanExpandedChange?: (open: boolean) => void;
   readonly planOriginRef?: RefObject<HTMLElement | null>;
+  readonly readAskDraft?: ((answers: Readonly<Record<string, DeckAskAnswer>>) => void) | undefined;
+  readonly skipSignal?: number | undefined;
   readonly onCurrentKind?: (kind: "plan" | "ask" | null) => void;
   readonly onAskSubmit?: (item: QueuedAskItem, answer: DeckAskAnswer) => boolean | Promise<boolean>;
   readonly onAskCancel?: (item: QueuedAskItem) => boolean | Promise<boolean>;
@@ -136,6 +141,7 @@ export function QueuedDeck({
   const presentedForms = useRef(new Set<string>());
   const [pos, setPos] = useState(0);
   const posRef = useRef(pos);
+  const previousSkip = useRef(skipSignal);
   const [answers, setAnswers] = useState<Readonly<Record<string, DeckAskAnswer>>>({});
   const [swap, setSwap] = useState<DeckSwap | null>(null);
   const [busy, setBusy] = useState(false);
@@ -239,7 +245,9 @@ export function QueuedDeck({
     const anchor = deck?.parentElement;
     if (!current || !deck || !area || !anchor) return;
     const update = () => {
-      const available = anchor.getBoundingClientRect().bottom - area.getBoundingClientRect().top - 16;
+      // Use the positioned bottom edge, including the offset above an active composer.
+      const bottom = anchor.getBoundingClientRect().bottom - Number.parseFloat(getComputedStyle(deck).bottom);
+      const available = bottom - area.getBoundingClientRect().top - 8;
       deck.style.setProperty("--deck-max-height", `${Math.max(64, available)}px`);
     };
     update();
@@ -361,6 +369,13 @@ export function QueuedDeck({
     setRemaining(next);
   }, [askPhase, beginSwap]);
 
+  useEffect(() => { readAskDraft?.(answers); }, [answers, readAskDraft]);
+  useEffect(() => {
+    if (skipSignal === previousSkip.current) return;
+    previousSkip.current = skipSignal;
+    if (current && current.kind !== "plan") drop(current.id);
+  }, [skipSignal, current, drop]);
+
   const dismissAsk = useCallback(async (item: QueuedAskItem, reason: "submit" | "cancel", chosen?: DeckAskAnswer) => {
     if (actionsLocked || (reason === "submit" && attachmentBusy)) return;
     if (reason === "submit" && onAskSubmit) {
@@ -446,6 +461,7 @@ export function QueuedDeck({
         <div ref={stageRef} className={`dk-stage${lockSmooth("stage")}`} style={lockStyle("stage")}>
           {current.kind === "plan" ? (
             <PlanCard
+              key={current.id}
               title={current.title}
               body={current.body}
               {...(demo === true ? { demo: true } : {})}
@@ -461,6 +477,7 @@ export function QueuedDeck({
             />
           ) : current.kind === "form" ? null : (
             <div className="ask-card">
+              <QuestionHeightHandle visible={!collapsed} />
               {/* 标题行：队列位置与胶囊高亮始终是当前卡的，不随离场正文回退 */}
               <AskHead
                 {...(demo === true ? { demo: true } : {})}

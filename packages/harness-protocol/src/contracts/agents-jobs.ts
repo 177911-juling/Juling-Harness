@@ -39,6 +39,9 @@ export interface HarnessAgentUsage {
 }
 
 export interface HarnessAgentSnapshot {
+  waitingOn?: string[];
+  waiters?: Array<{ waiter: string; since: number; via: string[] }>;
+  peer?: boolean;
   agentId: AgentId;
   generation: Generation;
   parentAgentId?: AgentId;

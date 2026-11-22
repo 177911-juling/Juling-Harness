@@ -68,14 +68,14 @@ test("a Linux Runtime archive preserves bytes and is a desktop update target", a
 });
 test("Runtime archive entrypoint must agree with the manifest platform", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-mismatch-"));
-  const wrong = await archiveSource(root, "darwin-arm64", "omp.exe");
+  const wrong = await archiveSource(root, "darwin-arm64", "juling.exe");
   await assert.rejects(() => createRuntimeArchive(wrong, join(root, "wrong.zip")), /does not match/);
-  const manifest = new TextEncoder().encode(JSON.stringify({ platform: "win32-x64", entrypoint: "omp.exe" }));
+  const manifest = new TextEncoder().encode(JSON.stringify({ platform: "win32-x64", entrypoint: "juling.exe" }));
   const bytes = (name: string) => new TextEncoder().encode(name);
   for (const [name, archive] of [
     ["swapped", zipSync({ "checksums.json": bytes("c"), omp: bytes("x"), "runtime-manifest.json": manifest, "runtime-signature.json": bytes("s") }, { level: 0 })],
     ["unsupported", zipSync({ "checksums.json": bytes("c"), omp: bytes("x"), "runtime-manifest.json": new TextEncoder().encode(JSON.stringify({ platform: "freebsd-x64", entrypoint: "omp" })), "runtime-signature.json": bytes("s") }, { level: 0 })],
-    ["two-entrypoints", zipSync({ "checksums.json": bytes("c"), omp: bytes("x"), "omp.exe": bytes("x"), "runtime-manifest.json": manifest }, { level: 0 })],
+    ["two-entrypoints", zipSync({ "checksums.json": bytes("c"), omp: bytes("x"), "juling.exe": bytes("x"), "runtime-manifest.json": manifest }, { level: 0 })],
     ["finder", zipSync({ ".DS_Store": bytes("d") }, { level: 0 })],
   ] as const) {
     const path = join(root, `${name}.zip`); await writeFile(path, archive);
@@ -126,7 +126,7 @@ test("a signed field the client does not understand fails at check time, not aft
 });
 test("Runtime archive refuses path traversal, compressed entries and missing files", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-bad-zip-"));
-  for (const [name, bytes] of [["traversal", zipSync({ "../omp.exe": new Uint8Array([1]) }, { level: 0 })], ["compressed", zipSync({ "omp.exe": new Uint8Array(512) })], ["missing", zipSync({ "omp.exe": new Uint8Array([1]) }, { level: 0 })]] as const) {
+  for (const [name, bytes] of [["traversal", zipSync({ "../juling.exe": new Uint8Array([1]) }, { level: 0 })], ["compressed", zipSync({ "juling.exe": new Uint8Array(512) })], ["missing", zipSync({ "juling.exe": new Uint8Array([1]) }, { level: 0 })]] as const) {
     const path = join(root, `${name}.zip`); await writeFile(path, bytes);
     await assert.rejects(() => extractRuntimeArchive(path, join(root, name)), /archive/);
   }

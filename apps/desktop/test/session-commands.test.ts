@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import type { HostCatalogEntry, HostSessionCatalogProvider } from "@juling-harness/host-client-api";
 import { threadIdFor } from "@juling-harness/host-client-api";
-import type { HarnessSessionArchiveService, HarnessSessionDeleteService } from "@juling-harness/harness-host";
+import { SessionDeleteServiceError, type HarnessSessionArchiveService, type HarnessSessionDeleteService } from "@juling-harness/harness-host";
 import type { DesktopRuntimeSession, DesktopSessionSwitchIntent } from "../src/host-composition.js";
 import type { ThreadId } from "@juling-harness/harness-protocol";
 
@@ -170,6 +170,59 @@ test("delete reports native partial cleanup while still removing telemetry, bind
   assert.match(result.message ?? "", /native-purge-partial/);
   assert.match(result.message ?? "", /托管产物清理失败|Managed artifact cleanup failed/);
   assert.deepEqual(cleaned, ["artifacts", "telemetry", "binding", "lease"]);
+});
+
+test("direct deletion evacuates the target writer before touching its transcript", async () => {
+  const calls: string[] = [];
+  const commands = createDesktopSemanticCommands({
+    ...baseOptions,
+    evacuateResident: async id => { calls.push(`stop:${id}`); return { found: true }; },
+    deleteService: () => ({
+      delete: async (id: string) => {
+        calls.push(`delete:${id}`);
+        return { nativeCleanup: { status: "complete" } };
+      },
+    }) as unknown as HarnessSessionDeleteService,
+  });
+  await commands.delete!({ threadId: threadIdFor("session-a") });
+  assert.deepEqual(calls, ["stop:session-a", "delete:session-a"]);
+});
+
+test("an archive-only delete waits for a restore in another context and skips the restored session", async () => {
+  const sessionFileOperations = new Map<ThreadId, Promise<unknown>>();
+  const threadId = threadIdFor("session-a") as ThreadId;
+  let markRestoreStarted!: () => void;
+  const restoreStarted = new Promise<void>(resolve => { markRestoreStarted = resolve; });
+  let finishRestore!: () => void;
+  const pendingRestore = new Promise<void>(resolve => { finishRestore = resolve; });
+  let restored = false;
+  let deleted = false;
+  const first = createDesktopSemanticCommands({ ...baseOptions, sessionFileOperations,
+    archive: () => ({
+      unarchive: async () => {
+        markRestoreStarted();
+        await pendingRestore;
+        restored = true;
+      },
+    }) as unknown as HarnessSessionArchiveService,
+  });
+  const second = createDesktopSemanticCommands({ ...baseOptions, sessionFileOperations,
+    deleteService: () => ({
+      delete: async (_id: string, { archivedOnly }: { archivedOnly: boolean }) => {
+        if (restored && archivedOnly) throw new SessionDeleteServiceError("SESSION_NOT_ARCHIVED", "unarchived");
+        deleted = true;
+        return { nativeCleanup: { status: "complete" } };
+      },
+    }) as unknown as HarnessSessionDeleteService,
+    evacuateResident: async () => { throw new Error("Archive-only deletion cannot stop a resident"); },
+  });
+  const restore = first.unarchive!({ threadId });
+  await restoreStarted;
+  const deletion = assert.rejects(async () => second.deleteArchived!({ threadId }), { code: "INVALID_ARGUMENT", message: /unarchived/ });
+  finishRestore();
+  await restore;
+  await deletion;
+  assert.equal(deleted, false);
 });
 
 test("queue takeback retries a failed attachment promotion before acknowledging recovery", async () => {

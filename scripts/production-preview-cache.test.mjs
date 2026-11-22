@@ -15,8 +15,8 @@ import {
 } from "./production-preview-cache.mjs";
 
 const runtime = {
-  manifest: { runtimeVersion: "18.20.2-harness.9", entrypoint: "omp.exe" },
-  checksums: { files: { "omp.exe": "123456789abcdef" } },
+  manifest: { runtimeVersion: "18.20.2-harness.9", entrypoint: "juling.exe" },
+  checksums: { files: { "juling.exe": "123456789abcdef" } },
   keyId: "release", keys: { release: Buffer.from("public key") },
 };
 const options = { env: {}, platform: "win32", arch: "x64", nodeVersion: "v24.0.0" };
@@ -58,7 +58,7 @@ async function fixture(t) {
     "node_modules/electron/dist/electron.exe": "electron source",
     "node_modules/electron-winstaller/vendor/rcedit.exe": "editor",
     [`${electronDirectory}/Juling Harness.exe`]: "staged electron",
-    [`${electronDirectory}/runtime/versions/18.20.2-harness.9/omp.exe`]: "staged runtime",
+    [`${electronDirectory}/runtime/versions/18.20.2-harness.9/juling.exe`]: "staged runtime",
   })) await put(root, path, contents);
   return root;
 }
@@ -76,7 +76,7 @@ test("production preview reuses a complete build only while source and dependenc
   const ready = await inspectProductionPreviewCache(root, options);
   assert.equal(ready.hit, true);
   assert.equal(await reusableProductionPreviewElectron(root, ready.record, runtime), join(root, electronDirectory, "Juling Harness.exe"));
-  const newRuntime = { ...runtime, checksums: { files: { "omp.exe": "different" } } };
+  const newRuntime = { ...runtime, checksums: { files: { "juling.exe": "different" } } };
   assert.equal(await reusableProductionPreviewElectron(root, ready.record, newRuntime), undefined);
 
   await put(root, "apps/renderer/src/NewUntracked.tsx", "new source");
@@ -185,7 +185,7 @@ test("the production launcher builds once, reuses it, and rebuilds when source c
   await put(root, "scripts/preload-bundle.mjs", `import {writeFileSync} from 'node:fs'; export function bundlePreload(){writeFileSync('apps/desktop/dist/preload.cjs','preload');}`);
   await put(root, "scripts/production-preview-runtime.mjs", `
 import {mkdir,writeFile} from 'node:fs/promises'; import {join} from 'node:path';
-export async function prepareProductionPreviewRuntime(){return {directory:join(process.cwd(),'fixture-runtime'),stateDirectory:join(process.cwd(),'fixture-state'),manifest:{runtimeVersion:'1.0.0',entrypoint:'omp.exe'},checksums:{files:{'omp.exe':'1234'}},keyId:'fixture',keys:{fixture:Buffer.from('key')}};}
+export async function prepareProductionPreviewRuntime(){return {directory:join(process.cwd(),'fixture-runtime'),stateDirectory:join(process.cwd(),'fixture-state'),manifest:{runtimeVersion:'1.0.0',entrypoint:'juling.exe'},checksums:{files:{'juling.exe':'1234'}},keyId:'fixture',keys:{fixture:Buffer.from('key')}};}
 export async function stageProductionPreviewRuntime(runtime,directory){await mkdir(join(directory,'runtime'),{recursive:true});await writeFile(join(directory,'runtime','marker'),runtime.manifest.runtimeVersion);}
 `);
   await put(root, "fixture-build.cjs", `
