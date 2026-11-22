@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - 合入 OMP Studio 0.2.5–0.2.8：WSL 2 工作区、手机访问、统一反汇编工作台、Plan 源码/预览编辑、会话本地文件与日志浮窗、Ask 折叠与 BTW、会话 ID 引用、已归档批量删除、活动图标与 Advisor 批次折叠、`.xlsm`/`.xlsb`/`.ods` 与 `.docm`/`.pptm` 预览、SSH 准备与传输校验。
-- 模型目录随上游更新到 6,402 条，收录 Kiro、Modal、Bifrost 供应商定义；模型参数新增压缩形态。
+- 模型目录随上游更新到 6,303 条，收录 Kiro、Modal、Bifrost 供应商定义；模型参数新增压缩形态。
 
 ### Changed
 

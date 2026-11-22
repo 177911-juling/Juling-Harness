@@ -80,11 +80,12 @@ OMP 18 → 19 的接缝改动已按 §4.1 / 附录 C 落位：
 | 桌面更新 | Windows/macOS/Linux（AppImage+deb） | 同 | 本地双签名域继续保留 |
 | 入口名 | `juling.exe` / `juling` | `omp.exe` / `omp` | 投影后必须改回 `juling` |
 
-工作区现状（升级前必须先处理）：
+升级前工作区快照（历史记录，已处理）：
 
-- 未提交：`apps/renderer/vite.config.ts`、`scripts/audit-linux.mjs`。
-- 未跟踪：`.release-backup/`、`.release-work/`（不要提交）。
-- 当前分支 `runtime/18.20.2`；已有 tag：`v1.0.0`、`local-0.2.0-snapshot`、`shell-0.2.2-verified`。
+- 未提交：`apps/renderer/vite.config.ts`、`scripts/audit-linux.mjs`（已单独提交）。
+- 未跟踪：`.release-backup/`、`.release-work/`（保持未跟踪，未提交）。
+- 升级前分支 `runtime/18.20.2`；当时已有 tag：`v1.0.0`、`local-0.2.0-snapshot`、`shell-0.2.2-verified`。
+- 当前分支 `upgrade/0.2.8`，回滚 tag `pre-0.2.8-20261122`。
 
 ## 2. 上游 0.2.5 – 0.2.8 升级了什么
 
@@ -131,7 +132,7 @@ OMP 18 → 19 的接缝改动已按 §4.1 / 附录 C 落位：
 | 活动图标 / Advisor 批次 | 桌面与 Web 对话（含手机页复用的渲染层）为等待、思考、回复、重试和工具执行显示专用活动图标，遵循减弱动效；Advisor 多条意见按批折叠，含阻断问题的批次默认展开，可复制整批；手动展开态在新消息、语言切换和虚拟滚动时保持 | 新增 `conversation/{ActivityGlyph,activityGlyphDrawing}.ts`、`advisorTranscript` 合并逻辑；`mobile/entry.tsx` 复用；`preview` 同步 |
 | 表格与 Office 预览 | `.xlsm`、`.xlsb`、`.ods` 内置预览，方向键/Home/End/PageUp/Down 导航、Shift 扩选复制、支持 Excel 行列上限内的稀疏数据；可选 Office 组件增加 `.docm`、`.pptm`，转换时禁用宏 | 新增 `files/{SpreadsheetPane,spreadsheet.worker}`、`fileTypes` 扩展；桌面 `office-component.ts`、`file-resources.ts`、`file-io.ts` |
 | SSH/WSL 准备流程 | 连接、认证与准备对话框展示目标、安装目录、网络选项及准备阶段，确认/上传阶段保持键盘焦点；SSH 文件传输显示远端实际接收进度，校验大小与 SHA-256，按目标系统选择传输方式，可重试失败后回退；演示连接与实际表单共用配置（端口/网络策略/安装目录） | 新增 `apps/desktop/src/remote/{file-transfer,channel}.ts`、`workspaces/{SshPasswordDialog,SshPreparationDialog,sshParts}`、`ssh.css` |
-| 模型目录 | 随 OMP 19 更新内置目录（6,392 → 6,402 条），收录 Kiro、Modal、Bifrost 供应商定义；账号模型由 Runtime 连接后发现 | `catalog/model-catalog-v1.json`、`packages/host-client-api/src/model-catalog.generated.ts`、`scripts/model-catalog.mjs` |
+| 模型目录 | 随 OMP 19 更新内置目录（6,303 条，与上游 0.2.8 一致），收录 Kiro、Modal、Bifrost 供应商定义；账号模型由 Runtime 连接后发现 | `catalog/model-catalog-v1.json`、`packages/host-client-api/src/model-catalog.generated.ts`、`scripts/model-catalog.mjs` |
 | 修复：删除与清理 | 批量删除跳过已取消归档；原生统计或产物清理只完成一部分时，界面报告残留 | `session-delete-service.ts`、`session-purge-maintenance.ts` |
 | 修复：SSH / 预览 | SSH 密码认证在 SFTP 批量传输中失效；预览连接未沿用所选端口、网络策略和安装目录 | `remote/{file-transfer,manager,terminal}.ts` |
 | 修复：表格 / Office | 超大选区复制可能卡住预览；CSV 更新后跳失选区；Office 更新期间收尾的转换可能清掉新组件；Office 缓存清理保留仍被文件窗口使用的 PDF | `files/SpreadsheetPane`、`spreadsheet.worker`、`office-component.ts` |
@@ -173,7 +174,7 @@ OMP 18 → 19 的接缝改动已按 §4.1 / 附录 C 落位：
 | 0.2.8 | 修复 SSH 密码 SFTP、预览连接端口/网络策略/安装目录 | 2.4 |
 | 0.2.8 | 修复超大选区复制卡顿、CSV 跳选区、Office 转换竞态、Office 缓存保留 PDF | 2.4 |
 | 0.2.8 | 修复演示对话切语言时 Advisor 批次重新折叠 | 2.4 |
-| 0.2.7* | 模型目录随 OMP 19 更新（Kiro/Modal/Bifrost，6,402 条） | 2.4 |
+| 0.2.7* | 模型目录随 OMP 19 更新（Kiro/Modal/Bifrost，6,303 条） | 2.4 |
 
 带 `*` 的条目来自 `docs/migrations/omp-19.0.1.md`，是对 CHANGELOG 的补充；其余逐条对应上游 `CHANGELOG.md`。
 
