@@ -33,7 +33,7 @@ async function navigateBrowser(browser, path) {
 const browserRow = (browser, name) => browser.locator("[data-path]").filter({ has: page.getByText(name, { exact: true }) });
 
 async function query(name, input = {}) {
-  const response = await page.evaluate(({ name, input }) => window.ompHarness.query({ queryName: name, input }), { name, input });
+  const response = await page.evaluate(({ name, input }) => window.julingHarness.query({ queryName: name, input }), { name, input });
   if (!response.ok) throw new Error(JSON.stringify(response.error));
   return response.result;
 }
@@ -41,13 +41,13 @@ async function command(name, input) {
   return page.evaluate(({ name, input }) => new Promise((resolveCommand, reject) => {
     const requestId = crypto.randomUUID();
     const timeout = setTimeout(() => { off(); reject(new Error(`No receipt: ${name}`)); }, 30000);
-    const off = window.ompHarness.subscribe({ scope: "command", requestId }, event => {
+    const off = window.julingHarness.subscribe({ scope: "command", requestId }, event => {
       if (event.kind !== "command.receipt") return;
       clearTimeout(timeout); off();
       if (event.receipt.status === "completed") resolveCommand(event.receipt.result);
       else reject(new Error(JSON.stringify(event.receipt)));
     });
-    window.ompHarness.command({ commandName: name, input, requestId, idempotencyKey: requestId }).catch(error => { clearTimeout(timeout); off(); reject(error); });
+    window.julingHarness.command({ commandName: name, input, requestId, idempotencyKey: requestId }).catch(error => { clearTimeout(timeout); off(); reject(error); });
   }), { name, input });
 }
 async function run() {
@@ -88,7 +88,7 @@ async function run() {
   page = await application.firstWindow({ timeout: 30000 }); page.setDefaultTimeout(15000);
   page.on("pageerror", error => report.errors.push(error.message));
   page.on("console", message => { if (message.type() === "error") report.errors.push(message.text()); });
-  await page.waitForFunction(() => !!window.ompHarness && !!window.ompHarnessChrome?.files);
+  await page.waitForFunction(() => !!window.julingHarness && !!window.julingHarnessChrome?.files);
   await command("workspace.openPath", { path: otherProject });
   const model = await command("workspace.openPath", { path: workspace });
   assert.ok(model.activeWorkspaceId);
@@ -112,7 +112,7 @@ async function run() {
   await assert.rejects(fs.access(renamed.path), { code: "ENOENT" });
   report.checks.push("new folder, no-overwrite rename, and the real Electron recycle bin");
   const media = await page.evaluate(async path => {
-    const api = window.ompHarnessChrome.files, resource = await api.open({ targetId: null, workspaceId: "", path, source: "system" });
+    const api = window.julingHarnessChrome.files, resource = await api.open({ targetId: null, workspaceId: "", path, source: "system" });
     try { const response = await fetch(resource.url, { headers: { Range: "bytes=0-3" } }); return { status: response.status, text: await response.text() }; }
     finally { await api.release(resource.id); }
   }, image);

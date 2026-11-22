@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<!--
-	  OMP Studio.app main executable. Embedded by pack:mac today; they only take
+	  Juling Harness.app main executable. Embedded by pack:mac today; they only take
 	  effect under the hardened runtime, which the Developer ID signature turns on.
 	    * allow-jit — V8 JIT pages (MAP_JIT) are refused without it.
 	    * device.audio-input — microphone for voice input and Live.

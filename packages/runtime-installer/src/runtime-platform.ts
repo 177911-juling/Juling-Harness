@@ -1,10 +1,10 @@
 /**
  * Runtime platform table. The entrypoint follows the artifact's platform
  * (the manifest `platform`), never the machine doing the work, so a Windows
- * artifact handled on macOS keeps `omp.exe`. `scripts/target-platform.mjs`
+ * artifact handled on macOS keeps `juling.exe`. `scripts/target-platform.mjs`
  * mirrors this table and a metadata test keeps the two identical.
  */
-export const RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "omp.exe", darwin: "omp", linux: "omp" } as const);
+export const RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "juling.exe", darwin: "omp", linux: "omp" } as const);
 export type RuntimeOs = keyof typeof RUNTIME_ENTRYPOINTS;
 export type RuntimeEntrypoint = (typeof RUNTIME_ENTRYPOINTS)[RuntimeOs];
 

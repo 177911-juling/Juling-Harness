@@ -115,8 +115,8 @@ describe("i18n system tests", () => {
 
   it("syncs html lang, title, and desktop chrome language from I18nProvider", async () => {
     const setLanguage = vi.fn(async () => undefined);
-    const originalChrome = globalThis.ompHarnessChrome;
-    globalThis.ompHarnessChrome = { ...(originalChrome ?? {}), setLanguage } as typeof globalThis.ompHarnessChrome;
+    const originalChrome = globalThis.julingHarnessChrome;
+    globalThis.julingHarnessChrome = { ...(originalChrome ?? {}), setLanguage } as typeof globalThis.julingHarnessChrome;
     try {
       const { rerender } = render(createElement(I18nProvider, { forcedLanguage: "en", children: createElement("span", null, "en") }));
       expect(document.documentElement.lang).toBe("en");
@@ -131,7 +131,7 @@ describe("i18n system tests", () => {
       render(createElement(I18nProvider, { children: createElement("span", null, "sys") }));
       await waitFor(() => expect(setLanguage).toHaveBeenCalledWith("en"));
     } finally {
-      globalThis.ompHarnessChrome = originalChrome;
+      globalThis.julingHarnessChrome = originalChrome;
     }
   });
 });

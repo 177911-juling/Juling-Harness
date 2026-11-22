@@ -6,6 +6,7 @@ import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 import { timeTravelService } from "./time-travel-service.js";
 import { randomUUID } from "node:crypto";
 import type { WorkspaceId, SessionId } from "@juling-harness/client-contract";
+import type { ThreadId } from "@juling-harness/harness-protocol";
 import { desktopText } from "./desktop-language-shared.js";
 
 /**
@@ -200,7 +201,7 @@ export interface DesktopRuntimeSessionContext {
   readonly endpoint: PrivateEndpoint;
   readonly profileDirectory: string;
   /**
-   * Managed Runtime tree used to spawn `omp.exe`. Packaged: `$INSTDIR\runtime`.
+   * Managed Runtime tree used to spawn `juling.exe`. Packaged: `$INSTDIR\runtime`.
    * Unpackaged / tests: `%APPDATA%\juling-harness\runtimes` (or the temp profile).
    */
   readonly runtimeInstallDirectory: string;
@@ -480,6 +481,7 @@ interface FacadeContext {
   readonly evaluationOwner: object;
   /** Private, profile-bound maintenance shared by every conversation facade. */
   readonly sessionPurge: SessionPurgeMaintenancePort;
+  readonly sessionFileOperations: Map<ThreadId, Promise<unknown>>;
   /** One usage adapter per Host: it caches the resolved dashboard endpoint. */
   usage?: HostUsageService;
   readonly authority: PublicAuthorityIdentity;
@@ -864,6 +866,7 @@ function buildFacade(context: FacadeContext): HarnessHostClientFacade {
       },
       archive: currentArchiveService,
       deleteService: currentDeleteService,
+      sessionFileOperations: context.sessionFileOperations,
       finishManagedArtifacts: async (sessionId, cascade) => {
         const library = artifactLibraryForProfile(context.profileDirectory);
         try { await runtimeMediaFilesForLibrary(library).finishSession(join(context.profileDirectory, "bridge", "media-v1"), sessionId, cascade); }
@@ -1155,7 +1158,10 @@ async function openSessionContext(root: FacadeContext, scope: import("@juling-ha
     seams: { ...root.seams,
       getActiveWorkspace: () => workspace.current,
       getWorkspaceCwd: () => workspace.current.cwd,
-      catalog: createWorkspaceSessionCatalog(() => workspace.current.cwd, async id => (await resolveWorkspace(id)).cwd),
+      catalog: {
+        ...createWorkspaceSessionCatalog(() => workspace.current.cwd, async id => (await resolveWorkspace(id)).cwd),
+        ...(root.seams.catalog?.locate ? { locate: root.seams.catalog.locate.bind(root.seams.catalog) } : {}),
+      },
       ...(root.seams.workspaces ? { workspaces: {
         list,
         ...(root.seams.workspaces.forgetUnavailable ? { forgetUnavailable: () => root.seams.workspaces!.forgetUnavailable!() } : {}),
@@ -1686,6 +1692,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
       const facadeContext: FacadeContext = {
         projectReads: new ProjectReadServices(),
         evaluationOwner: {},
+        sessionFileOperations: new Map(),
         sessionPurge: createNodeSessionPurgeMaintenance({
           workingDirectory: profileDirectory,
           executablePath: async () => {

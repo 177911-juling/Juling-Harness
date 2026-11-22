@@ -63,7 +63,7 @@ test("Win32PlatformPort reports the win32 platform", () => {
 
 test("runtimeExecutableName is the Windows runtime filename", () => {
   const port = new Win32PlatformPort(recordingServices().services);
-  assert.equal(port.runtimeExecutableName(), "omp.exe");
+  assert.equal(port.runtimeExecutableName(), "juling.exe");
 });
 
 test("Win32PlatformPort rejects services missing required native methods", () => {

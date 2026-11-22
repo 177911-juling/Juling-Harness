@@ -1,3 +1,4 @@
+import { HarnessHandoffService } from "./handoff-service";
 import type { HarnessQueuedCompactionService } from "./queued-compaction-service";
 import type { RuntimeQueueEntry } from "../runtime-queue-protocol";
 import type { AgentSession } from "../../session/agent-session";
@@ -30,6 +31,7 @@ export class HarnessRuntimeQueueService {
 		}
 		return {
 			entries,
+			compactionMode: HarnessHandoffService.running(this.session) ? "handoff" : maintenance ? "normal" : undefined,
 			total: native.length,
 			truncated: entries.length !== native.length,
 			...(this.compaction?.error ? { compactionError: this.compaction.error } : {}),
@@ -50,7 +52,8 @@ export class HarnessRuntimeQueueService {
 		) {
 			if (operation.id && operation.id !== this.compaction?.entry()?.id)
 				throw new SessionControlError("COMMAND_BLOCKED", "The queued compaction changed");
-			this.compaction?.cancel();
+			if (HarnessHandoffService.running(this.session)) this.session.abortCompaction();
+			else this.compaction?.cancel();
 			return this.get();
 		}
 		if (this.session.isCompacting) throw new SessionControlError("BUSY_COMPACTING", "Wait for compaction to finish");

@@ -1019,7 +1019,7 @@ export function SkillsharePane({
                 !enabled ||
                 (!preview &&
                   (!status?.privateTokenChannel ||
-                    !globalThis.ompHarnessChrome?.revealSkillshareToken))
+                    !globalThis.julingHarnessChrome?.revealSkillshareToken))
               }
               onClick={() =>
                 prepare({
@@ -1161,10 +1161,10 @@ export function SkillsharePane({
           {action.link ? (
             <button
               className="btn small outline"
-              disabled={!globalThis.ompHarnessChrome?.openUrl}
+              disabled={!globalThis.julingHarnessChrome?.openUrl}
               onClick={() => {
                 if (!preview)
-                  void globalThis.ompHarnessChrome?.openUrl({
+                  void globalThis.julingHarnessChrome?.openUrl({
                     url: action.link!,
                   });
               }}
@@ -1176,12 +1176,12 @@ export function SkillsharePane({
             <button
               className="btn small primary"
               disabled={
-                busy || !globalThis.ompHarnessChrome?.revealSkillshareToken
+                busy || !globalThis.julingHarnessChrome?.revealSkillshareToken
               }
               onClick={() =>
                 void run(async (generation) => {
                   const view = secretView.current;
-                  const value = await globalThis.ompHarnessChrome!
+                  const value = await globalThis.julingHarnessChrome!
                     .revealSkillshareToken!({
                     sessionId: sessionId!,
                     secretId: action.secretId!,

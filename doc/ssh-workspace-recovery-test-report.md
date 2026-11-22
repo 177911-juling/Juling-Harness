@@ -169,7 +169,7 @@ ucloud 的完整矩阵跑到 `cancel-during-snapshot-sync` 时进入一段主机
 
 | 检查 | 结果 | 证据 |
 |---|---|---|
-| 工作台启动 + 真实 preload 桥 | 通过 | 标题 "Juling Harness — 工作台"；`window.ompHarnessRemote` 14 个方法；真实 manager 读出预置连接 |
+| 工作台启动 + 真实 preload 桥 | 通过 | 标题 "Juling Harness — 工作台"；`window.julingHarnessRemote` 14 个方法；真实 manager 读出预置连接 |
 | 执行位置菜单 | 通过 | "此计算机 / UI deskserver / Windows · 已断开 / 添加 SSH 连接" |
 | 从 UI 发起连接 | 通过 | manager `state=connected`（generation 1），完成真实 probe/deploy/attach |
 | 远端目录选择（中文+空格） | 通过 | 对话框列出远端真实目录；填入 `…\UI 稳定性 project` 后注册成功；选择器变为 `SSH · UI deskserver` |

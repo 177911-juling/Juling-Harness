@@ -9,8 +9,10 @@ Public documentation for Juling Harness.
 | [getting-started.md](getting-started.md) | Run from source |
 | [linux.md](linux.md) | Linux AppImage / deb 安装、更新、沙箱、源码开发与原生包验收 |
 | [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
+| [mobile-access.md](mobile-access.md) | 手机访问的证书信任、扫码配对、会话与审批 / Mobile setup and pairing |
 | [time-travel.md](time-travel.md) | Time Travel 开启、检查点、代码/对话恢复、存储与限制 |
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |
+| [wsl-workspaces.md](wsl-workspaces.md) | Windows WSL 2 工作区、项目文件、本机编辑器和连接恢复 |
 | [tmux.md](tmux.md) | SSH tmux 会话附加、窗口与分屏、隐藏与分离、恢复及限制 |
 | [../doc/ssh-workspace-test-prompt.md](../doc/ssh-workspace-test-prompt.md) | SSH 与账密功能的独立测试交接提示词 |
 | [model-adaptation.md](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |
@@ -22,6 +24,12 @@ Public documentation for Juling Harness.
 | [dictation.md](dictation.md) | 工作台与 BTW 语音输入、原生模式、麦克风配置和内存恢复 |
 | [btw.md](btw.md) | BTW 原生功能对齐、话题历史、图片、子代理与快捷键 |
 | [fonts.md](fonts.md) | Independent interface, terminal and output font preferences |
+| [releases/v0.2.8.md](releases/v0.2.8.md) | 0.2.8 安装包、会话引用、归档清理、对话状态、表格预览与 SSH 截图 |
+| [reviews/v0.2.8-release-review.md](reviews/v0.2.8-release-review.md) | 0.2.8 审查修复、发布检查与验证边界 |
+| [releases/v0.2.7.md](releases/v0.2.7.md) | 0.2.7 OMP 19 适配、Plan 编辑、资源浮窗、反汇编与界面截图 |
+| [reviews/v0.2.7-release-review.md](reviews/v0.2.7-release-review.md) | 0.2.7 发布前检查、缓存预热与验证边界 |
+| [releases/v0.2.6.md](releases/v0.2.6.md) | 0.2.6 启动崩溃修复、平台下载与升级提示 |
+| [releases/v0.2.5.md](releases/v0.2.5.md) | 0.2.5 发布说明、平台下载与升级提示 |
 | [releases/v0.2.4.md](releases/v0.2.4.md) | 0.2.4 发布说明、平台下载与升级提示 |
 | [releases/v0.2.3.md](releases/v0.2.3.md) | 0.2.3 发布说明、平台下载与升级提示 |
 | [releases/v0.2.2.md](releases/v0.2.2.md) | 0.2.2 发布说明、平台下载与升级提示 |
@@ -30,6 +38,7 @@ Public documentation for Juling Harness.
 | [releases/v0.1.11.md](releases/v0.1.11.md) | 0.1.11 发布页文案、三平台下载与升级说明 |
 | [releases/v0.1.10.md](releases/v0.1.10.md) | 0.1.10 发布页文案、三平台下载与升级说明 |
 | [migrations/omp-18.13.2.md](migrations/omp-18.13.2.md) | 18.12.6 → 18.13.2 正式版本变化、完整 Runtime / GUI 迁移与无付费验收 |
+| [migrations/omp-19.0.1.md](migrations/omp-19.0.1.md) | OMP 19.0.1 Runtime、协议、工作台交互与验证记录 |
 | [migrations/omp-18.20.2.md](migrations/omp-18.20.2.md) | 18.19.0 → 18.20.2 分阶段迁移、同源 Runtime 与隔离验证范围 |
 | [migrations/omp-18.20.2-frontend-handoff.md](migrations/omp-18.20.2-frontend-handoff.md) | 前端接续阶段记录、typed API 与修复后的调用约定 |
 | [reviews/omp-18.20.2-frontend-fixes-2026-11-16.md](reviews/omp-18.20.2-frontend-fixes-2026-11-16.md) | 15 项前端复核修复、harness.5 canary、最终门禁与未验证边界 |

@@ -14,7 +14,7 @@ export interface HostBackendOptions {
   /**
    * Managed Runtime tree (`versions/` + `current.json`). Defaults to
    * `<stateDirectory>/runtimes`. Packaged desktop sets this to
-   * `$INSTDIR/runtime` so the live `omp.exe` sits next to the app.
+   * `$INSTDIR/runtime` so the live `juling.exe` sits next to the app.
    */
   runtimeInstallDirectory?: string;
   installer?: Omit<RuntimeInstallerOptions, "isRuntimeReferenced">;

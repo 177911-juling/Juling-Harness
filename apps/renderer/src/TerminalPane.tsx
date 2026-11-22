@@ -10,7 +10,7 @@ import { BrowserLinkMenu } from "./browser/browserLinks";
 import { registerTerminalBrowserLinks } from "./browser/terminalBrowserLinks";
 import { useTmuxPanel } from "./tmux/TmuxPanel";
 /**
- * Desktop-chrome integrated shell. Uses `window.ompHarnessTerminal` when the
+ * Desktop-chrome integrated shell. Uses `window.julingHarnessTerminal` when the
  * Electron preload is present; otherwise shows an honest unavailable state.
  * This is not Runtime TUI attach and does not talk to the Host contract.
  */
@@ -36,7 +36,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
 ) {
   const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
-  const api = globalThis.ompHarnessTerminal;
+  const api = globalThis.julingHarnessTerminal;
   const executionTarget = useExecutionTarget();
   const { preview } = usePreviewMode();
   const targetId = preview ? null : executionTarget.id;
@@ -183,7 +183,7 @@ function XtermScreen({
   active,
 }: {
   session: Session;
-  api: NonNullable<typeof globalThis.ompHarnessTerminal>;
+  api: NonNullable<typeof globalThis.julingHarnessTerminal>;
   hosts: Map<string, Host>;
   store: TerminalSessions;
   active: boolean;

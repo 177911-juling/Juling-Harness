@@ -54,7 +54,7 @@ const provider = createServer(async (request, response) => {
 });
 
 async function query(name, input = {}) {
-  const response = await page.evaluate(({ name, input }) => window.ompHarness.query({ queryName: name, input }), { name, input });
+  const response = await page.evaluate(({ name, input }) => window.julingHarness.query({ queryName: name, input }), { name, input });
   if (!response.ok) throw new Error(`${name}: ${JSON.stringify(response.error)}`);
   return response.result;
 }
@@ -63,13 +63,13 @@ async function command(name, input = {}) {
   return page.evaluate(({ name, input }) => new Promise((resolveCommand, reject) => {
     const requestId = crypto.randomUUID();
     const timer = setTimeout(() => { off(); reject(new Error(`Command timed out: ${name}`)); }, 90_000);
-    const off = window.ompHarness.subscribe({ scope: "command", requestId }, event => {
+    const off = window.julingHarness.subscribe({ scope: "command", requestId }, event => {
       if (event.kind !== "command.receipt" || !["completed", "failed", "rejected", "outcome_unknown"].includes(event.receipt.status)) return;
       clearTimeout(timer); off();
       if (event.receipt.status === "completed") resolveCommand(event.receipt.result);
       else reject(new Error(JSON.stringify(event.receipt)));
     });
-    window.ompHarness.command({ commandName: name, input, requestId, idempotencyKey: requestId }).catch(error => { clearTimeout(timer); off(); reject(error); });
+    window.julingHarness.command({ commandName: name, input, requestId, idempotencyKey: requestId }).catch(error => { clearTimeout(timer); off(); reject(error); });
   }), { name, input });
 }
 
@@ -93,7 +93,7 @@ async function launch(env) {
   for (const stream of [application.process().stdout, application.process().stderr]) stream?.on("data", data => { void appendFile(join(output, "electron.log"), data); });
   page = await application.firstWindow({ timeout: 30_000 });
   page.setDefaultTimeout(30_000);
-  await page.waitForFunction(() => Boolean(window.ompHarness));
+  await page.waitForFunction(() => Boolean(window.julingHarness));
   const identity = await application.evaluate(({ app }) => ({ packaged: app.isPackaged, sandboxDisabled: app.commandLine.hasSwitch("no-sandbox"), version: app.getVersion() }));
   assert.equal(identity.packaged, true);
   assert.equal(identity.sandboxDisabled, false);
@@ -142,14 +142,14 @@ try {
 
   const terminalOutput = await page.evaluate(async () => {
     let text = "";
-    const off = window.ompHarnessTerminal.onData(event => { text += event.data; });
-    const terminal = await window.ompHarnessTerminal.create({ cols: 80, rows: 24 });
+    const off = window.julingHarnessTerminal.onData(event => { text += event.data; });
+    const terminal = await window.julingHarnessTerminal.create({ cols: 80, rows: 24 });
     try {
-      await window.ompHarnessTerminal.write(terminal.id, "[ -t 0 ] && [ -t 1 ] && printf 'OMP_TTY_%s\\n' OK; omp-linux-probe\r");
+      await window.julingHarnessTerminal.write(terminal.id, "[ -t 0 ] && [ -t 1 ] && printf 'OMP_TTY_%s\\n' OK; omp-linux-probe\r");
       const deadline = Date.now() + 15_000;
       while ((!text.includes("OMP_TTY_OK") || !text.includes("OMP_LINUX_TOOL_OK")) && Date.now() < deadline) await new Promise(done => setTimeout(done, 100));
       return text;
-    } finally { off(); await window.ompHarnessTerminal.dispose(terminal.id); }
+    } finally { off(); await window.julingHarnessTerminal.dispose(terminal.id); }
   });
   assert.ok(terminalOutput.includes("OMP_TTY_OK") && terminalOutput.includes("OMP_LINUX_TOOL_OK"), "Terminal must be a real PTY, with GUI login PATH");
   report.checks.push("native node-pty ABI, real tty input/output, user tool execution and terminal disposal");
@@ -163,11 +163,11 @@ try {
   report.checks.push("real Runtime conversation through local model endpoint, native file read, streamed reply and persisted transcript");
   const session = await query("session.state");
   const prediction = (await command("prediction.prepare", { sessionId: session.sessionId, protocolVersion: 2 })).result;
-  const attached = await page.evaluate(channel => window.ompHarnessChrome.attachPrediction(channel), prediction);
+  const attached = await page.evaluate(channel => window.julingHarnessChrome.attachPrediction(channel), prediction);
   assert.ok(attached.ok, attached.message);
-  const pinged = await page.evaluate(channelId => window.ompHarnessChrome.predictionInput({ channelId, input: { kind: "ping" } }), prediction.channelId);
+  const pinged = await page.evaluate(channelId => window.julingHarnessChrome.predictionInput({ channelId, input: { kind: "ping" } }), prediction.channelId);
   assert.ok(pinged.ok, pinged.message);
-  await page.evaluate(channelId => window.ompHarnessChrome.detachPrediction({ channelId }), prediction.channelId);
+  await page.evaluate(channelId => window.julingHarnessChrome.detachPrediction({ channelId }), prediction.channelId);
   await command("prediction.release", { sessionId: session.sessionId, channelId: prediction.channelId });
   report.checks.push("v2 prediction channel metadata, authenticated private socket and input transport");
   await editor.fill("unsent ");

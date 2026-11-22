@@ -20,6 +20,7 @@ import type { SessionId, HarnessClient } from "@juling-harness/client-contract";
 import type { SessionTelemetrySnapshot } from "@juling-harness/harness-protocol";
 import { Icon } from "../icons";
 import { MenuItem } from "../menus";
+import { CopySessionMenuItem } from "../composer/SessionReferences";
 import { useI18n } from "../i18n";
 import { useViewedSessionTelemetry, type ViewedSessionTelemetryState } from "../telemetry/useViewedSessionTelemetry";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -317,6 +318,7 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
                   onExport={() => run(chrome.onExportThread)}
                   onHistory={() => run(() => onRoute("history"))}
                 />
+                <CopySessionMenuItem identity={chrome.sessionCopyIdentity} onClose={() => setOpenMenu(null)} />
                 <MenuItem
                   icon="archive"
                   disabled={preview ? chrome.hiddenPreviewThreads.has(chrome.previewThreadId) : chrome.archiveTarget === undefined}
@@ -354,9 +356,9 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
         ><Icon name="fork" /></button>
         <button
           className="icon-btn"
-          data-tip={sessionLive && !sessionBusy ? t("shell.tipHandoffThread") : sessionActionReason}
+          data-tip={sessionLive && !liveSnapshot?.isCompacting ? t("shell.tipHandoffThread") : sessionActionReason}
           aria-label={t("shell.handoffThread")}
-          disabled={!sessionLive || sessionBusy}
+          disabled={!sessionLive || liveSnapshot?.isCompacting}
           onClick={() => run(chrome.onHandoffThread)}
         ><Icon name="handoff" /></button>
       </div>}
@@ -450,11 +452,12 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
       source={{ project: crumbProject, branch: crumbBranch, path: preview ? previewProject?.path : realActiveWorkspace?.root, connection: executionTarget.id === null ? undefined : executionTarget.name }}
       status={floatingStatus} onDetailsChange={setFloatingDetails}
       windowed={windowed} projectMenu={close => projectMenu(action => { close(); run(action); }, true)} branchMenu={close => branchMenu(action => { close(); run(action); }, true)}
-      threadActions={{ disabled: preview || !sessionLive || sessionBusy, forkDisabled: preview || !sessionLive || forkBusy, reason: preview ? t("common.unavailableInPreview") : sessionActionReason, onFork: () => run(chrome.onForkThread), onHandoff: () => run(chrome.onHandoffThread) }}
+      threadActions={{ disabled: preview || !sessionLive || !!liveSnapshot?.isCompacting, forkDisabled: preview || !sessionLive || forkBusy, reason: preview ? t("common.unavailableInPreview") : sessionActionReason, onFork: () => run(chrome.onForkThread), onHandoff: () => run(chrome.onHandoffThread) }}
       sessionMenu={close => {
         const finish = (action: () => void) => { close(); run(action); };
         return <><ThreadActionMenuItems live={!preview && sessionLive} busy={sessionBusy} forkBusy={forkBusy} compacting={liveSnapshot?.isCompacting === true} compactPending={chrome.compactPending} reason={preview ? t("common.unavailableInPreview") : sessionActionReason}
           onRename={() => finish(chrome.onRenameThread)} onFork={() => finish(chrome.onForkThread)} onHandoff={() => finish(chrome.onHandoffThread)} onCompact={() => finish(chrome.onCompactThread)} onExport={() => finish(chrome.onExportThread)} onHistory={() => finish(() => { revealMainWindow(); onRoute("history"); })} />
+          <CopySessionMenuItem identity={chrome.sessionCopyIdentity} onClose={close} />
           {chrome.compactPending || liveSnapshot?.isCompacting ? <MenuItem icon="x" disabled={preview || !sessionLive} onClick={() => finish(chrome.onCancelCompact)}>{t("common.cancel")}</MenuItem> : null}
           <MenuItem icon="archive" disabled={preview ? chrome.hiddenPreviewThreads.has(chrome.previewThreadId) : chrome.archiveTarget === undefined} onClick={() => { if (preview) finish(() => chrome.onArchivePreviewThread(chrome.previewThreadId)); else if (chrome.archiveTarget) finish(() => chrome.onArchiveThread(chrome.archiveTarget!)); }}>{t("history.archiveSession")}</MenuItem>
           {windowed ? <><div className="menu-sep" /><ConversationWidthMenu onSelect={close} onOpenSettings={() => { close(); revealMainWindow(); setSettingsIntent("appearance", "conversation.width"); onRoute("settings"); }} /></> : null}

@@ -78,7 +78,7 @@ export interface PerfProfileApiIpc {
   removeListener(channel: string, listener: (event: unknown, payload: PerfProfileSnapshot | null | undefined) => void): void;
 }
 
-/** Read-only surface exposed by the preload as `window.ompHarnessPerf`. */
+/** Read-only surface exposed by the preload as `window.julingHarnessPerf`. */
 export interface OmpHarnessPerfApi {
   /**
    * Last snapshot Main knows about, read synchronously at preload time.
@@ -93,7 +93,7 @@ export interface OmpHarnessPerfApi {
 }
 
 /**
- * Build `window.ompHarnessPerf`. Frozen so the renderer cannot add fields, and
+ * Build `window.julingHarnessPerf`. Frozen so the renderer cannot add fields, and
  * deliberately read-only: there is no method that writes anything to Main.
  */
 export function createPerfProfileApi(ipc: PerfProfileApiIpc): OmpHarnessPerfApi {

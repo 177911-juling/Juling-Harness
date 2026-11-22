@@ -5,7 +5,7 @@ import { WorkspaceStatus } from "../workspaces/Workspace";
 import { DeferredPanel, lazyPanel } from "../DeferredPanel";
 const RecordingPlayer = lazyPanel(() => import("./RecordingPlayer").then(module => ({ default: module.RecordingPlayer })));
 import "./recordings.css";
-type Api = NonNullable<typeof globalThis.ompHarnessTerminal>;
+type Api = NonNullable<typeof globalThis.julingHarnessTerminal>;
 type Status = Awaited<ReturnType<NonNullable<Api["recordingStatus"]>>>;
 export function TerminalRecordingControls({
   api,

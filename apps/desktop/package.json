@@ -1,7 +1,7 @@
 {
   "name": "@juling-harness/desktop",
   "productName": "Juling Harness",
-  "version": "0.2.4",
+  "version": "0.2.8",
   "private": true,
   "type": "module",
   "main": "./dist/src/main.js",
@@ -15,24 +15,33 @@
     "test:built": "node --test dist/test/*.test.js"
   },
   "dependencies": {
-    "@juling-harness/client": "0.2.4",
-    "@juling-harness/client-contract": "0.2.4",
-    "@juling-harness/host-client-api": "0.2.4",
-    "@juling-harness/platform": "0.2.4",
-    "@juling-harness/platform-darwin": "0.2.4",
-    "@juling-harness/platform-win32": "0.2.4",
-    "@juling-harness/runtime-installer": "0.2.4",
-    "@juling-harness/harness-host": "0.2.4",
-    "@juling-harness/transport-desktop": "0.2.4",
+    "@juling-harness/client": "0.2.8",
+    "@juling-harness/client-contract": "0.2.8",
+    "@juling-harness/host-client-api": "0.2.8",
+    "@juling-harness/platform": "0.2.8",
+    "@juling-harness/platform-darwin": "0.2.8",
+    "@juling-harness/platform-win32": "0.2.8",
+    "@juling-harness/runtime-installer": "0.2.8",
+    "@juling-harness/harness-host": "0.2.8",
+    "@juling-harness/transport-desktop": "0.2.8",
+    "@juling-harness/transport-web": "0.2.8",
+    "@peculiar/asn1-schema": "^3.0.0",
+    "@peculiar/x509": "^3.1.0",
+    "asn1js": "^4.0.0",
     "builder-util-runtime": "9.7.0",
     "electron-updater": "6.8.9",
     "node-pty": "^1.1.0",
-    "socks": "2.8.7"
+    "qrcode": "^1.5.4",
+    "reflect-metadata": "^0.2.2",
+    "socks": "2.8.7",
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
-    "@juling-harness/testkit": "0.2.4",
+    "@juling-harness/testkit": "0.2.8",
     "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/ws": "^8.18.2",
     "electron": "^43.8.8",
     "typescript": "^5.9.0"
   }

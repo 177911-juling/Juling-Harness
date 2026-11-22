@@ -9,10 +9,10 @@ export function surfaceWindow(doc: Document): Window & typeof globalThis {
   return (doc.defaultView ?? window) as Window & typeof globalThis;
 }
 export function useSurfaceChrome() {
-  return surfaceWindow(useSurfaceDocument()).ompHarnessChrome;
+  return surfaceWindow(useSurfaceDocument()).julingHarnessChrome;
 }
 export function revealMainWindow(workbench = false): boolean {
-  void globalThis.ompHarnessChrome?.controlFloatWindow?.({ key: "", action: "showMain" });
+  void globalThis.julingHarnessChrome?.controlFloatWindow?.({ key: "", action: "showMain" });
   const request = { accepted: true };
   if (workbench) window.dispatchEvent(new CustomEvent("omp:dock-reveal-workbench", { detail: request }));
   return request.accepted;

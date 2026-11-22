@@ -400,7 +400,7 @@ export function NativeMaintenancePane({
             </span>
             <button
               className="btn small outline"
-              disabled={!preview && !globalThis.ompHarnessChrome?.exportArtifact}
+              disabled={!preview && !globalThis.julingHarnessChrome?.exportArtifact}
               onClick={() => {
                 if (preview) {
                   if (marks)
@@ -411,7 +411,7 @@ export function NativeMaintenancePane({
                     );
                   return;
                 }
-                void globalThis.ompHarnessChrome!.exportArtifact!({
+                void globalThis.julingHarnessChrome!.exportArtifact!({
                   artifactId: exportState.result!.asset.artifactId,
                 })
                   .then((result) => {

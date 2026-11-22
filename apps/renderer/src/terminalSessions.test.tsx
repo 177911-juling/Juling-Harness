@@ -123,7 +123,7 @@ function fakeScreen() {
   };
 }
 
-afterEach(() => { cleanup(); globalThis.ompHarnessTerminal = undefined; });
+afterEach(() => { cleanup(); globalThis.julingHarnessTerminal = undefined; });
 
 /** Let the microtask-coalesced ACK flush run. */
 const settle = async (): Promise<void> => {
@@ -133,8 +133,8 @@ const settle = async (): Promise<void> => {
 
 async function storeWith(...args: Parameters<TerminalSessions["create"]>): Promise<{ store: TerminalSessions; api: ReturnType<typeof harness>; id: string }> {
   const api = harness();
-  globalThis.ompHarnessTerminal = api.value as unknown as typeof globalThis.ompHarnessTerminal;
-  const store = new TerminalSessions(globalThis.ompHarnessTerminal);
+  globalThis.julingHarnessTerminal = api.value as unknown as typeof globalThis.julingHarnessTerminal;
+  const store = new TerminalSessions(globalThis.julingHarnessTerminal);
   const id = await store.create(...args);
   return { store, api, id };
 }
@@ -217,8 +217,8 @@ describe("unmounted terminal: queued output is never acknowledged", () => {
 describe("unmounted terminal: Main's watermark drives the back-pressure", () => {
   it("stops the PTY at 500 KiB unacknowledged and resumes once the backlog is written", async () => {
     const runtime = harness();
-    globalThis.ompHarnessTerminal = runtime.value as unknown as typeof globalThis.ompHarnessTerminal;
-    const store = new TerminalSessions(globalThis.ompHarnessTerminal);
+    globalThis.julingHarnessTerminal = runtime.value as unknown as typeof globalThis.julingHarnessTerminal;
+    const store = new TerminalSessions(globalThis.julingHarnessTerminal);
     const main = new FakeMain((text) => runtime.emit("terminal", text));
     const originalAck = runtime.value.ack;
     runtime.value.ack = vi.fn((id: string, bytes: number) => {
@@ -585,8 +585,8 @@ describe("terminal lifecycle: natural exit preserves the backlog", () => {
     let releaseClose: () => void = () => {};
     const closing = new Promise<void>((resolve) => { releaseClose = resolve; });
     api.value.dispose = vi.fn(async () => { await closing; });
-    globalThis.ompHarnessTerminal = api.value as unknown as typeof globalThis.ompHarnessTerminal;
-    const store = new TerminalSessions(globalThis.ompHarnessTerminal);
+    globalThis.julingHarnessTerminal = api.value as unknown as typeof globalThis.julingHarnessTerminal;
+    const store = new TerminalSessions(globalThis.julingHarnessTerminal);
     const id = await store.create(null);
     const removing = store.remove(id);
     api.emit(id, "during-close");
@@ -599,8 +599,8 @@ describe("terminal lifecycle: natural exit preserves the backlog", () => {
 
   it("drops nothing when the process exits before create returns", async () => {
     const api = harness();
-    globalThis.ompHarnessTerminal = api.value as unknown as typeof globalThis.ompHarnessTerminal;
-    const store = new TerminalSessions(globalThis.ompHarnessTerminal);
+    globalThis.julingHarnessTerminal = api.value as unknown as typeof globalThis.julingHarnessTerminal;
+    const store = new TerminalSessions(globalThis.julingHarnessTerminal);
     const creating = store.create(null);
     api.emit("terminal", "early output");
     api.exit("terminal");
@@ -659,8 +659,8 @@ describe("local PTY and SSH terminals share one contract", () => {
 
   it("two terminals do not cross-talk and are credited independently", async () => {
     const runtime = harness();
-    globalThis.ompHarnessTerminal = runtime.value as unknown as typeof globalThis.ompHarnessTerminal;
-    const store = new TerminalSessions(globalThis.ompHarnessTerminal);
+    globalThis.julingHarnessTerminal = runtime.value as unknown as typeof globalThis.julingHarnessTerminal;
+    const store = new TerminalSessions(globalThis.julingHarnessTerminal);
     const local = await store.create(null);
     const ssh = await store.create("remote-target", "ws");
     expect(local).not.toBe(ssh);
@@ -687,8 +687,8 @@ describe("local PTY and SSH terminals share one contract", () => {
 
   it("switching the active target keeps both backlogs separate", async () => {
     const runtime = harness();
-    globalThis.ompHarnessTerminal = runtime.value as unknown as typeof globalThis.ompHarnessTerminal;
-    const store = new TerminalSessions(globalThis.ompHarnessTerminal);
+    globalThis.julingHarnessTerminal = runtime.value as unknown as typeof globalThis.julingHarnessTerminal;
+    const store = new TerminalSessions(globalThis.julingHarnessTerminal);
     const local = await store.create(null);
     const ssh = await store.create("remote-target", "ws");
     runtime.emit(local, "local-bg");
@@ -705,7 +705,7 @@ describe("local PTY and SSH terminals share one contract", () => {
 // ---- Previously covered behaviour, kept intact ---------------------------
 
 it("keeps remote terminal output and identity while its target view is unmounted", async () => {
-  const remote = harness(); globalThis.ompHarnessTerminal = remote.value as unknown as typeof globalThis.ompHarnessTerminal;
+  const remote = harness(); globalThis.julingHarnessTerminal = remote.value as unknown as typeof globalThis.julingHarnessTerminal;
   let store!: TerminalSessions;
   function View() { const value = useTerminalSessions(); store = value.store; return <button onClick={() => void store.create("remote", "ws")}>create</button>; }
   const mounted = render(<TerminalSessionsProvider><View /></TerminalSessionsProvider>);
@@ -727,7 +727,7 @@ it("disposes a terminal whose asynchronous creation finishes after the window cl
   const remote = harness();
   let complete!: (value: { id: string; name: string; cwd: string }) => void;
   remote.value.create.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
-  const store = new TerminalSessions(remote.value as unknown as typeof globalThis.ompHarnessTerminal);
+  const store = new TerminalSessions(remote.value as unknown as typeof globalThis.julingHarnessTerminal);
   const pending = store.create("remote", "ws");
   store.close();
   complete({ id: "late", name: "SSH", cwd: "/project" });
@@ -736,8 +736,8 @@ it("disposes a terminal whose asynchronous creation finishes after the window cl
 });
 
 it("opts in to output flow control when creating a terminal", async () => {
-  const remote = harness(); globalThis.ompHarnessTerminal = remote.value as unknown as typeof globalThis.ompHarnessTerminal;
-  const store = new TerminalSessions(globalThis.ompHarnessTerminal);
+  const remote = harness(); globalThis.julingHarnessTerminal = remote.value as unknown as typeof globalThis.julingHarnessTerminal;
+  const store = new TerminalSessions(globalThis.julingHarnessTerminal);
   await store.create(null);
   expect(remote.value.create).toHaveBeenCalledWith(expect.objectContaining({ flowControl: true }));
 });
@@ -807,8 +807,8 @@ it("preserves oversized ordinary logs including ANSI sequences", async () => {
 
 it("works without an ack method (older preload) and queues instead of losing output", async () => {
   const remote = harness({ ack: false });
-  globalThis.ompHarnessTerminal = remote.value as unknown as typeof globalThis.ompHarnessTerminal;
-  const store = new TerminalSessions(globalThis.ompHarnessTerminal);
+  globalThis.julingHarnessTerminal = remote.value as unknown as typeof globalThis.julingHarnessTerminal;
+  const store = new TerminalSessions(globalThis.julingHarnessTerminal);
   const id = await store.create(null);
   expect(remote.value.create).toHaveBeenCalledWith({ cols: 80, rows: 24 });
   remote.emit(id, "世界");

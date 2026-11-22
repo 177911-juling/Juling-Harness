@@ -72,7 +72,7 @@ describe("createOmpUsageService", () => {
         let execCalls = 0;
         const service = createOmpUsageService({
           statsDbPath: dbPath,
-          locateOmp: async () => "C:\\tools\\omp.exe",
+          locateOmp: async () => "C:\\tools\\juling.exe",
           exec: async () => {
             execCalls += 1;
             return { stdout: "", stderr: "", code: 0 };
@@ -110,7 +110,7 @@ describe("createOmpUsageService", () => {
     const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     const opened: string[] = [];
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\\tools\\omp.exe",
+      locateOmp: async () => "C:\\tools\\juling.exe",
       spawnDashboard: (exe, options) => {
         spawned.push({ exe, ...(options === undefined ? {} : { options }) });
       },
@@ -124,7 +124,7 @@ describe("createOmpUsageService", () => {
     assert.equal(result.applied, true);
     // The explicit browser request keeps `omp stats` opening one; only the
     // embedded dashboard start suppresses it.
-    assert.deepEqual(spawned, [{ exe: "C:\\tools\\omp.exe", options: { open: true } }]);
+    assert.deepEqual(spawned, [{ exe: "C:\\tools\\juling.exe", options: { open: true } }]);
     assert.deepEqual(opened, []);
     assert.equal(JSON.stringify(result).includes("C:\\\\tools"), false);
   });
@@ -133,7 +133,7 @@ describe("createOmpUsageService", () => {
     const spawned: string[] = [];
     const opened: string[] = [];
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\\tools\\omp.exe",
+      locateOmp: async () => "C:\\tools\\juling.exe",
       spawnDashboard: (exe) => {
         spawned.push(exe);
       },
@@ -155,7 +155,7 @@ describe("createOmpUsageService", () => {
     const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     let probes = 0;
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\tools\omp.exe",
+      locateOmp: async () => "C:\tools\juling.exe",
       spawnDashboard: (exe, options) => {
         spawned.push({ exe, ...(options === undefined ? {} : { options }) });
       },
@@ -177,7 +177,7 @@ describe("createOmpUsageService", () => {
     const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     let live = false;
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\tools\omp.exe",
+      locateOmp: async () => "C:\tools\juling.exe",
       spawnDashboard: (exe, options) => {
         spawned.push({ exe, ...(options === undefined ? {} : { options }) });
         live = true;
@@ -194,7 +194,7 @@ describe("createOmpUsageService", () => {
     assert.equal(a?.available, true);
     assert.equal(b?.available, true);
     // The embedded start must not also open the panel in the system browser.
-    assert.deepEqual(spawned, [{ exe: "C:\tools\omp.exe" }], "two mounts must not race two servers onto one port");
+    assert.deepEqual(spawned, [{ exe: "C:\tools\juling.exe" }], "two mounts must not race two servers onto one port");
     const cached = await service.dashboard?.();
     assert.equal(cached?.url, "http://127.0.0.1:3847/#/overview?range=all");
     assert.equal(spawned.length, 1, "a resolved endpoint is reused");
@@ -215,7 +215,7 @@ describe("createOmpUsageService", () => {
   test("dashboard gives up after the startup deadline instead of hanging the page", async () => {
     let clock = NOW;
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\tools\omp.exe",
+      locateOmp: async () => "C:\tools\juling.exe",
       spawnDashboard: () => undefined,
       probeDashboard: async () => false,
       delay: async () => {
@@ -233,7 +233,7 @@ describe("createOmpUsageService", () => {
     let live = true;
     const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\tools\omp.exe",
+      locateOmp: async () => "C:\tools\juling.exe",
       spawnDashboard: (exe, options) => {
         spawned.push({ exe, ...(options === undefined ? {} : { options }) });
       },
@@ -261,7 +261,7 @@ describe("createOmpUsageService", () => {
     const service = createOmpUsageService({
       locateOmp: async () => {
         locates += 1;
-        return "C:\tools\omp.exe";
+        return "C:\tools\juling.exe";
       },
       exec: async () => {
         execs += 1;
@@ -298,7 +298,7 @@ describe("createOmpUsageService", () => {
     const service = createOmpUsageService({
       locateOmp: async () => {
         locates += 1;
-        return "C:\tools\omp.exe";
+        return "C:\tools\juling.exe";
       },
       exec: async () => {
         execs += 1;

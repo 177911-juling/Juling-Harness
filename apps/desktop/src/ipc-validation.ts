@@ -53,9 +53,9 @@ import type { OmpHarnessDesktopApi } from "@juling-harness/transport-desktop";
 
 /**
  * Fixed window global under which the preload exposes the Desktop bridge.
- * The renderer reads `window.ompHarness` (never `ipcRenderer`).
+ * The renderer reads `window.julingHarness` (never `ipcRenderer`).
  */
-export const DESKTOP_BRIDGE_GLOBAL = "ompHarness" as const;
+export const DESKTOP_BRIDGE_GLOBAL = "julingHarness" as const;
 
 /**
  * Opaque per-subscription id. Chosen by the preload, bounded in length and

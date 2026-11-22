@@ -57,13 +57,13 @@ function createSampleIndex(overrides: Partial<UpdateIndex> = {}): UpdateIndex {
       runtimeVersion: "18.0.12-harness.1",
       channel: "stable",
       platform: "win32-x64",
-      entrypoint: "omp.exe",
+      entrypoint: "juling.exe",
       minAppVersion: "0.1.3",
       harnessProtocol: { min: 1, max: 1 },
       files: [
         {
-          name: "omp.exe",
-          url: "https://github.com/177911-juling/juling-harness/releases/download/v0.1.4/omp.exe",
+          name: "juling.exe",
+          url: "https://github.com/177911-juling/juling-harness/releases/download/v0.1.4/juling.exe",
           size: 174000000,
           sha256: "c".repeat(64),
         },

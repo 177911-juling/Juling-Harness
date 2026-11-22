@@ -41,7 +41,7 @@ it("does not use WebContentsView for a native WebKit descriptor just because Ele
   const command = vi.fn(async () => ({ requestId: "native-tabs" }));
   const client = { command, getState: () => ({ commands: { "native-tabs": { status: "completed", result: { result: { tabs: [tab] } } } } }), subscribe: () => () => {} } as unknown as HarnessClient;
   const present = vi.fn(async () => {});
-  vi.stubGlobal("ompHarnessChrome", { managedBrowser: { available: async () => true, read: async () => ({ sessionId: "native-chat", pages: [], activePageId: null, spaces: [], control: "agent", connection: "connected", settings: { maxTabs: 16, downloadDirectory: "", askDownloadLocation: false }, downloads: [], permissions: [] }), execute: vi.fn(), present, subscribe: () => () => {} } });
+  vi.stubGlobal("julingHarnessChrome", { managedBrowser: { available: async () => true, read: async () => ({ sessionId: "native-chat", pages: [], activePageId: null, spaces: [], control: "agent", connection: "connected", settings: { maxTabs: 16, downloadDirectory: "", askDownloadLocation: false }, downloads: [], permissions: [] }), execute: vi.fn(), present, subscribe: () => () => {} } });
   render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><ManagedBrowserPane nativeClient={client} sessionId="native-chat" pageId={tab.id} visible /></PreviewModeProvider></I18nProvider>);
   expect(await screen.findByText("WebKit")).toBeTruthy();
   expect(screen.getByText("当前连接无法显示同页画面")).toBeTruthy();

@@ -16,7 +16,7 @@ import {
  * layout). Concrete Windows literals are allowed here and nowhere else in
  * the shared tree.
  */
-const RUNTIME_EXECUTABLE_NAME = "omp.exe";
+const RUNTIME_EXECUTABLE_NAME = "juling.exe";
 
 /** Absolute Windows paths: drive-letter (`C:\…`, `C:/…`) or UNC (`\\server\share`). */
 const WINDOWS_ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\\\\)/u;

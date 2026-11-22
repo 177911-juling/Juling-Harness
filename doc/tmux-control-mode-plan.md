@@ -155,7 +155,7 @@ c8f1,204x51,0,0{102x51,0,0,0,101x51,103,0[101x25,103,0,1,101x25,103,26,2]}
 - [remote/platform.ts:43-58](../apps/desktop/src/remote/platform.ts) 的 `sshArguments` **默认就是 `-T`**（SSH 终端把 `args[0]` 改成了 `-tt`）。tmux 控制连接直接用默认参数。
 - 合批与流控：[terminal-batch.ts](../apps/desktop/src/terminal-batch.ts)。`push(id, Uint8Array)` 接受字节，每个会话有一个有状态的 `StringDecoder`，**跨 chunk 拆开的 UTF-8 码点会被拼回去**。所以窗格输出解码成字节后可以直接交给 batcher，不用自己处理 `%output` 行之间被拆开的多字节字符。高水位 500 KiB 时调 `pauseSource(id, true)`，降到低水位 100 KiB 时恢复。
 - 组装：[main.ts:402](../apps/desktop/src/main.ts) 创建 `RemoteTerminalManager`，[main.ts:884-897](../apps/desktop/src/main.ts) 调 `registerTerminalIpc`，[main.ts:1101](../apps/desktop/src/main.ts) 在 `beforeShutdown` 里 `remoteTerminals.disposeAll()`，[main.ts:693](../apps/desktop/src/main.ts) 在 SSH 目标还有终端时拒绝安装 Runtime（`hasTarget`）。
-- preload：[preload.ts:113-144](../apps/desktop/src/preload.ts) 是冻结的 `ompHarnessTerminal`。
+- preload：[preload.ts:113-144](../apps/desktop/src/preload.ts) 是冻结的 `julingHarnessTerminal`。
 - Renderer 存储：[terminalSessions.tsx](../apps/renderer/src/terminalSessions.tsx)。每个 id 一份 backlog 和图形解码器，按 xterm 实际写入的字节 ACK。**未知 id 的输出直接丢弃**（第 226 行），`#sessionIds` 由 `#publish` 按 `state.sessions` 重建（第 378-385 行）。
 - 面板：[TerminalPane.tsx](../apps/renderer/src/TerminalPane.tsx)。预览模式下 `targetId = preview ? null : executionTarget.id`（第 40 行），也就是预览时终端只连本机。xterm 选项 `convertEol: true`，scrollback 1000（第 189-200 行）。CSS 在 `styles/workbench.css` 的 `.term-*`。
 - 上限：`TERMINAL_MAX_SESSIONS = 8`，统计每个窗口里的 PTY 进程数。
@@ -201,10 +201,10 @@ c8f1,204x51,0,0{102x51,0,0,0,101x51,103,0[101x25,103,0,1,101x25,103,26,2]}
 
 ```
 Renderer (TerminalPane / TmuxWindowView / terminalSessions store)
-   │  ompHarnessTerminal.tmuxSessions / tmuxAttach / tmuxCommand / tmuxDetach   (invoke)
-   │  ompHarnessTerminal.onTmux                                                   (event: 拓扑快照)
-   │  ompHarnessTerminal.write / ack  ← 窗格 terminalId 复用现有通道
-   │  ompHarnessTerminal.onData       ← 窗格输出复用现有通道
+   │  julingHarnessTerminal.tmuxSessions / tmuxAttach / tmuxCommand / tmuxDetach   (invoke)
+   │  julingHarnessTerminal.onTmux                                                   (event: 拓扑快照)
+   │  julingHarnessTerminal.write / ack  ← 窗格 terminalId 复用现有通道
+   │  julingHarnessTerminal.onData       ← 窗格输出复用现有通道
    ▼
 Main: terminal-ipc.ts ──owns?──► tmux/manager.ts (TmuxControlManager，按 windowId 分)
                                    │  每个连接 = TmuxConnection
@@ -389,7 +389,7 @@ export interface TmuxTopology {
   - `dispose()` 和启动时的 `removeHandler` 列表都要加上新通道。
 - `preload.ts`：在 `terminalApi` 里加上述方法，`onTmux` 用 `subscribeChannel`。
 - `main.ts`：在 `remoteTerminals` 旁边 `new TmuxControlManager({ connections: remoteConnections, log: … })`，传给 `registerTerminalIpc`，加进 `beforeShutdown` 和 `hasTarget` 判断。
-- `apps/renderer/src/vite-env.d.ts`：`ompHarnessTerminal` 的类型会随 `OmpHarnessTerminalApi` 一起更新。确认它引用的是这个接口，没有另写一份类型。
+- `apps/renderer/src/vite-env.d.ts`：`julingHarnessTerminal` 的类型会随 `OmpHarnessTerminalApi` 一起更新。确认它引用的是这个接口，没有另写一份类型。
 
 ### 5.3 Renderer
 

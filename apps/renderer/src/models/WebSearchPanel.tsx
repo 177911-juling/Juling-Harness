@@ -530,7 +530,7 @@ export function WebSearchPanel({ client, preview, sessionId, visible = true, run
               <div className="wsx-modal-keysec">
                 <div className="wsx-modal-keyheading">
                   <label className="wsx-modal-keylabel" htmlFor="search-api-key">{t("modelConfig.webSearchApiKeyLabel")}</label>
-                  {keyState?.keyUrl ? <button type="button" className="btn small" onClick={() => { if (!preview) void window.ompHarnessChrome?.openUrl({ url: keyState.keyUrl! }); }}>{t("runtimeUpgrade.authWebsite")}<Icon name="external" extra="sm" /></button> : null}
+                  {keyState?.keyUrl ? <button type="button" className="btn small" onClick={() => { if (!preview) void window.julingHarnessChrome?.openUrl({ url: keyState.keyUrl! }); }}>{t("runtimeUpgrade.authWebsite")}<Icon name="external" extra="sm" /></button> : null}
                 </div>
                 <div className="wsx-modal-keyrow">
                   <input id="search-api-key" type="password" value={apiKeyDraft} disabled={!canEdit}

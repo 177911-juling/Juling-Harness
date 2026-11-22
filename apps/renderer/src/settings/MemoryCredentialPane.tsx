@@ -19,7 +19,7 @@ export function MemoryCredentialPane({ runtime, targetId, client, inspect = fals
   const [pending, setPending] = useState(false);
   const [serviceStatus, setServiceStatus] = useState<HarnessRuntimeSettingsGetResult["hindsightStatus"]>();
   const generation = useRef(0);
-  const api = globalThis.ompHarnessChrome;
+  const api = globalThis.julingHarnessChrome;
 
   useEffect(() => {
     generation.current++; setToken(""); setConfigured(false); setSyncSupported(true); setMessage(""); setPending(false); setServiceStatus(undefined);

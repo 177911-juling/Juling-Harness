@@ -130,7 +130,7 @@ export function AppUpdateDialog({
     setNotice(null);
     if (manualInstallUrl && !ready) {
       if (preview) { if (marks) setNotice({ key: "appUpdate.demoUpdate" }); return; }
-      const openUrl = globalThis.ompHarnessChrome?.openUrl;
+      const openUrl = globalThis.julingHarnessChrome?.openUrl;
       if (openUrl) await openUrl({ url: manualInstallUrl });
       else window.open(manualInstallUrl, "_blank", "noopener,noreferrer");
       return;
@@ -175,7 +175,7 @@ export function AppUpdateDialog({
   const openGithub = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     const url = update.htmlUrl ?? "https://github.com/177911-juling/juling-harness/releases";
-    const openUrl = globalThis.ompHarnessChrome?.openUrl;
+    const openUrl = globalThis.julingHarnessChrome?.openUrl;
     if (openUrl !== undefined) {
       void openUrl({ url });
       return;

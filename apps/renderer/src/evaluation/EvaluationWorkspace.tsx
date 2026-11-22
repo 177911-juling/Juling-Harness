@@ -487,8 +487,8 @@ export function EvaluationPage({
       }
       const result = await invoke("evaluations.export", { id: record.id, format });
       if (epoch.current !== currentEpoch) return;
-      if (!executionTarget.id && globalThis.ompHarnessChrome?.exportArtifact) {
-        const saved = await globalThis.ompHarnessChrome.exportArtifact({
+      if (!executionTarget.id && globalThis.julingHarnessChrome?.exportArtifact) {
+        const saved = await globalThis.julingHarnessChrome.exportArtifact({
           artifactId: result.artifactId,
         });
         if (!saved.ok) throw new Error(saved.message);

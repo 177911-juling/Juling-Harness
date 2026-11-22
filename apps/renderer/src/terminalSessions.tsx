@@ -7,7 +7,7 @@ import { isZh } from "./i18n";
 import type { TerminalCommand } from "../../desktop/src/terminal-shared";
 import type { TmuxAction, TmuxTopology } from "../../desktop/src/tmux/tmux-shared";
 
-type Api = NonNullable<typeof globalThis.ompHarnessTerminal>;
+type Api = NonNullable<typeof globalThis.julingHarnessTerminal>;
 export interface TerminalSession {
   readonly kind?: "shell" | "tmux-pane";
   readonly tmux?: { connectionId: string; paneId: string; windowId: string };
@@ -495,7 +495,7 @@ export class TerminalSessions {
 const Context = createContext<TerminalSessions | undefined>(undefined);
 export const terminalOwnerKey = (targetId: string | null, workspaceId?: string, sessionId?: string) => JSON.stringify([targetId, workspaceId ?? null, sessionId ?? null]);
 export function TerminalSessionsProvider({ children }: { children: ReactNode }) {
-  const store = useMemo(() => new TerminalSessions(globalThis.ompHarnessTerminal), []);
+  const store = useMemo(() => new TerminalSessions(globalThis.julingHarnessTerminal), []);
   useEffect(() => () => store.close(), [store]);
   return <Context.Provider value={store}>{children}</Context.Provider>;
 }

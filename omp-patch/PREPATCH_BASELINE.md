@@ -6,7 +6,7 @@ Verified on Windows x64 on 2026-08-10, before the first OMP source patch.
 
 - Upstream commit: `45e12e5bb758198a920c6070e7e64cb33b21beac`
 - OMP version: `17.2.12`
-- Patched CLI/runtime executable: `omp.exe`
+- Patched CLI/runtime executable: `juling.exe`
 - Future desktop application executable: `juling-harness.exe` (reserved; not part of this backend-only phase)
 
 ## Toolchain
@@ -26,6 +26,6 @@ Bazel is not required for a Windows `host` native build. The upstream driver del
 - OMP pause/CLI regression selection: 35 tests passed.
 - OMP source CLI smoke: passed.
 - Windows native addon: `pi_natives.win32-x64-modern.node` built successfully.
-- Windows host binary: `packages/coding-agent/dist/omp.exe` built successfully; `--version` and `--smoke-test` passed.
+- Windows host binary: `packages/coding-agent/dist/juling.exe` built successfully; `--version` and `--smoke-test` passed.
 
 The first optimized Rust build must use a bounded Cargo job count on this workstation. `npm run omp:build:host` defaults to four jobs and reuses Cargo's build cache on subsequent runs.

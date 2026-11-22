@@ -942,7 +942,11 @@ function writeOverrideRow(override: ModelOverridePatch, previous?: Record<string
 
 function parametersFromYaml(row: Record<string, YamlValue>): ModelParameterValues {
   const thinkingConfig = parseModelThinkingConfig(row.thinking);
+  const shape = asRecord(row.snapcompactShape);
+  const variant = stringOf(shape?.variant);
+  const frameSize = numberOf(shape?.frameSize);
   return {
+    ...(variant ? { snapcompactShape: { variant, ...(frameSize === undefined ? {} : { frameSize }) } } : {}),
     ...(numberOf(row.contextWindow) === undefined ? {} : { contextWindow: numberOf(row.contextWindow)! }),
     ...(numberOf(row.maxContextWindow) === undefined ? {} : { maxContextWindow: numberOf(row.maxContextWindow)! }),
     ...(numberOf(row.maxTokens) === undefined ? {} : { maxTokens: numberOf(row.maxTokens)! }),
@@ -1380,7 +1384,7 @@ function defaultAgentDir(): string {
 }
 
 async function defaultLocateOmp(): Promise<string | undefined> {
-  const exeName = process.platform === "win32" ? "omp.exe" : "omp";
+  const exeName = process.platform === "win32" ? "juling.exe" : "omp";
   const extraDirs = [
     join(homedir(), ".omp", "bin"),
     join(homedir(), ".local", "bin"),

@@ -6,8 +6,8 @@ import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
 import { ServicesPane } from "./ServicesPane";
 
-const initialChrome = window.ompHarnessChrome;
-afterEach(() => { cleanup(); window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY); window.ompHarnessChrome = initialChrome; });
+const initialChrome = window.julingHarnessChrome;
+afterEach(() => { cleanup(); window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY); window.julingHarnessChrome = initialChrome; });
 function mount(preview: boolean) {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, preview ? "1" : "0");
   const client = { command: vi.fn(), subscribe: vi.fn() } as unknown as HarnessClient;
@@ -18,7 +18,7 @@ function mount(preview: boolean) {
 }
 it("preview creates and controls demo services without calling Host or desktop storage", async () => {
   const save = vi.fn();
-  window.ompHarnessChrome = { saveServiceDefinition: save } as unknown as NonNullable<typeof window.ompHarnessChrome>;
+  window.julingHarnessChrome = { saveServiceDefinition: save } as unknown as NonNullable<typeof window.julingHarnessChrome>;
   const client = mount(true);
   await screen.findAllByText("web-dev");
   fireEvent.click(screen.getByRole("button", { name: "新建服务" }));
@@ -31,7 +31,7 @@ it("preview creates and controls demo services without calling Host or desktop s
 });
 it("saving a real configuration never starts a process and defaults to session lifetime", async () => {
   const saved = vi.fn(async () => ({ ok: true, definitions: [] }));
-  window.ompHarnessChrome = { listServiceDefinitions: vi.fn(async () => ({ ok: true, definitions: [] })), saveServiceDefinition: saved } as unknown as NonNullable<typeof window.ompHarnessChrome>;
+  window.julingHarnessChrome = { listServiceDefinitions: vi.fn(async () => ({ ok: true, definitions: [] })), saveServiceDefinition: saved } as unknown as NonNullable<typeof window.julingHarnessChrome>;
   const client = mount(false);
   fireEvent.click(await screen.findByRole("button", { name: "新建服务" }));
   fireEvent.change(screen.getByLabelText("名称"), { target: { value: "server" } });

@@ -45,7 +45,7 @@ export function StartupNoticeDialog({
   }, []);
   const openGithub = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
-    const openUrl = globalThis.ompHarnessChrome?.openUrl;
+    const openUrl = globalThis.julingHarnessChrome?.openUrl;
     if (openUrl !== undefined) {
       void openUrl({ url: PROJECT_GITHUB_URL });
       return;

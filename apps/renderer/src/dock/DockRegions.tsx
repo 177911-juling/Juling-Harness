@@ -900,15 +900,18 @@ export function FloatWindow({ group: storedGroup, bounds, order, nativeKey }: { 
   const { t } = useI18n();
   const frame = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const open = (event: Event) => { if (group.panels.includes((event as CustomEvent).detail.panel)) frame.current?.focus({ preventScroll: true }); };
+    const open = (event: Event) => {
+      const { panel, documentId } = (event as CustomEvent).detail;
+      if (documentId === store.documentId && group.panels.includes(panel)) frame.current?.focus({ preventScroll: true });
+    };
     window.addEventListener("omp:dock-open", open);
     return () => window.removeEventListener("omp:dock-open", open);
-  }, [group.id, group.panels.join(",")]);
+  }, [store, group.id, group.panels.join(",")]);
   const menu = useDockContextMenu();
   const tabbed = group.panels.length > 1;
   const minHeight = Math.max(200, minimumBody(definitionFor(definitions, group.active)) + 42 + (tabbed ? 36 : 0));
   const rect = snapped && snap && manager ? snapCells(snap.template, snap.tree, manager.size())[cell!]! : nativeKey || group.maximized ? { x: 0, y: 0, width: bounds.width, height: bounds.height } : clampFloat(group.rect, { width: bounds.width, height: bounds.height }, minHeight);
-  const control = (action: "minimize" | "maximize") => { if (nativeKey) void globalThis.ompHarnessChrome!.controlFloatWindow!({ key: nativeKey, action }); else store.dispatch({ type: "float", groupId: group.id, ...(action === "minimize" ? { minimized: true } : { maximized: !group.maximized }) }); };
+  const control = (action: "minimize" | "maximize") => { if (nativeKey) void globalThis.julingHarnessChrome!.controlFloatWindow!({ key: nativeKey, action }); else store.dispatch({ type: "float", groupId: group.id, ...(action === "minimize" ? { minimized: true } : { maximized: !group.maximized }) }); };
   const dragTitle = (event: ReactPointerEvent<HTMLElement>) => {
     if (nativeKey) return;
     if (readWorkbenchBounds(globalThis.document)) { drag(event, group.panels, group.id); return; }
@@ -922,6 +925,8 @@ export function FloatWindow({ group: storedGroup, bounds, order, nativeKey }: { 
   const containsConversation = group.panels.some(id => definitionFor(definitions, id).content);
   const content = <WindowFrame title={title} icon={definitionFor(definitions, group.active).icon} tint={panelWindowTint(group.active, workspace?.store)}
     {...(group.panels.length === 1 && group.active === "annotations" ? { closeLabel: text("关闭标注", "Close annotations") } : {})}
+    {...(group.panels.length === 1 && group.active === "local-files" ? { closeLabel: text("关闭会话本地文件", "Close session-local files") } : {})}
+    {...(group.panels.length === 1 && group.active === "spill-output" ? { closeLabel: text("关闭完整输出", "Close full output") } : {})}
     titleContent={definitionFor(definitions, group.active).glyph ? <><i className="dock-window-mark"><PanelGlyph definition={definitionFor(definitions, group.active)} /></i><span>{title}</span></> : undefined}
     {...(closesPages ? { closeLabel: group.panels.every(isFilePanelId) ? text("关闭文件", "Close file") : containsConversation ? text("关闭整个浮窗", "Close window group") : group.panels.length > 1 ? text("关闭网页并隐藏其余工具", "Close pages and hide other tools") : text("关闭网页", "Close page") } : {})} rect={rect} bounds={bounds} minHeight={minHeight} minWidth={manager ? 360 : 320} resizable={!snapped}
     maximizeButton={!nativeKey && managed && manager ? <WindowSnapButton manager={manager} window={managed} locked={preferences.locked} onMaximize={() => control("maximize")} /> : undefined}
@@ -929,7 +934,7 @@ export function FloatWindow({ group: storedGroup, bounds, order, nativeKey }: { 
     onTitleDrag={dragTitle} onTitleContextMenu={event => menu.onContextMenu(event, group.panels, group.id)} onTitleKeyDown={event => menu.onKeyDown(event, group.panels, group.id)}
     onControl={control} onClose={() => closePanels(store, definitions, group.panels)}
     onRectChange={rect => store.dispatch({ type: "float", groupId: group.id, rect })} onMeasure={() => hosts.flush()}
-    frameProps={{ role: modal ? "dialog" : "region", "aria-modal": modal || undefined, "aria-owns": modal ? `dock-${modalPanel}-content` : undefined,
+    frameProps={{ role: modal ? "dialog" : "region", "aria-modal": modal || undefined, "aria-owns": modal ? hosts.get(modalPanel).element.id : undefined,
       "aria-label": modal ? title : text(`${title} 浮窗`, `${title} floating window`),
       className: `${snapped ? "is-snapped " : ""}${source && group.panels.every(id => source.panels.includes(id)) ? "dock-drag-source" : ""}`,
       style: { ...(modal ? { zIndex: 81 } : {}), ...(snapped ? { position: "absolute" } : {}) },
@@ -944,14 +949,17 @@ export function FloatWindow({ group: storedGroup, bounds, order, nativeKey }: { 
 /** The float frame, content host and its menus are separate portals. */
 function DockModalFocus({ panel }: { panel: PanelId }) {
   const { store, hosts } = useDockEngine();
+  const { document: conversation } = useConversationDom();
   const { resolvedLanguage } = useI18n();
+  const language = useRef(resolvedLanguage);
+  language.current = resolvedLanguage;
   useLayoutEffect(() => {
     const doc = document;
     const win = doc.defaultView!;
     const origin = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
-    const frame = () => doc.querySelector<HTMLElement>("[data-dock-modal]");
     const host = hosts.get(panel).element;
-    const allowed = (target: Element | null) => !!target && (!!target.closest("[data-dock-modal], [data-dock-menu='popup']") || host.contains(target));
+    const frame = () => doc.querySelector<HTMLElement>(`[data-dock-modal][aria-owns="${host.id}"]`);
+    const allowed = (target: Element | null) => !!target && (frame()?.contains(target) || !!target.closest("[data-dock-menu='popup']") || host.contains(target));
     const first = () => frame()?.querySelector<HTMLElement>(FOCUSABLE) ?? frame();
     const focusFrame = () => first()?.focus({ preventScroll: true });
     doc.body.classList.add("dock-modal-active");
@@ -989,11 +997,13 @@ function DockModalFocus({ panel }: { panel: PanelId }) {
       hosts.schedule();
       if (!locatePanel(store.getSnapshot().layout, panel)) {
         const entry = origin?.isConnected && origin !== doc.body && !origin.closest("[hidden], [inert]") ? origin
-          : [...doc.querySelectorAll<HTMLElement>("button[aria-label]")].find(button => button.getAttribute("aria-label") === translate(resolvedLanguage, "shell.contextCompositionDetails") && visibleElement(button));
+          : panel === "context-viewer"
+            ? [...conversation.querySelectorAll<HTMLElement>("button[aria-label]")].find(button => button.getAttribute("aria-label") === translate(language.current, "shell.contextCompositionDetails") && visibleElement(button))
+            : [...conversation.querySelectorAll<HTMLElement>(".chip-composer-editor")].find(visibleElement);
         entry?.focus({ preventScroll: true });
       }
     };
-  }, [hosts, panel, store, resolvedLanguage]);
+  }, [hosts, panel, store, conversation]);
   return <div className="dock-modal-backdrop" aria-hidden="true" />;
 }
 
@@ -1005,7 +1015,7 @@ export function DockFloatingLayer() {
   const { t } = useI18n();
   const [error, setError] = useState<string | null>(null);
   const [bounds, setBounds] = useState<DockRect | null>(null);
-  const hasLocalFloats = layout.floats.some(group => !isNativeFloat(group) || !globalThis.ompHarnessChrome?.prepareFloatWindow);
+  const hasLocalFloats = layout.floats.some(group => !isNativeFloat(group) || !globalThis.julingHarnessChrome?.prepareFloatWindow);
   useLayoutEffect(() => {
     if (!hasLocalFloats) return;
     let frame = 0;
@@ -1060,7 +1070,7 @@ export function DockFloatingLayer() {
     const managed = store.windowManager?.get(store.windowId(group.id));
     if (managed?.content.kind === "conversation") return null;
     if (managed && managed.placement !== "native" && !store.windowManager!.visible(managed)) return null;
-    if (isNativeFloat(group) && globalThis.ompHarnessChrome?.prepareFloatWindow) return <NativeFloat key={`${preview}:${group.id}`} group={group} namespace={preview ? "preview" : "real"} onError={message => setError(`${t("dockPin.failed")}：${message}`)} />;
+    if (isNativeFloat(group) && globalThis.julingHarnessChrome?.prepareFloatWindow) return <NativeFloat key={`${preview}:${group.id}`} group={group} namespace={preview ? "preview" : "real"} onError={message => setError(`${t("dockPin.failed")}：${message}`)} />;
     return bounds && !group.minimized ? <FloatWindow key={group.id} group={group} order={order} bounds={bounds} /> : null;
   })}
     {!!minimizedPins.length && <div className="dock-pinned-capsules" role="group" aria-label={t("dockPin.minimized")}>{minimizedPins.map(group => <MinimizedCapsule key={group.id} owner={store.windowManager ?? store} capsuleId={`pin:${preview}:${group.id}`} locked={preferences.locked} onClick={() => store.dispatch({ type: "open", panel: group.active })}><Icon name="pin" extra="sm" /><span className="dock-capsule-title">{floatTitle(definitionFor(definitions, group.active).title, conversationTitle)}</span><Icon name="restore" extra="sm" /></MinimizedCapsule>)}</div>}

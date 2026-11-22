@@ -21,18 +21,18 @@ const report={status:'running',modelCalls:0,checks:[],profile:temp};
 let app,page;
 const query=async(name,input={})=>{const r=await page.evaluate(async({name,input})=>{
  let timer;
- try{return await Promise.race([window.ompHarness.query({queryName:name,input}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Query timeout: '+name)),45000);})]);}
+ try{return await Promise.race([window.julingHarness.query({queryName:name,input}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Query timeout: '+name)),45000);})]);}
  finally{clearTimeout(timer);}
 },{name,input});if(!r.ok)throw Error(JSON.stringify(r.error));return r.result;};
 async function until(read,accept,label,timeoutMs=90000){const end=Date.now()+timeoutMs;let last;while(Date.now()<end){try{const value=await read();if(accept(value))return value;}catch(e){last=e;}await new Promise(r=>setTimeout(r,300));}throw Error(label+': '+last);}
 const command=async(name,input={})=>page.evaluate(({name,input})=>{
  const requestId=crypto.randomUUID();return new Promise((resolve,reject)=>{
   const timer=setTimeout(()=>{off();reject(Error('Receipt timeout: '+name));},45000);
-  const off=window.ompHarness.subscribe({scope:'command',requestId},event=>{
+  const off=window.julingHarness.subscribe({scope:'command',requestId},event=>{
    if(event.kind!=='command.receipt'||!['completed','failed','rejected','outcome_unknown'].includes(event.receipt.status))return;
    clearTimeout(timer);off();if(event.receipt.status==='completed')resolve(event.receipt.result);else reject(Error(JSON.stringify(event.receipt)));
   });
-  window.ompHarness.command({commandName:name,input,requestId,idempotencyKey:requestId}).catch(error=>{clearTimeout(timer);off();reject(error);});
+  window.julingHarness.command({commandName:name,input,requestId,idempotencyKey:requestId}).catch(error=>{clearTimeout(timer);off();reject(error);});
  });
 },{name,input});
 async function capture(name){await page.screenshot({path:join(output,name+'.png')});}
@@ -115,7 +115,7 @@ try{
   dialog.showOpenDialog=async(...args)=>({canceled:false,filePaths:[args.at(-1)?.properties?.includes('openDirectory')?workspace:transferFile]});
   dialog.showSaveDialog=async()=>({canceled:false,filePath:transferFile});
  },{workspace,transferFile});
- await page.waitForFunction(()=>!!window.ompHarness);
+ await page.waitForFunction(()=>!!window.julingHarness);
  await page.evaluate(()=>{localStorage.setItem('omp.appSettings',JSON.stringify({language:'zh'}));localStorage.setItem('omp.previewMode','0');localStorage.setItem('omp.startupNotice.dismissed','incomplete-v1');localStorage.setItem('omp.lastRoute','home');});
  await page.reload();
  await page.getByRole('button',{name:/打开本地文件夹|Open local folder/i}).first().click();
@@ -126,15 +126,15 @@ try{
  report.runtime=environment.runtime.runtimeVersion;
  console.log('Authenticated Runtime '+report.runtime);
  if(packaged){
-  const terminal=await page.evaluate(()=>window.ompHarnessTerminal.create({cols:80,rows:24}));
-  await page.evaluate(id=>window.ompHarnessTerminal.dispose(id),terminal.id);
+  const terminal=await page.evaluate(()=>window.julingHarnessTerminal.create({cols:80,rows:24}));
+  await page.evaluate(id=>window.julingHarnessTerminal.dispose(id),terminal.id);
   report.checks.push('packaged application and native PTY creation/disposal');
  }
  const session=await query('session.state');
  const invoke=(name,input={})=>command(name,{sessionId:session.sessionId,...input});
  if(process.env.OMP_E2E_WORKTREE_ONLY!=='1'){
  const caps=await query('capabilities.get');
- for(const id of ['ida.status','resource.read','session.queue.list','session.queue.ack','session.tier.get','session.skills.list','agent.btw.read'])if(!caps.capabilities.some(c=>c.id===id&&c.grade!=='unavailable'))throw Error('Missing '+id);
+ for(const id of ['disassembler.status','resource.read','session.queue.list','session.queue.ack','session.tier.get','session.skills.list','agent.btw.read'])if(!caps.capabilities.some(c=>c.id===id&&c.grade!=='unavailable'))throw Error('Missing '+id);
  report.checks.push('signed managed Runtime handshake and capability negotiation');
  for(const id of ['preferences.features.get','accounts.pool.options','models.compaction.preview','session.portability.prepare','maintenance.compression.scan','worktrees.session.create','mode.plan.review.details','composer.predictions'])if(!caps.capabilities.some(c=>c.id===id&&c.grade!=='unavailable'))throw Error('Missing new capability '+id);
  const featureSettings=(await invoke('preferences.features.get')).result;
@@ -148,9 +148,9 @@ try{
  if(!(await invoke('worktrees.session.remove.apply',{token:removal.token})).result.removed)throw Error('Isolated worktree was not removed');
  report.checks.push('native worktree creation, desktop workspace registration, reviewed removal');
  const packed=(await invoke('session.portability.pack',{targetSessionId:transferSessionId})).result;
- const saved=await page.evaluate(artifactId=>window.ompHarnessChrome.exportArtifact({artifactId}),packed.asset.artifactId);
+ const saved=await page.evaluate(artifactId=>window.julingHarnessChrome.exportArtifact({artifactId}),packed.asset.artifactId);
  if(!saved.ok||saved.cancelled)throw Error('Cannot export acceptance session archive');
- const picked=await page.evaluate(sessionId=>window.ompHarnessChrome.importArtifact({kind:'export',sessionId}),session.sessionId);
+ const picked=await page.evaluate(sessionId=>window.julingHarnessChrome.importArtifact({kind:'export',sessionId}),session.sessionId);
  if(!picked.ok||!picked.artifact)throw Error('Cannot select acceptance session archive');
  const importPreview=(await invoke('session.portability.prepare',{artifactId:picked.artifact.artifactId})).result;
  if(!importPreview.conflicts)throw Error('Archive collision was not detected');
@@ -160,7 +160,7 @@ try{
  if(recovered.imported?.workspaceId!==imported.workspaceId)throw Error('Import result was not recoverable after refresh');
  await invoke('session.portability.anonymize',{targetSessionId:transferSessionId});
  report.checks.push('native archive export, private desktop transfer, collision-preserving import, recoverable result and anonymous export');
- for(const name of ['ida.status','session.queue.list','session.tier.get','session.skills.list']){const value=await invoke(name);if(name==='ida.status')report.ida=value;report.checks.push(name);}
+ for(const name of ['disassembler.status','session.queue.list','session.tier.get','session.skills.list']){const value=await invoke(name);if(name==='disassembler.status')report.disassembler=value;report.checks.push(name);}
  await invoke('resource.read',{uri:'omp://'});
  const prediction=await query('prediction.query',{sessionId:session.sessionId,version:1,before:'',prefix:'unsent-verification'});
  if(prediction.version!==1)throw Error('Prediction version mismatch');
@@ -177,7 +177,7 @@ try{
   console.log((preview?'Preview ':'Real ')+route);
   await page.evaluate(({preview,route})=>{localStorage.setItem('omp.previewMode',preview?'1':'0');localStorage.setItem('omp.lastRoute',route);},{preview,route});
   const routeUrl=new URL(page.url());routeUrl.search=preview?'?preview=1':'';
-  await page.goto(routeUrl.href);await page.waitForFunction(()=>!!window.ompHarness);await page.waitForTimeout(800);
+  await page.goto(routeUrl.href);await page.waitForFunction(()=>!!window.julingHarness);await page.waitForTimeout(800);
   if(route==='agent-hub')await page.getByRole('button',{name:'Agent Hub',exact:true}).click();
   else {
    await page.getByRole('button',{name:/^统计$|^Statistics$/}).click();
@@ -213,8 +213,8 @@ try{
   }
   if(route==='evaluation')await page.getByRole('tab',{name:/判断批次|Judgment batches/}).click();
   if(route==='capabilities'){
-   await page.locator('#capTab-ida').click();
-   await page.getByRole('heading',{name:/IDA/}).waitFor();
+   await page.locator('#capTab-disassembler').click();
+   await page.getByRole('heading',{name:/Disassembler|反汇编/}).waitFor();
    if(preview){await page.getByRole('button',{name:/数据库视图与编辑|Database views and edits/}).click();await page.getByRole('combobox',{name:/IDA 数据库|IDA database/}).selectOption({index:1});await page.getByRole('button',{name:/^检查操作$|^Review operation$/}).click();await page.getByRole('alertdialog').waitFor();await page.getByRole('alertdialog').getByRole('button',{name:/^返回$|^Back$/}).click();}
   }
   await capture((preview?'preview-':'real-')+route);report.checks.push((preview?'preview':'real')+' '+route);
@@ -243,7 +243,7 @@ try{
  }
  // Exercise the real fresh-session policy without sending any prompt.
  await page.evaluate(()=>localStorage.setItem('omp.previewMode','0'));
- const realUrl=new URL(page.url());realUrl.search='';await page.goto(realUrl.href);await page.waitForFunction(()=>!!window.ompHarness);
+ const realUrl=new URL(page.url());realUrl.search='';await page.goto(realUrl.href);await page.waitForFunction(()=>!!window.julingHarness);
  await page.getByText('OMP 已就绪',{exact:true}).first().waitFor({timeout:60000});
  // Preview project selections are UI-only. Select the real fixture workspace again.
  await page.getByRole('button',{name:/打开本地文件夹|Open local folder/i}).first().click();

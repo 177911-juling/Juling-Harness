@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/can1357/oh-my-pi.git",
-  "commit": "7c49c11aa5bbaf3f418406583096168ad5b8c6dc",
+  "commit": "f40f335845f0b136453d12fec8d6057011082766",
   "firstPlatform": "win32-x64",
-  "entrypoint": "omp.exe",
+  "entrypoint": "juling.exe",
   "platforms": [
     "win32-x64",
     "win32-arm64",
@@ -12,8 +12,8 @@
     "linux-arm64"
   ],
   "entrypoints": {
-    "win32": "omp.exe",
-    "darwin": "omp",
-    "linux": "omp"
+    "win32": "juling.exe",
+    "darwin": "juling",
+    "linux": "juling"
   }
 }

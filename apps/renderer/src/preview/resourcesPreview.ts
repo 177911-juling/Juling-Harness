@@ -1,5 +1,6 @@
 import type { LocalResourceRow, ResourcePage } from "@juling-harness/harness-protocol";
 import { isZh } from "../i18n";
+export const PREVIEW_LOCAL_ROOT = "/workspace/.omp/sessions/demo/local";
 
 // Kept for callers that already use the original resource fixture.
 export const PREVIEW_RESOURCE: ResourcePage = {
@@ -18,7 +19,53 @@ function buildLocalContent(zh: boolean) {
         : "# Implementation plan\n\n## Goal\n\nOrganize implementation steps and verification notes for the current session.\n\n## Steps\n\n- [x] Confirm session identity and workspace boundary\n- [x] Review resource reading and version checks\n- [ ] Verify queue and attachments\n- [ ] Re-check file contents before and after saving\n\n## Acceptance\n\nSwitching sessions does not carry stale requests; external edits do not overwrite drafts.\n",
     },
     { name: "notes.md", modifiedAt: "2026-10-28T09:42:00Z", text: PREVIEW_RESOURCE.text },
+    {
+      name: "1.log", modifiedAt: "2026-10-28T09:44:00Z",
+      text: [
+        "$ \x1b[36mnpm run check -- --only renderer\x1b[0m",
+        "",
+        "build: compiling workspace packages",
+        "  PASS  harness-protocol",
+        "  \x1b[1;32mPASS\x1b[0m  client-contract",
+        "  PASS  client",
+        "  PASS  renderer",
+        "  WARN  source map missing for one worker chunk",
+        "test: running renderer suites",
+        "  PASS  conversation/markdown.test.tsx",
+        "  PASS  composer/command-manifest.test.ts",
+        "  PASS  dock/windows.test.ts",
+        "  PASS  capabilities/ResourcesWorkspace.test.tsx",
+        "",
+        "build: complete",
+        "",
+      ].join("\n"),
+    },
     { name: "review.md", modifiedAt: "2026-10-27T15:20:00Z", text: "# Review notes\n\n## Scope\n\nThe session owns its local files. Project files stay in the workspace.\n\n## Checks\n\n1. Read the complete file before editing.\n2. Save against the version that was opened.\n3. Keep the draft if the source changes externally.\n4. Reopen the latest source before resolving a conflict.\n\n## Follow-up\n\nReview the attachment and record any remaining UI issues.\n" },
+    {
+      name: "context-preview.ts", modifiedAt: "2026-10-27T13:00:00Z",
+      text: [
+        "interface ContextSnapshot {",
+        "  readonly usedTokens: number;",
+        "  readonly limit: number;",
+        "  readonly capturedAt: string;",
+        "}",
+        "",
+        "export function contextPercent(snapshot: ContextSnapshot): number {",
+        "  const { usedTokens, limit } = snapshot;",
+        "  if (limit <= 0) return 0;",
+        "  return Math.round((usedTokens / limit) * 100);",
+        "}",
+        "",
+        "const snapshot: ContextSnapshot = {",
+        "  usedTokens: 220_400,",
+        "  limit: 1_000_000,",
+        "  capturedAt: '2026-10-27T13:00:00Z',",
+        "};",
+        "",
+        "console.log(`Context usage: ${contextPercent(snapshot)}%`);",
+        "",
+      ].join("\n"),
+    },
     { name: "verify.py", modifiedAt: "2026-10-27T11:35:00Z", text: "from pathlib import Path\n\n\ndef inspect_notes(root: Path) -> list[str]:\n    return sorted(path.name for path in root.glob('*.md'))\n\n\nif __name__ == '__main__':\n    for name in inspect_notes(Path.cwd()):\n        print(name)\n" },
   ];
 }
@@ -53,6 +100,7 @@ const ATTACHMENT_PNG = "iVBORw0KGgoAAAANSUhEUgAAAeAAAAEOCAIAAADe+FMwAAAH+0lEQVR4
 export function readPreviewResource(uri: string, offset = 0, version?: string, zh = isZh()): ResourcePage {
   let text: string;
   let resourceVersion: string;
+  if (uri === "artifact://1") return { ...readPreviewResource("local://1.log", offset, version, zh), uri };
   if (uri.startsWith("local://")) {
     const file = createPreviewLocalFiles(zh).find(file => file.uri === uri);
     if (!file) throw new Error(zh ? "没有此本地资源" : "Local resource not found");

@@ -21,6 +21,7 @@ import { PromptHead, type DeckQueue } from "./deck/PromptHead";
 import type { DeckAskAnswer } from "./deck/types";
 import { closeFormSession, useFormInteractionLifecycle, useFormSession, type FormInteraction, type ReadInteractionForm } from "./deck/FormSession";
 import { FormCard } from "./deck/FormCard";
+import { QuestionHeightHandle } from "./deck/QuestionHeightHandle";
 import { isZh, useI18n } from "./i18n/I18nContext";
 
 export type { DeckQueue } from "./deck/PromptHead";
@@ -107,6 +108,7 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
     };
     return (
       <div className="ask-card">
+        <QuestionHeightHandle />
         <AskHead
           {...(demo === true ? { demo: true } : {})}
           {...(caption?.meta ? { meta: caption.meta } : {})}
@@ -136,18 +138,21 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
   if (interaction.kind === "input") {
     return (
       <div className="ask-card">
+        <QuestionHeightHandle />
         <PromptHead icon="pencil" title={interaction.title || (zh ? "输入" : "Input")} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
         <div className="ask-body">
-          <input className="input dk-input" value={text} onChange={(event) => setText(event.target.value)} disabled={busy} placeholder={interaction.placeholder ?? "Response"} type={interaction.secret ? "password" : "text"} />
+          {interaction.riskAcknowledgement && <p className="model-native-warning">{zh ? "登录前请阅读上面的风险说明，并输入 yes 确认。" : "Review the sign-in risk above and type yes to continue."}</p>}
+          <input className="input dk-input" value={text} onChange={(event) => setText(event.target.value)} disabled={busy} placeholder={interaction.placeholder ?? (zh ? "输入回答" : "Response")} type={interaction.secret ? "password" : "text"} />
         </div>
         {retryNote}
-        <AskActions {...(busy ? { disabled: true } : {})} canSubmit={text.trim().length > 0} onCancel={cancel} onSubmit={() => submit(text)} />
+        <AskActions {...(busy ? { disabled: true } : {})} canSubmit={interaction.riskAcknowledgement ? text.trim().toLowerCase() === "yes" : text.trim().length > 0} onCancel={cancel} onSubmit={() => submit(text)} />
       </div>
     );
   }
   if (interaction.kind === "editor") {
     return (
       <div className="ask-card">
+        <QuestionHeightHandle />
         <PromptHead icon="pencil" title={interaction.title || (zh ? "编辑" : "Edit")} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
         <div className="ask-body">
           {interaction.language ? <p className="muted small">{interaction.language}</p> : null}
@@ -202,11 +207,13 @@ function LiveAskQueue({
   onRespond,
   disabled,
   leaving,
+  partialAsk,
 }: {
   interaction: Extract<ClientInteraction, { kind: "ask" | "select" }>;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
   disabled: boolean;
   leaving?: boolean;
+  partialAsk?: { current: InteractionResponseValue | undefined } | undefined;
 }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
@@ -245,6 +252,7 @@ function LiveAskQueue({
   return (
     <QueuedDeck
       items={items}
+      readAskDraft={partialAsk ? draft => { partialAsk.current = liveAskValue(interaction, { ...answersRef.current, ...draft }, zh); } : undefined}
       regionLabel={zh ? "待处理的审批与提问" : "Pending approvals & questions"}
       {...(disabled ? { disabled: true } : {})}
       {...(submitError ? { submitError: true } : {})}
@@ -265,12 +273,13 @@ function liveAskValue(
   return submitSelectValue(view, answers[view.question.id] ?? NO_ASK_ANSWER, interaction.multiple);
 }
 
-export function InteractionDeck({ interaction, onRespond, disabled, leaving, readForm }: {
+export function InteractionDeck({ interaction, onRespond, disabled, leaving, readForm, partialAsk }: {
   interaction: ClientInteraction | null;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
   disabled: boolean;
   leaving?: boolean;
   readForm?: ReadInteractionForm | undefined;
+  partialAsk?: { current: InteractionResponseValue | undefined } | undefined;
 }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
@@ -282,7 +291,7 @@ export function InteractionDeck({ interaction, onRespond, disabled, leaving, rea
   }
   if (interaction.kind === "ask" || interaction.kind === "select") {
     return (
-      <LiveAskQueue
+      <LiveAskQueue partialAsk={partialAsk}
         key={`${interaction.interactionId}:${interaction.leaseGeneration}`}
         interaction={interaction}
         onRespond={onRespond}

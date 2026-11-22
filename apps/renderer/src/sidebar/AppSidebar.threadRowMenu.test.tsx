@@ -130,7 +130,7 @@ describe("AppSidebar thread row more menu", () => {
 
     // 顶栏「对话选项」同款七项，弹层 portal 到 body。
     const menu = screen.getByRole("menu");
-    for (const label of ["重命名对话", "Fork 当前对话", "Handoff 到新对话", "Compact 当前上下文", "导出对话", "会话历史", "归档会话"]) {
+    for (const label of ["重命名对话", "Fork 当前对话", "生成交接摘要", "Compact 当前上下文", "导出对话", "会话历史", "归档会话"]) {
       expect(within(menu).getByRole("menuitem", { name: label })).toBeTruthy();
     }
 
@@ -163,6 +163,7 @@ describe("AppSidebar thread row more menu", () => {
 
   it("opens the same menu at the cursor on row right-click", () => {
     const onThreadRowAction = vi.fn();
+    const onDeleteThread = vi.fn();
     const chrome = {
       ...baseChrome(),
       projectHistories: {
@@ -173,6 +174,7 @@ describe("AppSidebar thread row more menu", () => {
         },
       },
       onThreadRowAction,
+      onDeleteThread,
     } as unknown as ComponentProps<typeof AppSidebar>["chrome"];
     const state = {
       ...baseState(),
@@ -194,8 +196,9 @@ describe("AppSidebar thread row more menu", () => {
     expect(screen.getAllByRole("menu")).toHaveLength(1);
     expect(screen.getByRole("menu").style.top).toBe("88px");
 
-    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Fork 当前对话" }));
-    expect(onThreadRowAction).toHaveBeenCalledWith(historyEntry, workspaceId, "fork");
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "删除会话" }));
+    expect(onDeleteThread).toHaveBeenCalledWith(historyEntry, workspaceId);
+    expect(onThreadRowAction).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -216,7 +219,7 @@ describe("AppSidebar thread row more menu", () => {
     fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "更多操作" }));
     const fork = screen.getByRole("menuitem", { name: "Fork 当前对话" }) as HTMLButtonElement;
     expect(fork.disabled).toBe(blocked);
-    expect((screen.getByRole("menuitem", { name: "Handoff 到新对话" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: "生成交接摘要" }) as HTMLButtonElement).disabled).toBe(blocked);
     if (!blocked) { fireEvent.click(fork); expect(onThreadRowAction).toHaveBeenCalledWith(historyEntry, workspaceId, "fork"); }
   });
 });

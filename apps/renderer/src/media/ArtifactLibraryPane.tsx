@@ -82,7 +82,7 @@ export function ArtifactStorageSettings({
           type="button"
           className="btn small outline"
           disabled={
-            !preview && !globalThis.ompHarnessChrome?.chooseArtifactDirectory
+            !preview && !globalThis.julingHarnessChrome?.chooseArtifactDirectory
           }
           onClick={() => {
             if (preview) {
@@ -91,7 +91,7 @@ export function ArtifactStorageSettings({
               );
               return;
             }
-            void globalThis.ompHarnessChrome
+            void globalThis.julingHarnessChrome
               ?.chooseArtifactDirectory?.()
               .then((result) => {
                 if (!result.ok) setError(result.message);
@@ -217,7 +217,7 @@ export function ArtifactLibraryPane({
     setBusy(true);
     setError("");
     try {
-      const result = await globalThis.ompHarnessChrome?.importArtifact?.({
+      const result = await globalThis.julingHarnessChrome?.importArtifact?.({
         kind: kind || "image",
         ...(workspaceId ? { workspaceId } : {}),
         ...(sessionId ? { sessionId } : {}),
@@ -266,7 +266,7 @@ export function ArtifactLibraryPane({
           type="button"
           className="btn small outline"
           disabled={
-            busy || (!preview && !globalThis.ompHarnessChrome?.importArtifact)
+            busy || (!preview && !globalThis.julingHarnessChrome?.importArtifact)
           }
           onClick={() => void importFile()}
         >
@@ -366,11 +366,11 @@ export function ArtifactLibraryPane({
                 type="button"
                 className="btn small outline"
                 disabled={
-                  !preview && !globalThis.ompHarnessChrome?.exportArtifact
+                  !preview && !globalThis.julingHarnessChrome?.exportArtifact
                 }
                 onClick={() => {
                   if (preview) return;
-                  void globalThis.ompHarnessChrome
+                  void globalThis.julingHarnessChrome
                     ?.exportArtifact?.({ artifactId: selected.artifactId })
                     .then((result) => {
                       if (!result.ok) setError(result.message);
@@ -384,7 +384,7 @@ export function ArtifactLibraryPane({
               </button>
             </div>
             {!visible ? null : !preview &&
-              !globalThis.ompHarnessChrome?.exportArtifact ? (
+              !globalThis.julingHarnessChrome?.exportArtifact ? (
               <p className="muted">{t("media.unavailable")}</p>
             ) : selected.kind === "graphic" || graphicFormat(selected.name) ? (
               <GraphicPreview

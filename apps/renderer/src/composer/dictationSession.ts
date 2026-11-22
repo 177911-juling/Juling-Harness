@@ -58,7 +58,7 @@ interface Dependencies {
 }
 const EMPTY: DictationView = { phase: "off", message: "", level: 0 };
 
-export function dictationDesktopApi(api = globalThis.ompHarnessChrome): DictationAudioApi | undefined {
+export function dictationDesktopApi(api = globalThis.julingHarnessChrome): DictationAudioApi | undefined {
   if (!api?.attachDictationAudio || !api.controlDictationAudio || !api.appendDictationAudio || !api.drainDictationAudio || !api.getDictationRecovery || !api.replayDictationAudio || !api.retainDictationAudio || !api.releaseDictationAudio || !api.onDictationAudio) return undefined;
   return api as typeof api & DictationAudioApi;
 }

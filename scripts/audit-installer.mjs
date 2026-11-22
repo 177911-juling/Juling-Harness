@@ -257,10 +257,10 @@ export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory
   if (packedVersion !== expectedVersion) {
     throw new Error(`Packed Runtime is ${packedVersion}; series expects ${expectedVersion}`);
   }
-  const omp = join(versionsRoot, packedVersion, "omp.exe");
+  const omp = join(versionsRoot, packedVersion, "juling.exe");
   const manifest = join(versionsRoot, packedVersion, "runtime-manifest.json");
   if (!existsSync(omp) || !existsSync(manifest)) {
-    throw new Error("No signed Runtime folder with omp.exe + runtime-manifest.json");
+    throw new Error("No signed Runtime folder with juling.exe + runtime-manifest.json");
   }
   const packedManifest = JSON.parse(readFileSync(manifest, "utf8"));
   if (targetArch) {

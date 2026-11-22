@@ -229,6 +229,12 @@ export interface SessionHistoryEntry {
   readonly pinned?: boolean;
 }
 
+export interface SessionHistoryMatch {
+  readonly workspaceId: WorkspaceId;
+  readonly workspaceName: string;
+  readonly entry: SessionHistoryEntry;
+}
+
 export interface SessionHistoryReadModel {
   readonly entries: ReadonlyArray<SessionHistoryEntry>;
   readonly total: number;
@@ -355,6 +361,8 @@ export interface TokenUsageHourPoint {
  * files, folders, or other filesystem facts.
  */
 export interface TokenUsageReadModel {
+  readonly offTranscript?: ReadonlyArray<{ kind: "title" | "jobCaption" | "judge" | "cacheWarming"; requests: number; tokens: number }>;
+  readonly decisionModels?: ReadonlyArray<{ purpose: string; provider: string; model: string; requests: number; tokens: number }>;
   readonly generatedAt: string;
   readonly days: ReadonlyArray<TokenUsageDayPoint>;
   readonly models: ReadonlyArray<TokenUsageModelRef>;
@@ -473,6 +481,7 @@ export interface ModelProviderRemoteCompaction {
 
 /** Partial `models.yml` modelOverrides / extra custom-model fields. */
 export interface ModelOverridePatch {
+  readonly snapcompactShape?: import("./model-adaptation.js").SnapcompactShape;
   readonly maxContextWindow?: number;
   readonly thinkingConfig?: ModelThinkingConfig | null;
   readonly parameterSources?: ModelParameterSources;
@@ -504,6 +513,7 @@ export interface ModelOverridePatch {
 
 /** One model row under a provider. Safe display facts only. */
 export interface ModelExecutionMetadata {
+  readonly snapcompactShape?: import("./model-adaptation.js").SnapcompactShape;
   readonly serviceTiers?: ReadonlyArray<string>;
   readonly promptCache?: { readonly short?: number; readonly long?: number };
   readonly promptCacheConfig?: { readonly short?: number; readonly long?: number };

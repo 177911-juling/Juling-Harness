@@ -28,7 +28,7 @@ Harness 的 pin、patchset 和制品身份以以下文件为真值：
 | patchset digest | sha256:2ab946b985a6ba9103b6051c191508e1bf984b0ae6e183144641278afd1ae4b3 | 覆盖 overlay 与 seam patch 内容和路径 |
 | seam patch 顺序 | 0001-harness-cli-entry.patch → 0002-harness-session-runtime.patch → 0003-harness-modes-and-pause.patch → 0004-harness-extensibility.patch | 只能由 regen 脚本生成，不手改 patch |
 | Runtime 制品版本 | 18.0.3-harness.10 | 上游版本与 patchset 的联合身份 |
-| Windows entrypoint | omp.exe | 以 omp --mode harness-host 启动；juling-harness.exe 仍预留给未来桌面壳 |
+| Windows entrypoint | juling.exe | 以 omp --mode harness-host 启动；juling-harness.exe 仍预留给未来桌面壳 |
 | 首个平台 | win32-x64 | upstream.json 的 firstPlatform |
 | Harness Protocol | juling-harness / v1 | 根 packages/harness-protocol 是 canonical contract |
 
@@ -237,8 +237,8 @@ Settings props、Plan save callback、History pinned 显示都保持可选；预
 | Renderer type/build | npm run typecheck -w @juling-harness/renderer；npm run build -w @juling-harness/renderer | exactOptionalPropertyTypes、App 接线、preview/real 分支和 i18n 无错误 | 通过；390 |
 | Renderer focused | npm run test -w @juling-harness/renderer -- src/RuntimeSettings.test.tsx src/deck/PlanSaveAndQuit.test.tsx src/sidebar/useProjectHistories.test.ts | 缺省禁用、七 key onSet、preview 不调 Host、compaction 状态、PLAN.md/default/cancel、QueuedDeck 透传、History pinned 排序展示通过 | 通过；focused UI 31 |
 | Root package gates | npm run check | 根 packages、Desktop、Renderer、协议、transport 和静态门禁全部通过 | 通过 |
-| Host artifact | npm run omp:build:host | Windows omp.exe 成功构建并可探测 | 通过；omp:build:host 成功 |
-| Binary identity | 构建出的 omp.exe --version、--smoke-test 和 authenticated identity probe | CLI --version 输出 omp/18.0.3；认证 identity probe 输出 18.0.3-harness.10；hello、manifest hash 和 patchset 一致 | 通过；两种身份已明确区分 |
+| Host artifact | npm run omp:build:host | Windows juling.exe 成功构建并可探测 | 通过；omp:build:host 成功 |
+| Binary identity | 构建出的 juling.exe --version、--smoke-test 和 authenticated identity probe | CLI --version 输出 omp/18.0.3；认证 identity probe 输出 18.0.3-harness.10；hello、manifest hash 和 patchset 一致 | 通过；两种身份已明确区分 |
 | Install e2e | npm run omp:e2e:install | 签名/校验、channel 选择、安装、activate、previous 保留、rollback、hello、manifest、graceful shutdown 全链路通过 | 通过；已安装并激活 win32-x64 |
 | 最终断言 | 复核 upstreamVersion=18.0.3、upstreamCommit=160ed439ac0df594347e7d7018b813a7ffdb5e81、patchsetVersion=harness.10、runtimeVersion=18.0.3-harness.10、protocol=1、unclassifiedBuiltins=[] | 无身份漂移、无未声明 capability、vendor verifier 清理完成 | 通过 |
 | 工作树卫生 | git diff --check；限定路径 git status/diff；确认不纳入 node_modules、dist、artifact、日志、截图、密钥和无关删除 | 只审查本轮所有权，保留并行 agent 的用户改动 | 通过；diff-check 通过；本轮文件按文档范围审查，用户原有删除/无关改动保持未触碰；artifact/build 输出不纳入 Git |
@@ -254,7 +254,7 @@ Settings props、Plan save callback、History pinned 显示都保持可选；预
 | command hash | sha256:dcd545345750eb28809f0f7f080de4ae8049855adc1db239130b1df70931ef3a |
 | manifest SHA256 | afdc61cc9b9e563e94ae0ba64350e90e1dc6abd86349c2d02750be5ccbb46bae |
 | Runtime artifact 目录 | packages/runtime-installer/dist/artifacts/win32-x64/18.0.3-harness.10 |
-| artifact 文件 | runtime-manifest.json、checksums.json、runtime-signature.json、omp.exe |
+| artifact 文件 | runtime-manifest.json、checksums.json、runtime-signature.json、juling.exe |
 | binary CLI identity | omp/18.0.3 |
 | authenticated Runtime identity | 18.0.3-harness.10 |
 | unclassified builtins | 0 |
@@ -279,7 +279,7 @@ CLI 的 omp/18.0.3 是上游程序版本输出；authenticated identity probe �
 
 ### 7.2 安全回滚顺序
 
-1. 停止 Desktop、Harness Host 和正在运行的 omp.exe；保留日志、manifest、checksum、diagnostics 和 active/previous 目录现场。
+1. 停止 Desktop、Harness Host 和正在运行的 juling.exe；保留日志、manifest、checksum、diagnostics 和 active/previous 目录现场。
 2. 通过 installer 的 rollback/previous 机制切回上一份已验证制品；不要直接删除 current 或 previous，也不要用未校验的目录替换当前运行版本。
 3. 在根仓库和 vendor 分别执行限定路径 git diff/status，确认要恢复的文件确实属于本轮。禁止使用 git reset --hard、git checkout --、根目录 git add -A 或在 fork 已应用时执行 git submodule update。
 4. 若需回退 Runtime pin，把 vendor detached checkout 恢复到已确认的前一 pin（本轮 README 的初始审计基线为 45e12e5bb758198a920c6070e7e64cb33b21beac；旧 v17.4.1 目标 9350b7990d26ebf69a604edc82d8558ef04adf30 仅在明确选择旧版本时使用），再按对应备份恢复 upstream.json 和 series.json。

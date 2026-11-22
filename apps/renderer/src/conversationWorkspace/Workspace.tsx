@@ -34,13 +34,15 @@ import { acquireProjectReads, cachedProjectReads } from "./projectReads";
 import { WorkspaceEmpty } from "./WorkspaceEmpty";
 import { ToolWindowTabs, WindowTabAdd, WindowTabs } from "./Tabs";
 import { ConversationLayoutPreview } from "./LayoutPreview";
+import { ToastHost } from "../ToastHost";
+import { partialSessionDeletionNotice } from "../workbench/sessionActions";
 import { useWorkbenchPageMotion } from "./pageMotion";
 import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
 import "./workspace.css";
 
 export function ConversationWorkspace({ client, renderDocument }: { client: HarnessClient; renderDocument: (client: HarnessClient) => ReactNode }) {
   const { preview } = usePreviewMode();
-  const { resolvedLanguage } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const visited = useRef({ real: !preview, demo: preview });
   if (preview) visited.current.demo = true; else visited.current.real = true;
@@ -49,6 +51,10 @@ export function ConversationWorkspace({ client, renderDocument }: { client: Harn
   const store = preview ? demo : real;
   if (!preview) real.enablePersistence();
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const removed = store.deletionNotice;
+  const removalMessage = !removed ? null : removed.cleanupWarning !== undefined
+    ? partialSessionDeletionNotice(removed.title, removed.cleanupWarning, zh)
+    : t(removed.preview ? "history.demoDeleteToast" : "history.deletedSession", { title: removed.title });
   const activeDocument = state.documents.find(record => record.id === state.activeDocumentId);
   const pageVisible = activeDocument?.page === true;
   useWorkbenchPageMotion(pageVisible, activeDocument?.pagePhase ?? "in");
@@ -86,6 +92,7 @@ export function ConversationWorkspace({ client, renderDocument }: { client: Harn
   const context = useMemo(() => ({ store, slots, snapLayer, titleRow }), [store, slots, snapLayer, titleRow]);
   const rootStyle = { "--sidebar-w": `${state.sidebarVisible ? state.sidebarWidth : 0}px`, "--panel-w": `${state.panelWidth}px`, "--cw-bottom-height": `${state.bottomHeight}px` } as CSSProperties;
   return <WindowFocusContext.Provider value={store.windows}><WorkspaceContext.Provider value={context}>
+    <ToastHost message={removalMessage} icon={removed?.cleanupWarning !== undefined ? "alert" : "trash"} onDismiss={() => store.setDeletionNotice(null)} />
     <div className={`conversation-workspace${state.views.some(view => view.placement !== "main") ? " has-conversation-windows" : ""}`} style={rootStyle}>
       <div ref={slotRefs.background} />
       <div className="cw-title-slot" ref={slotRefs.title} />
@@ -254,7 +261,7 @@ function ConversationWindow({ view, store, hosts, bounds, order, snapLayer }: { 
   const windowRecord = store.manager.get(view.id);
   const dragging = useSyncExternalStore(dragPreview.subscribe, () => dragPreview.snapshot()?.conversation?.documentId === view.documentId);
   const frame = useRef<HTMLDivElement>(null);
-  const native = view.placement === "native" && !!globalThis.ompHarnessChrome?.prepareFloatWindow;
+  const native = view.placement === "native" && !!globalThis.julingHarnessChrome?.prepareFloatWindow;
   const cell = store.snapCell(view.id), snap = store.getSnapshot().snap;
   const snapped = cell !== undefined && !!snap && !native && !view.maximized;
   const locked = useConversationLayoutLocked(store, view.documentId);
@@ -272,7 +279,7 @@ function ConversationWindow({ view, store, hosts, bounds, order, snapLayer }: { 
       frameProps={{ className: `dock-conversation-window${snapped ? " is-snapped" : ""}${dragging ? " dock-drag-source" : ""}`, ...{ "data-conversation-view": view.id, "data-conversation-owner": view.documentId, "data-workbench-surface": view.pin === "none" ? "" : undefined, "data-dock-group": conversationPanelId(view.id), "data-dock-region": "float" }, style: snapped ? { position: "absolute" } : undefined }}
       onTitleDrag={event => { if (!nativeKey) dragConversation(event, store, { viewId: view.id }); }}
       onRectChange={rect => store.setWindow(view.id, { rect })}
-      onControl={action => { if (nativeKey) void globalThis.ompHarnessChrome!.controlFloatWindow!({ key: nativeKey, action }); else control(action); }}
+      onControl={action => { if (nativeKey) void globalThis.julingHarnessChrome!.controlFloatWindow!({ key: nativeKey, action }); else control(action); }}
       onClose={() => store.close(view.id)} closeLabel={zh ? "关闭对话视图" : "Close conversation view"}
       titleContent={<HeaderSlot hosts={hosts} id={view.documentId} kind="title" fallback={record.title} />}
       titleExtra={view.pin !== "none" ? <span className="dock-pin-status"><Icon name={native ? "external" : "pin"} extra="sm" /></span> : null}

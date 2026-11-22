@@ -5,7 +5,7 @@ import { peArchitecture } from "./windows-architecture.mjs";
 // Mirrors packages/runtime-installer/src/runtime-platform.ts; target-platform.test.mjs
 // keeps the two tables identical. The entrypoint follows the artifact platform,
 // never the machine running the script.
-export const RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "omp.exe", darwin: "omp", linux: "omp" });
+export const RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "juling.exe", darwin: "omp", linux: "omp" });
 export const UPDATE_PLATFORMS = Object.freeze(["win32-x64", "win32-arm64", "darwin-arm64", "linux-x64"]);
 export const RUNTIME_PLATFORMS = Object.freeze([...UPDATE_PLATFORMS, "darwin-x64", "linux-arm64"]);
 

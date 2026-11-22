@@ -1,4 +1,4 @@
-// OMP Studio installer UI host.
+// Juling Harness installer UI host.
 // C# 5 / .NET Framework 4.x (Framework csc). Frameless 720x480 WinForms
 // window hosting packaging/ui via WebView2. NSIS is the copy engine.
 using System;
@@ -38,7 +38,7 @@ internal static class UpdateMaintenance
             string image = ExpandPath(path.ToString());
             if (!image.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
             string name = Path.GetFileNameWithoutExtension(image);
-            if (string.Equals(name, "OMP Studio", StringComparison.OrdinalIgnoreCase)
+            if (string.Equals(name, "Juling Harness", StringComparison.OrdinalIgnoreCase)
               || string.Equals(name, "omp", StringComparison.OrdinalIgnoreCase)) return true;
           }
         }
@@ -78,17 +78,17 @@ internal static class UpdateMaintenance
     oldRoot = Path.GetFullPath(oldRoot).TrimEnd('\\');
     string localRoot = Path.GetFullPath(newRoot).TrimEnd('\\');
     if (string.Equals(oldRoot, localRoot, StringComparison.OrdinalIgnoreCase)) return 0;
-    string uninstaller = Path.Combine(oldRoot, "Uninstall OMP Studio.exe");
-    if (!File.Exists(uninstaller) || !File.Exists(Path.Combine(oldRoot, "OMP Studio.exe"))) return 11;
+    string uninstaller = Path.Combine(oldRoot, "Uninstall Juling Harness.exe");
+    if (!File.Exists(uninstaller) || !File.Exists(Path.Combine(oldRoot, "Juling Harness.exe"))) return 11;
     // The old uninstaller kills by name. Never invoke it while unrelated OMP work exists.
-    foreach (string name in new string[] { "OMP Studio", "omp" })
+    foreach (string name in new string[] { "Juling Harness", "omp" })
     {
       Process[] processes = Process.GetProcessesByName(name);
       bool busy = processes.Length != 0;
       foreach (Process process in processes) process.Dispose();
       if (busy) return 12;
     }
-    ProcessStartInfo migration = new ProcessStartInfo(Path.Combine(localRoot, "OMP Studio.exe"), "--omp-migrate-runtime \"" + oldRoot + "\"");
+    ProcessStartInfo migration = new ProcessStartInfo(Path.Combine(localRoot, "Juling Harness.exe"), "--juling-migrate-runtime \"" + oldRoot + "\"");
     migration.UseShellExecute = false;
     migration.CreateNoWindow = true;
     using (Process process = Process.Start(migration))
@@ -97,7 +97,7 @@ internal static class UpdateMaintenance
       if (process.ExitCode != 0) return 15;
     }
     string oldProfile = Path.Combine(oldRoot, "userdata", "profile");
-    string profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "omp-studio", "profile");
+    string profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "juling-harness", "profile");
     if (Directory.Exists(oldProfile) && !Directory.Exists(profile)) CopyTree(oldProfile, profile);
     return UninstallLegacy(oldRoot, delegate(ProcessStartInfo start) {
       return RunUninstaller(start, 600000);
@@ -113,7 +113,7 @@ internal static class UpdateMaintenance
     string uninstaller = Path.Combine(temporary, "old-uninstaller.exe");
     try
     {
-      File.Copy(Path.Combine(oldRoot, "Uninstall OMP Studio.exe"), uninstaller, false);
+      File.Copy(Path.Combine(oldRoot, "Uninstall Juling Harness.exe"), uninstaller, false);
       // NSIS requires _?= last, without quotes around the directory (including spaces).
       ProcessStartInfo start = new ProcessStartInfo(uninstaller, "/S /KEEP_APP_DATA --updated /allusers _?=" + oldRoot);
       start.UseShellExecute = true;
@@ -121,7 +121,7 @@ internal static class UpdateMaintenance
       start.WindowStyle = ProcessWindowStyle.Hidden;
       int code = run(start);
       if (code != 0) return code;
-      return File.Exists(Path.Combine(oldRoot, "OMP Studio.exe")) || File.Exists(Path.Combine(oldRoot, "Uninstall OMP Studio.exe")) ? 16 : 0;
+      return File.Exists(Path.Combine(oldRoot, "Juling Harness.exe")) || File.Exists(Path.Combine(oldRoot, "Uninstall Juling Harness.exe")) ? 16 : 0;
     }
     catch (System.ComponentModel.Win32Exception) { return 13; }
     finally
@@ -252,7 +252,7 @@ public sealed class MainForm : Form
   {
     this.options = options;
     this.bridge = new Bridge(this);
-    Text = "OMP Studio 安装";
+    Text = "Juling Harness 安装";
     FormBorderStyle = FormBorderStyle.None;
     StartPosition = FormStartPosition.CenterScreen;
     MaximizeBox = false;
@@ -485,7 +485,7 @@ public sealed class MainForm : Form
 
 [ComVisible(true)]
 [ClassInterface(ClassInterfaceType.AutoDual)]
-[ProgId("OmpStudio.InstallerBridge")]
+[ProgId("OmpHarness.InstallerBridge")]
 public class Bridge
 {
   public const string BootstrapScript = @"(function () {
@@ -548,7 +548,7 @@ public class Bridge
     string occJson = occupancy.Length == 0 ? "null" : Json.Str(occupancy);
     StringBuilder sb = new StringBuilder();
     sb.Append('{');
-    sb.Append("\"productName\":").Append(Json.Str("OMP Studio"));
+    sb.Append("\"productName\":").Append(Json.Str("Juling Harness"));
     sb.Append(",\"version\":").Append(Json.Str(version));
     sb.Append(",\"runtimeVersion\":").Append(Json.Str(runtime));
     sb.Append(",\"arch\":").Append(Json.Str(Ini.Read(ini, "Arch", Ini.Read(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "host-defaults.ini"), "Arch", "x64"))));
@@ -557,7 +557,7 @@ public class Bridge
     sb.Append(",\"existingPath\":").Append(Json.Str(existingDir));
     sb.Append(",\"occupancy\":").Append(occJson);
     sb.Append(",\"running\":").Append(running ? "true" : "false");
-    bool desktop = existingDir.Length == 0 || File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "OMP Studio.lnk"));
+    bool desktop = existingDir.Length == 0 || File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Juling Harness.lnk"));
     sb.Append(",\"desktopShortcut\":").Append(desktop ? "true" : "false");
     sb.Append(",\"spaceRequiredMB\":").Append(Json.Number(space));
     sb.Append(",\"specialFolders\":").Append(Json.StrArray(SpecialFolders()));
@@ -582,8 +582,8 @@ public class Bridge
         if (exists)
         {
           empty = DirectoryIsEmpty(path);
-          hasProduct = File.Exists(Path.Combine(path, "OMP Studio.exe"))
-            || File.Exists(Path.Combine(path, "Uninstall OMP Studio.exe"));
+          hasProduct = File.Exists(Path.Combine(path, "Juling Harness.exe"))
+            || File.Exists(Path.Combine(path, "Uninstall Juling Harness.exe"));
         }
         string root = Path.GetPathRoot(path);
         if (root != null && root.Length > 0)
@@ -619,7 +619,7 @@ public class Bridge
     {
       using (FolderBrowserDialog dialog = new FolderBrowserDialog())
       {
-        dialog.Description = "选择 OMP Studio 安装位置";
+        dialog.Description = "选择 Juling Harness 安装位置";
         dialog.ShowNewFolderButton = true;
         if (!string.IsNullOrEmpty(current) && Directory.Exists(current))
         {
@@ -693,7 +693,7 @@ public class Bridge
   public void OpenReleaseNotes()
   {
     string version = Ini.Read(Path.Combine(form.Dir, "host.ini"), "Version", "");
-    Process.Start(new ProcessStartInfo("https://github.com/the-snowpear/omp-studio/releases/tag/v" + version) { UseShellExecute = true });
+    Process.Start(new ProcessStartInfo("https://github.com/177911-juling/juling-harness/releases/tag/v" + version) { UseShellExecute = true });
   }
 
   static bool DirectoryIsEmpty(string path)
@@ -711,7 +711,7 @@ public class Bridge
 
   static string DefaultInstallDir()
   {
-    return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "OMP Studio");
+    return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Juling Harness");
   }
 
   static string[] SpecialFolders()
@@ -839,7 +839,7 @@ internal static class UserData
     // Every setup owns its assets and browser cache. Never grant other users
     // write access to a shared WebView2 profile or reuse another setup's UI.
     string session = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-      "omp-studio", "installer", Guid.NewGuid().ToString("N"));
+      "juling-harness", "installer", Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(session);
     return session;
   }

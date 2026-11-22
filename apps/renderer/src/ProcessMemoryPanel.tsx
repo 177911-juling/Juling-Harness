@@ -64,7 +64,7 @@ export function useProcessMemory(enabled: boolean): {
     // `app.getAppMetrics()` may be slow under memory pressure. Never let the
     // fixed interval enqueue overlapping Main-process samples indefinitely.
     if (inFlight.current || globalThis.document?.hidden) return Promise.resolve();
-    const chrome = globalThis.ompHarnessChrome;
+    const chrome = globalThis.julingHarnessChrome;
     if (chrome?.sampleProcessMemory === undefined) {
       setUnsupported(true);
       return Promise.resolve();

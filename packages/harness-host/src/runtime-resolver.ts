@@ -342,7 +342,7 @@ export function createPathLocator(options: {
   const exists = options.exists;
   return {
     async locate(platform) {
-      const name = executableName ?? (platform === "win32" ? "omp.exe" : "omp");
+      const name = executableName ?? (platform === "win32" ? "juling.exe" : "omp");
       for (const directory of pathEnv.split(platform === "win32" ? ";" : ":")) {
         if (directory.length === 0) continue;
         const candidate = join(directory, name);

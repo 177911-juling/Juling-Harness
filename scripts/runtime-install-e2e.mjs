@@ -1,6 +1,6 @@
 // WP-002/WP-003 opt-in end-to-end check: installs a real generated Runtime
 // artifact and activates it with the REAL default self-check runner (which
-// executes the installed `omp.exe --smoke-test`). Not part of the unit test
+// executes the installed `juling.exe --smoke-test`). Not part of the unit test
 // suite; run explicitly after `npm run omp:build:host` (or `npm run
 // omp:artifact`) and `npm run build -w @juling-harness/runtime-installer`.
 //

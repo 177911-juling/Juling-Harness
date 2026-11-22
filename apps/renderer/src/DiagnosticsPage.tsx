@@ -406,7 +406,7 @@ export function DiagnosticsPage({
     }
     if (notify) beginAction({ kind: "check-update", label: t("diagnostics.comparingLocalArtifact"), step: 1, steps: 1 });
     try {
-      const chrome = globalThis.ompHarnessChrome;
+      const chrome = globalThis.julingHarnessChrome;
       let remoteCheckResult: Awaited<ReturnType<NonNullable<typeof chrome>["checkUpdates"]>> = null;
       if (chrome && typeof chrome.checkUpdates === "function") {
         try {
@@ -495,7 +495,7 @@ export function DiagnosticsPage({
       return;
     }
     if (kind === "import") {
-      const chrome = globalThis.ompHarnessChrome;
+      const chrome = globalThis.julingHarnessChrome;
       if (!chrome || typeof chrome.importLocalUpdate !== "function") {
         show(t("diagnostics.cannotRead"), "alert-c");
         return;
@@ -544,7 +544,7 @@ export function DiagnosticsPage({
       return;
     }
     if (kind === "update" && updates.state.check?.runtime.plan === "available") {
-      const chrome = globalThis.ompHarnessChrome;
+      const chrome = globalThis.julingHarnessChrome;
       if (chrome?.prepareUpdates && await chrome.getUpdateSnapshot?.().catch(() => null)) {
         try {
           beginAction({ kind, label: t("updates.downloading"), step: 1, steps: 2 });
@@ -657,7 +657,7 @@ export function DiagnosticsPage({
       if (marks) show(`${label} · ${t("appUpdate.demoUpdate")}`, "check");
       return;
     }
-    const chrome = globalThis.ompHarnessChrome;
+    const chrome = globalThis.julingHarnessChrome;
     const action = kind === "rollback" ? chrome?.rollbackRuntimeUpdate : chrome?.pruneRuntimeUpdates;
     if (!action) { show(t("common.unavailable"), "alert-c"); return; }
     beginAction({ kind, label, step: 1, steps: 1 });
@@ -678,7 +678,7 @@ export function DiagnosticsPage({
       if (marks) show(t("diagnostics.openLogsDemoToast"), "folder");
       return;
     }
-    const api = window.ompHarnessChrome;
+    const api = window.julingHarnessChrome;
     if (api?.openLogDir === undefined) {
       show(t("diagnostics.openLogsUnavailable"), "alert-c");
       return;
@@ -697,7 +697,7 @@ export function DiagnosticsPage({
       if (marks) show(t("diagnostics.exportLogsDemoToast"), "export");
       return;
     }
-    const api = window.ompHarnessChrome;
+    const api = window.julingHarnessChrome;
     if (api?.exportLogs === undefined) {
       show(t("diagnostics.exportLogsUnavailable"), "alert-c");
       return;
@@ -901,11 +901,11 @@ export function DiagnosticsPage({
         <div className="set-section">
           <div className="set-row">
             <div className="sr-label">{t("updates.rollbackRuntime")}</div>
-            <button type="button" className="btn outline" disabled={busy !== null || (!preview && !globalThis.ompHarnessChrome?.rollbackRuntimeUpdate)} onClick={() => void maintainRuntime("rollback")}>{t("updates.rollbackRuntime")}</button>
+            <button type="button" className="btn outline" disabled={busy !== null || (!preview && !globalThis.julingHarnessChrome?.rollbackRuntimeUpdate)} onClick={() => void maintainRuntime("rollback")}>{t("updates.rollbackRuntime")}</button>
           </div>
           <div className="set-row">
             <div className="sr-label">{t("updates.pruneOld")}</div>
-            <button type="button" className="btn outline" disabled={busy !== null || (!preview && !globalThis.ompHarnessChrome?.pruneRuntimeUpdates)} onClick={() => void maintainRuntime("prune")}>{t("updates.pruneOld")}</button>
+            <button type="button" className="btn outline" disabled={busy !== null || (!preview && !globalThis.julingHarnessChrome?.pruneRuntimeUpdates)} onClick={() => void maintainRuntime("prune")}>{t("updates.pruneOld")}</button>
           </div>
           {(runtimeUpdate?.plan === "available" || runtimeUpdate?.plan === "blocked") ? (
             <div className="set-row">

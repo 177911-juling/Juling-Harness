@@ -93,7 +93,7 @@ export function I18nProvider({ children, forcedLanguage }: { children: ReactNode
       document.title = resolvedLanguage === "zh" ? "Juling Harness — 工作台" : "Juling Harness — Workbench";
     }
     if (forcedLanguage === undefined) {
-      void globalThis.ompHarnessChrome?.setLanguage?.(resolvedLanguage);
+      void globalThis.julingHarnessChrome?.setLanguage?.(resolvedLanguage);
     }
   }, [resolvedLanguage, forcedLanguage]);
 

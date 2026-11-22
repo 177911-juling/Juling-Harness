@@ -4,11 +4,11 @@ import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
 
 export function useDictation(options: DictationSessionOptions) {
   const document = useSurfaceDocument(), window = surfaceWindow(document);
-  const api = useRef(window.ompHarnessChrome);
+  const api = useRef(window.julingHarnessChrome);
   const [session] = useState(() => new DictationSession(options, { api: () => dictationDesktopApi(api.current) }));
   const view = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   useLayoutEffect(() => { session.setOptions(options); });
-  useEffect(() => { api.current = window.ompHarnessChrome; session.connect(); return () => session.disconnect(); }, [session, window]);
+  useEffect(() => { api.current = window.julingHarnessChrome; session.connect(); return () => session.disconnect(); }, [session, window]);
   useEffect(() => { void session.inspect(); }, [session, options.client, options.sessionId, options.available, options.remote]);
   useEffect(() => {
     const hide = () => { if (document.hidden) void session.interrupt(); else void session.refreshRecovery(); };

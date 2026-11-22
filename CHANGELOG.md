@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-11-22
+
+### Added
+
+- 工作台侧栏和会话历史可直接删除会话。历史页的「已归档」筛选支持分批加载、多选和批量删除，显示逐条处理结果，并保留产物库中的托管产物。单条删除可选择同时清理托管产物。
+- 可以从对话或会话历史复制会话 ID，再粘贴到输入框生成引用。打开引用可查看来源与最近保存的消息，按需选取最多六条摘录随消息发送。
+- 文件窗口内置 `.xlsm`、`.xlsb` 和 `.ods` 预览。表格可用方向键、Home / End、Page Up / Down 导航，按住 Shift 扩展选区并复制，支持 Excel 行列上限内的稀疏数据。可选 Office 组件增加 `.docm` 和 `.pptm` 预览，转换时禁用宏。
+
+### Changed
+
+- 桌面与 Web 对话为等待、思考、回复、重试和工具执行显示专用活动图标，遵循系统的减弱动效设置。Advisor 多条审阅意见按批折叠，含阻断问题的批次默认展开，可复制整批意见。手动展开状态在新消息、语言切换和虚拟滚动时保持。 [#58](https://github.com/177911-juling/juling-harness/issues/58)
+- SSH 与 WSL 的连接、认证和准备对话框展示目标、安装目录、网络选项及准备阶段。SSH 文件传输显示远端实际接收进度，校验文件大小与 SHA-256，根据目标系统选择传输方式并在可重试的失败后回退。 [SSH 工作区](docs/ssh-workspaces.md)
+
+### Fixed
+
+- 批量删除时跳过已取消归档的会话。原生统计或产物清理只完成一部分时，界面会报告残留。
+- 修复 SSH 密码认证在 SFTP 批量传输中失效，以及预览连接未沿用所选端口、网络策略和安装目录的问题。
+- 修复表格超大选区复制可能卡住预览、CSV 更新后跳失选区，以及 Office 更新期间收尾的转换可能清掉新组件的问题。Office 缓存清理保留仍被文件窗口使用的 PDF。
+- 修复演示对话实时切换语言时，已展开的 Advisor 批次重新折叠的问题。
+
+## [0.2.7] - 2026-11-20
+
+### Added
+
+- Plan 评审支持 Markdown 源码与实时预览联动定位、调整编辑区高度、查找替换和按章节批注。收起、重新展开或切换界面语言时保留草稿、撤销历史、光标和批注；批准、请求修改或保存退出前先保存正文，失败时保留现场并显示原因。
+- 会话本地文件与完整工具输出使用可停靠的独立浮窗。`/local` 可定位文件，Markdown 支持源码、预览与分栏视图，文本支持查找、跳转、换行和字号调整；日志保留 ANSI 颜色与跨页样式，并标记常见日志级别。
+- 反汇编工作台接入 OMP 19 的统一反汇编器，支持 IDA Pro、Ghidra、自动选择及头部元数据模式，提供快捷卡、数据库浏览、查询与带预览的编辑入口。
+
+### Changed
+
+- 内置 Runtime 升级到 **OMP 19.0.1（`19.0.1-harness.1`）**。同步原生 Plan、Ask、后台交接、Daemon、Agent 等待关系和工作树状态，移除上游已删除的 Seance 入口。 [迁移报告](docs/migrations/omp-19.0.1.md)
+- Ask 表单采用连续折叠布局，选项附注可带图片；主输入框以 `?` 发起 BTW，回答可在时间线便签和 BTW 面板继续处理。
+- 模型菜单增加供应商筛选与 `provider/model` 搜索；同步 Kiro 多账号、Claude 订阅信息、Live 端点与音色设置，并区分会话辅助调用与评判模型用量。
+- 减少流式对话的重复拷贝与代码块重绘，优化大型评测报告翻页、3D 模型法线与贴图处理、会话切换和工作台空闲开销。 [实测方法与适用范围](docs/reviews/runtime-performance-2026-11-19.md)
+
+### Fixed
+
+- 修复后台交接结束后误切换会话，以及会话文件目录、完整输出链接与当前会话关联不正确的问题。
+- 资源浮窗按会话区分焦点与内容宿主；重复打开文件时保留未保存草稿并确认后再切换，避免跨会话浮窗互相抢焦点。
+- 修复文件编辑器在内容更新、只读状态变化或语言切换时重建编辑状态的问题，并保留预览文件的本地修改。
+
+## [0.2.6] - 2026-11-20
+
+### Fixed
+
+- 补齐桌面安装包中的手机访问 HTTPS 证书依赖，修复 0.2.5 启动时的 `ERR_MODULE_NOT_FOUND` 崩溃。 [#50](https://github.com/177911-juling/juling-harness/issues/50)
+
+## [0.2.5] - 2026-11-20
+
+### Added
+
+- Windows 桌面端可在空白对话的「工作位置」中选择 WSL 2 发行版和项目目录。Agent、Git 和终端在发行版内运行，可以从 Windows 资源管理器或支持 WSL 的 VS Code 打开项目。发行版重启后，Harness 会尝试恢复连接并提示 Host 实例是否更换。 [WSL 工作区](docs/wsl-workspaces.md)
+- 桌面设置新增「手机访问」。在同一局域网内信任证书并扫码配对后，可以打开所选本地项目中的已有会话，阅读消息、继续对话、停止当前回合或处理单次工具审批。 [手机访问](docs/mobile-access.md)
+
+### Changed
+
+- 内置 Runtime 更新为 `18.20.2-harness.15`，支持在会话中显示 Advisor 审阅意见。
+
+### Fixed
+
+- 修复切换项目时会话行被搬到新选的项目下、同一个会话在两个项目里各显示一行、且在重启应用前不会消失的问题。
+- 修复对话和 Markdown 预览里的文件路径链接。确认缺失的路径显示为普通文字，目录在文件浏览器中定位，网络路径在点击后访问。
+- Advisor 审阅意见按发生顺序显示在桌面和手机对话中，包含已记录的顾问名称和严重程度。重开保存了意见的会话时仍可查看，桌面端复制时也会带上来源。 [#46](https://github.com/177911-juling/juling-harness/issues/46) · [#47](https://github.com/177911-juling/juling-harness/pull/47)
+- 恢复原生提问表单的分页，支持拖动调整提问卡片高度。
+- OpenCode Go 和 Zen 在「原生登录与凭据」中配置 API Key，并可核对授权模型目录。
+
 ## [0.2.4] - 2026-11-18
 
 ### Changed
@@ -595,7 +661,11 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 Juling Harness 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/177911-juling/juling-harness/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/177911-juling/juling-harness/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/177911-juling/juling-harness/compare/v0.2.7...v0.2.8
+[0.2.7]: https://github.com/177911-juling/juling-harness/compare/v0.2.6...v0.2.7
+[0.2.6]: https://github.com/177911-juling/juling-harness/compare/v0.2.5...v0.2.6
+[0.2.5]: https://github.com/177911-juling/juling-harness/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/177911-juling/juling-harness/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/177911-juling/juling-harness/compare/v0.2.2...v0.2.3
 [0.2.0]: https://github.com/177911-juling/juling-harness/compare/v0.1.17...v0.2.0

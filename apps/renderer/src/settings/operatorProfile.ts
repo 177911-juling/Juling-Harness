@@ -140,7 +140,7 @@ type AvatarDisk = {
 };
 
 function diskFromChrome(): AvatarDisk | undefined {
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (chrome?.saveAvatar === undefined || chrome.loadAvatar === undefined || chrome.clearAvatar === undefined) {
     return undefined;
   }

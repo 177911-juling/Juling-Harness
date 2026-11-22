@@ -3,10 +3,10 @@
  *
  * Runs in a sandboxed renderer (contextIsolation + sandbox, no Node
  * integration) and exposes exactly one frozen object under
- * `window.ompHarness` (see {@link DESKTOP_BRIDGE_GLOBAL}):
+ * `window.julingHarness` (see {@link DESKTOP_BRIDGE_GLOBAL}):
  * `OmpHarnessDesktopApi` with the fixed named methods bootstrap / query /
- * command / subscribe / close. Window chrome helpers (`ompHarnessChrome`,
- * `ompHarnessTerminal`) are separate frozen objects on named channels —
+ * command / subscribe / close. Window chrome helpers (`julingHarnessChrome`,
+ * `julingHarnessTerminal`) are separate frozen objects on named channels —
  * they are not Host transport.
  *
  * Hard guarantees:
@@ -21,6 +21,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from "electron";
+import { MOBILE_ACCESS_CHANNELS, type MobileAccessApi } from "@juling-harness/transport-desktop";
 
 import {
   createDesktopIpcBridge,
@@ -68,6 +69,8 @@ const api = createDesktopIpcBridge(sender);
 
 contextBridge.exposeInMainWorld(DESKTOP_BRIDGE_GLOBAL, api);
 const remoteApi: RemoteApi = {
+  wslDistributions: () => ipcRenderer.invoke(REMOTE_CHANNELS.wslDistributions),
+  ensureWsl: distro => ipcRenderer.invoke(REMOTE_CHANNELS.ensureWsl, distro),
   list: () => ipcRenderer.invoke(REMOTE_CHANNELS.list),
   save: profile => ipcRenderer.invoke(REMOTE_CHANNELS.save, profile),
   remove: id => ipcRenderer.invoke(REMOTE_CHANNELS.remove, id),
@@ -91,13 +94,21 @@ const remoteApi: RemoteApi = {
   onEvent: listener => subscribeChannel(ipcRenderer, REMOTE_CHANNELS.event, listener),
   onChanged: listener => subscribeChannel(ipcRenderer, REMOTE_CHANNELS.changed, listener),
 };
-contextBridge.exposeInMainWorld("ompHarnessRemote", Object.freeze(remoteApi));
-contextBridge.exposeInMainWorld("ompHarnessChrome", createOmpHarnessChromeApi(ipcRenderer, webUtils));
+contextBridge.exposeInMainWorld("julingHarnessRemote", Object.freeze(remoteApi));
+contextBridge.exposeInMainWorld("julingHarnessChrome", createOmpHarnessChromeApi(ipcRenderer, webUtils));
+contextBridge.exposeInMainWorld("julingHarnessMobileAccess", Object.freeze({
+  status: () => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.status),
+  start: (ip, workspaceId) => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.start, ip, workspaceId),
+  stop: () => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.stop),
+  pair: () => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.pair),
+  revoke: () => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.revoke),
+  exportCertificate: () => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.exportCertificate),
+} satisfies MobileAccessApi));
 // P0-6: read-only GPU/low-spec profile. `cached` is read synchronously at
 // preload time (sendSync) so the Renderer can pick its first-paint policy
 // without waiting for an IPC round-trip; there is no write method.
 contextBridge.exposeInMainWorld(
-  "ompHarnessPerf",
+  "julingHarnessPerf",
   createPerfProfileApi({
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
     sendSync: (channel) => ipcRenderer.sendSync(channel),
@@ -148,4 +159,4 @@ const terminalApi: OmpHarnessTerminalApi = {
   },
 };
 
-contextBridge.exposeInMainWorld("ompHarnessTerminal", Object.freeze(terminalApi));
+contextBridge.exposeInMainWorld("julingHarnessTerminal", Object.freeze(terminalApi));

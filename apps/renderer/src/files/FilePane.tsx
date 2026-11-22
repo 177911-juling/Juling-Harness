@@ -1,3 +1,4 @@
+import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { useSurfaceDocument } from "../dock/SurfaceContext";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { WorkspaceId } from "@juling-harness/client-contract";
@@ -13,23 +14,24 @@ import { fileManagerName } from "../platformCopy";
 import type { FileMenuAction } from "../menus";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { previewFile, previewFileBlob, previewFilePatch } from "../preview/filesPreview";
-import { FileReferenceContext, FileImageContext } from "./fileLinks";
-import { fileBadge, fileKind, formatBytes, relativeFileReference, textEditable, type FileReference } from "./fileTypes";
+import { FileDocumentContext } from "./fileLinks";
+import { fileBadge, fileKind, formatBytes, textEditable } from "./fileTypes";
 import type { FileDocument } from "./fileDocuments";
 import type { FileViewerActions } from "./fileActions";
-import { DEFAULT_EDITOR_PREFS, readEditorPrefs, saveEditorPrefs, subscribeEditorPrefs } from "./filePreferences";
+import { DEFAULT_EDITOR_PREFS, useEditorDisplayPrefs } from "./filePreferences";
 import { EMPTY_MARKS, parsePatchMarks } from "./gitMarks";
 import { FileHeader, MOD_KEY, type FileMenuEntry, type FileModeOption, type FileTool } from "./FileHeader";
 import { FileStatusBar } from "./FileStatusBar";
 import type { EditorCommands, EditorController, EditorCursor } from "./FileTextEditor";
 import { OfficePane } from "./OfficePane";
+import { MARKDOWN_SPLIT_MIN_WIDTH, markdownModes, useMarkdownScroll } from "./markdownView";
 
 const TextEditor = lazy(() => import("./FileTextEditor"));
 const PdfPane = lazy(() => import("./PdfPane"));
 const SpreadsheetPane = lazy(() => import("./SpreadsheetPane"));
-const SPLIT_MIN_WIDTH = 640, NARROW_WIDTH = 560;
+const NARROW_WIDTH = 560;
 
-export default function FilePane({ id, descriptor, session, visible, onSettings, onOpen, onViewState, actions }: { id: string; descriptor: FilePanelDescriptor; session: FileDocument; visible: boolean; onSettings: () => void; onOpen: (reference: FileReference) => void; onViewState: (patch: Partial<FilePanelDescriptor>) => void; actions?: FileViewerActions | undefined }) {
+export default function FilePane({ id, descriptor, session, visible, onSettings, onViewState, actions }: { id: string; descriptor: FilePanelDescriptor; session: FileDocument; visible: boolean; onSettings: () => void; onViewState: (patch: Partial<FilePanelDescriptor>) => void; actions?: FileViewerActions | undefined }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot), { preview, marks } = usePreviewMode();
   const { t, resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh", surface = useSurfaceDocument();
   const kind = fileKind(descriptor.path), editable = textEditable(descriptor.path), badge = fileBadge(descriptor.path);
@@ -37,13 +39,12 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
   const active = visible && surfaceVisible, needsResource = !editable || (kind === "spreadsheet" && !state.loaded && Boolean(state.error));
   const [resource, setResource] = useState<FileResource | null>(null), [error, setError] = useState(""), [reload, setReload] = useState(0);
   const [mode, setMode] = useState<FileViewMode>(descriptor.mode ?? (kind === "markdown" || kind === "spreadsheet" ? "preview" : "source"));
-  const prefs = useSyncExternalStore(subscribeEditorPrefs, () => readEditorPrefs(preview));
+  const { prefs, setFont, toggleWrap } = useEditorDisplayPrefs(preview);
   const [cursor, setCursor] = useState<EditorCursor | null>(null), [info, setInfo] = useState("");
   const [patch, setPatch] = useState(""), [splitDiff, setSplitDiff] = useState(false);
   const [notice, setNotice] = useState(""), [width, setWidth] = useState(900);
-  const controller = useRef<EditorController | null>(null), pane = useRef<HTMLElement>(null), markdownRef = useRef<HTMLDivElement>(null), followingPreview = useRef(false);
-  const latestOnOpen = useRef(onOpen);
-  latestOnOpen.current = onOpen;
+  const controller = useRef<EditorController | null>(null), pane = useRef<HTMLElement>(null);
+  const { markdownRef, followEditor, previewScroll } = useMarkdownScroll(controller);
   useEffect(() => { session.setVisible(id, active); if (active) void session.refresh(); return () => session.setVisible(id, false); }, [id, session, active]);
   useEffect(() => { if (active && editable && !state.loaded) void session.load(); }, [session, editable, state.file.version, active]);
   useEffect(() => { if (preview && active && editable && state.loaded && !state.dirty) void session.load(); }, [preview, active, editable, resolvedLanguage]);
@@ -54,10 +55,10 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
     if (preview) {
       const fixture = previewFile(descriptor.path, descriptor.workspaceId);
       void previewFileBlob(fixture).then(sample => { if (sample && alive) { blob = URL.createObjectURL(sample); setResource({ id: "demo", url: blob, file: { ...fixture, size: sample.size } }); } }).catch(error => { if (alive) setError(String(error)); });
-    } else if (globalThis.ompHarnessChrome?.files) {
-      void globalThis.ompHarnessChrome.files.open({ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, path: descriptor.path, ...(descriptor.source ? { source: descriptor.source } : {}) }).then(result => { lease = result.id; if (alive) setResource(result); else void globalThis.ompHarnessChrome?.files?.release(result.id); }).catch(error => { if (alive) setError(error instanceof Error ? error.message : String(error)); });
+    } else if (globalThis.julingHarnessChrome?.files) {
+      void globalThis.julingHarnessChrome.files.open({ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, path: descriptor.path, ...(descriptor.source ? { source: descriptor.source } : {}) }).then(result => { lease = result.id; if (alive) setResource(result); else void globalThis.julingHarnessChrome?.files?.release(result.id); }).catch(error => { if (alive) setError(error instanceof Error ? error.message : String(error)); });
     } else setError(zh ? "此连接没有桌面文件资源通道" : "Desktop file resource channel unavailable on this connection");
-    return () => { alive = false; if (lease) void globalThis.ompHarnessChrome?.files?.release(lease); if (blob) URL.revokeObjectURL(blob); };
+    return () => { alive = false; if (lease) void globalThis.julingHarnessChrome?.files?.release(lease); if (blob) URL.revokeObjectURL(blob); };
   }, [descriptor.path, descriptor.source, descriptor.targetId, descriptor.workspaceId, state.file.version, preview, reload, visible, needsResource]);
   // Working-tree patch for the gutter and Diff view; a non-repository or failed query simply shows nothing.
   useEffect(() => {
@@ -79,13 +80,13 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
   const source = resource?.url;
   const gitMarks = useMemo(() => patch ? parsePatchMarks(patch) : EMPTY_MARKS, [patch]);
   const git = gitMarks.additions || gitMarks.deletions ? { additions: gitMarks.additions, deletions: gitMarks.deletions } : null;
-  const narrow = width < NARROW_WIDTH, canSplit = kind === "markdown" && width >= SPLIT_MIN_WIDTH;
+  const narrow = width < NARROW_WIDTH, canSplit = kind === "markdown" && width >= MARKDOWN_SPLIT_MIN_WIDTH;
   const fallback: FileViewMode = kind === "markdown" || kind === "spreadsheet" ? "preview" : "source";
   const view: FileViewMode = !editable ? "preview" : mode === "diff" ? (git ? "diff" : fallback) : mode === "split" ? (canSplit ? "split" : "preview") : kind === "text" ? "source" : mode;
   const showsEditor = editable && state.loaded && (view === "source" || view === "split");
   const changeMode = (next: FileViewMode) => { setMode(next); onViewState({ mode: next }); };
   const modes: FileModeOption[] | null = !editable ? null : [
-    ...(kind === "markdown" ? [{ id: "source", label: zh ? "源码" : "Source", icon: "code" }, ...(canSplit ? [{ id: "split", label: zh ? "分栏" : "Split", icon: "columns" }] : []), { id: "preview", label: zh ? "预览" : "Preview", icon: "eye" }] as FileModeOption[]
+    ...(kind === "markdown" ? markdownModes(zh, canSplit)
       : kind === "spreadsheet" ? [{ id: "preview", label: zh ? "表格" : "Table", icon: "table" }, { id: "source", label: zh ? "源码" : "Source", icon: "code" }] as FileModeOption[]
       : [{ id: "source", label: zh ? "编辑" : "Edit", icon: "code" }] as FileModeOption[]),
     ...(git ? [{ id: "diff", label: "Diff", icon: "diff" }] as FileModeOption[] : []),
@@ -107,18 +108,18 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
       setNotice(lines ? (zh ? `已添加第 ${lines[0] === lines[1] ? lines[0] : `${lines[0]}–${lines[1]}`} 行到对话` : `Added ${lines[0] === lines[1] ? `line ${lines[0]}` : `lines ${lines[0]}–${lines[1]}`} to conversation`) : (zh ? "已添加到对话" : "Added to conversation"));
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
   };
-  const desktopReason = preview ? (zh ? "预览演示中不可用" : "Unavailable in preview demo") : descriptor.targetId ? (zh ? "远程文件请先下载，再用本机应用打开" : "Download remote files before opening with a local app") : !actions || !globalThis.ompHarnessChrome?.openFile ? (zh ? "仅桌面工作台可用" : "Available in desktop app only") : undefined;
+  const { inventory } = useExecutionTarget();
+  const wsl = inventory.profiles.some(profile => profile.id === descriptor.targetId && profile.kind === "wsl");
+  const desktopReason = preview ? (zh ? "预览演示中不可用" : "Unavailable in preview demo") : descriptor.targetId && (!wsl || descriptor.source === "system") ? (zh ? "远程文件请先下载，再用本机应用打开" : "Download remote files before opening with a local app") : !actions || !globalThis.julingHarnessChrome?.openFile ? (zh ? "仅桌面工作台可用" : "Available in desktop app only") : undefined;
   const shell = (action: FileMenuAction) => {
     if (desktopReason) return;
-    if (descriptor.source !== "system") { actions?.runShell(descriptor.workspaceId, action, { path: relativePath, name, kind: "file" }); return; }
-    const chrome = globalThis.ompHarnessChrome!;
+    if (descriptor.source !== "system") { actions?.runShell(descriptor.workspaceId, action, { path: relativePath, name, kind: "file" }, descriptor.targetId ?? null); return; }
+    const chrome = globalThis.julingHarnessChrome!;
     const operation = action.type === "openSystem" ? chrome.systemFileOpen({ path: relativePath })
       : action.type === "openWith" ? chrome.systemFileOpenWith({ path: relativePath, openerId: action.openerId as "vscode" | "cursor" | "windsurf" | "choose" })
       : action.type === "reveal" ? chrome.systemFileReveal({ path: relativePath }) : undefined;
     void operation?.then(result => { if (result.status === "failed") setNotice(result.message); }).catch(error => setNotice(String(error)));
   };
-  const setFont = (delta: number | null) => saveEditorPrefs({ fontSize: delta === null ? DEFAULT_EDITOR_PREFS.fontSize : prefs.fontSize + delta }, preview);
-  const toggleWrap = () => saveEditorPrefs({ wrap: !prefs.wrap }, preview);
   const refresh = () => { if (editable && !state.dirty) void session.load(); else void session.refresh(); setReload(value => value + 1); };
   const commands: EditorCommands = {
     onCursor: setCursor, onReady: value => { controller.current = value; if (!value) setCursor(null); },
@@ -144,21 +145,18 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
     { kind: "item", id: "reveal", label: t("shell.fileRevealInExplorer", { fileManager: fileManagerName(t) }), icon: "folder-open", disabled: !!desktopReason, tip: desktopReason, run: () => shell({ type: "reveal" }) },
     { kind: "item", id: "open-system", label: zh ? "使用系统应用打开" : "Open with system app", icon: "external", disabled: !!desktopReason, tip: desktopReason, run: () => shell({ type: "openSystem" }) },
     ...(!desktopReason ? actions?.openers.map((opener): FileMenuEntry => ({ kind: "item", id: `open-${opener.id}`, label: zh ? `用 ${opener.name} 打开` : `Open with ${opener.name}`, icon: "code", run: () => shell({ type: "openWith", openerId: opener.id }) })) ?? [] : []),
-    { kind: "item", id: "download", label: zh ? "下载副本…" : "Download copy…", icon: "download", disabled: preview, tip: preview ? (zh ? "预览演示中不可用" : "Unavailable in preview demo") : undefined, run: () => { void globalThis.ompHarnessChrome?.files?.export({ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, path: descriptor.path, ...(descriptor.source ? { source: descriptor.source } : {}) }).catch(error => setError(String(error))); } },
+    { kind: "item", id: "download", label: zh ? "下载副本…" : "Download copy…", icon: "download", disabled: preview, tip: preview ? (zh ? "预览演示中不可用" : "Unavailable in preview demo") : undefined, run: () => { void globalThis.julingHarnessChrome?.files?.export({ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, path: descriptor.path, ...(descriptor.source ? { source: descriptor.source } : {}) }).catch(error => setError(String(error))); } },
     { kind: "sep", id: "s2" },
     { kind: "item", id: "context", label: zh ? "添加到对话" : "Add to conversation", icon: "at", disabled: !actions, tip: actions ? (zh ? "在对话输入框插入文件引用" : "Insert file reference in composer") : (zh ? "此窗口没有关联的对话" : "No conversation linked to this window"), run: () => addContext() },
     ...(showsEditor && cursor?.selected ? [{ kind: "item", id: "context-selection", label: zh ? "添加选中行到对话" : "Add selected lines to conversation", icon: "at", kbd: `${MOD_KEY} Shift L`, disabled: !actions, run: () => { const selection = controller.current?.selection(); if (selection) addContext([selection.from, selection.to]); } }] as FileMenuEntry[] : []),
     ...(showsEditor ? [{ kind: "sep", id: "s3" }, { kind: "zoom", id: "zoom", value: prefs.fontSize, onChange: setFont }] as FileMenuEntry[] : []),
   ];
 
-  const markdown = useMemo(() => <FileReferenceContext.Provider value={reference => latestOnOpen.current({ ...reference, path: relativeFileReference(descriptor.path, reference.path) })}><FileImageContext.Provider value={{ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, basePath: descriptor.path, preview, ...(descriptor.source ? { source: descriptor.source } : {}) }}><MarkdownText text={state.text} /></FileImageContext.Provider></FileReferenceContext.Provider>,
-    // latestOnOpen ref avoids rebuilding Markdown DOM while scrolling; links resolve against descriptor.path.
+  const markdown = useMemo(() => <FileDocumentContext.Provider value={{ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, basePath: descriptor.path, preview, ...(descriptor.source ? { source: descriptor.source } : {}) }}><MarkdownText text={state.text} /></FileDocumentContext.Provider>,
     [state.text, descriptor.path, descriptor.source, descriptor.targetId, descriptor.workspaceId, preview]);
   const editor = (onScrollRatio?: (ratio: number) => void) => state.loaded
     ? <TextEditor viewId={id} session={session} descriptor={descriptor} onViewState={onViewState} readOnly={!state.file.writable} wrap={prefs.wrap} fontSize={prefs.fontSize} gitMarks={gitMarks} commands={commands} onScrollRatio={onScrollRatio} />
     : <FileEmpty badge={badge} loading={state.loading} title={state.loading ? (zh ? "正在读取文本…" : "Loading text…") : (zh ? "无法读取此文件" : "Unable to read this file")} />;
-  const followEditor = (ratio: number) => { const element = markdownRef.current; if (!element) return; const top = Math.round(ratio * (element.scrollHeight - element.clientHeight)); if (Math.abs(element.scrollTop - top) > 1) { followingPreview.current = true; element.scrollTop = top; } };
-  const previewScroll = () => { if (followingPreview.current) { followingPreview.current = false; return; } const element = markdownRef.current; if (!element) return; const range = element.scrollHeight - element.clientHeight; controller.current?.scrollToRatio(range > 0 ? element.scrollTop / range : 0); };
 
   let body: ReactNode;
   if (!visible && (view === "preview" || view === "diff")) body = null;

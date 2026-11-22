@@ -316,7 +316,7 @@ export class HarnessSessionArchiveReader {
       throw new SessionArchiveError("CURSOR_INVALID", "Transcript limit is invalid");
     }
     if (input.agentId !== undefined) this.#assertAgentId(input.agentId);
-    const parentFile = await this.#locate(input.sessionId);
+    const parentFile = await this.#locate(input.sessionId, true);
     await this.#assertParentWorkspace(parentFile, input.sessionId);
     const located =
       input.agentId === undefined
@@ -435,6 +435,7 @@ export class HarnessSessionArchiveReader {
       if (projected.kind !== "message") return [{ ...base, kind: "system" as const, title: "Context reset", detail: "" }];
       if (projected.content.length === 0) return [];
       const text = projected.content.filter(block => block.type === "text").map(block => block.text).join("\n").slice(0, 500);
+      if (projected.role === "advisor") return [{ ...base, kind: "system" as const, title: "Advisor", detail: text }];
       const calls = projected.content.filter(block => block.type === "toolCall").map(block => block.toolName).join(", ");
       const kind = projected.role === "user" ? "user" as const : projected.role === "assistant" ? "assistant" as const : "system" as const;
       return [{ ...base, kind, title: calls || (kind === "user" ? "User" : kind === "assistant" ? "Assistant" : "System"), detail: text }];
@@ -649,7 +650,7 @@ export class HarnessSessionArchiveReader {
     return header?.id;
   }
 
-  async #locate(sessionId: string): Promise<string> {
+  async #locate(sessionId: string, workspaceScoped = false): Promise<string> {
     // Hot reads should use the already-built identity index. Directory walking is
     // reserved for a cache miss (new session) or an in-place replacement.
     let matches = this.#index.sessions.get(sessionId) ?? [];
@@ -672,6 +673,15 @@ export class HarnessSessionArchiveReader {
       candidates ??= await listSessionFiles({ sessions: this.#sessionsRoot, archive: this.#archiveRoot }, this.#maxScanFiles);
       await this.#ensureIndex(candidates, true);
       matches = this.#index.sessions.get(sessionId) ?? [];
+    }
+    if (workspaceScoped && matches.length > 1) {
+      const headers = await Promise.all(matches.map(path =>
+        readHeader(path, Math.min(this.#maxSessionBytes, 64 * 1024), this.#maxSessionBytes),
+      ));
+      matches = matches.filter((_, index) => {
+        const header = headers[index];
+        return header?.id === sessionId && header.cwd !== undefined && sameWorkspace(header.cwd, this.#allowedCwd);
+      });
     }
     if (matches.length === 0) throw new SessionArchiveError("SESSION_NOT_FOUND", "Session is not available");
     if (matches.length > 1) {
@@ -1585,11 +1595,10 @@ function publicArchiveConversationRole(
     (role === "custom" || role === "hookMessage") &&
     message.display === true &&
     typeof message.customType === "string" &&
-    message.customType !== "advisor" &&
     message.customType !== "async-result" &&
     !message.customType.startsWith("irc:")
   ) {
-    return "extension";
+    return message.customType === "advisor" ? "advisor" : "extension";
   }
   return undefined;
 }
@@ -1605,7 +1614,9 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
       parentId: entry.parentId,
       createdAt,
       role,
-      content: projectContent(entry.content, `extension:${entry.id}`),
+      content: role === "advisor" ? projectAdvisorContent(entry.details, entry.content) : projectContent(entry.content, `extension:${entry.id}`),
+      ...(entry.excludeFromContext === true ? { excludeFromContext: true } : {}),
+      ...(entry.customType === "async-notify" ? { asyncNotify: true } : {}),
     };
   }
   if (entry.type === "message") {
@@ -1622,7 +1633,9 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
       parentId: entry.parentId,
       createdAt,
       role,
-      content: projectContent(message.content, `tool:${entry.id}`),
+      content: role === "advisor" ? projectAdvisorContent(message.details, message.content) : projectContent(message.content, `tool:${entry.id}`),
+      ...(message.role === "custom" && message.excludeFromContext === true ? { excludeFromContext: true } : {}),
+      ...(message.role === "custom" && message.customType === "async-notify" ? { asyncNotify: true } : {}),
     };
   }
   if (entry.type === "compaction" && typeof entry.summary === "string") {
@@ -1640,6 +1653,26 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
     return { kind: "resetBoundary", itemId: entry.id, parentId: entry.parentId, createdAt };
   }
   return undefined;
+}
+
+/** Mirrors the Runtime projection when the archived session has no live process. */
+function projectAdvisorContent(details: unknown, content: unknown): ConversationContentBlock[] {
+  const blocks: Extract<ConversationContentBlock, { type: "text" }>[] = [];
+  if (isRecord(details) && Array.isArray(details.notes)) {
+    for (const note of details.notes) {
+      if (!isRecord(note) || typeof note.note !== "string") continue;
+      const { text, truncated } = sanitizeText(note.note, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+      const block: (typeof blocks)[number] = { type: "text", text };
+      if (truncated) block.truncated = true;
+      if (typeof note.advisor === "string") block.advisor = sanitizeText(note.advisor, CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS).text;
+      if (note.severity === "nit" || note.severity === "concern" || note.severity === "blocker") block.severity = note.severity;
+      blocks.push(block);
+    }
+  }
+  if (blocks.length) return blocks;
+  const body = typeof content === "string" ? content : Array.isArray(content)
+    ? content.filter(part => part?.type === "text").map(part => part.text).join("\n") : "";
+  return body ? projectContent(body, "") : [];
 }
 
 function projectContent(value: unknown, fallbackPrefix: string): ConversationContentBlock[] {

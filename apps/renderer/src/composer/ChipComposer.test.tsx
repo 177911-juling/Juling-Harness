@@ -14,7 +14,7 @@ import * as ingest from "./ingest";
 
 afterEach(() => {
   cleanup();
-  Reflect.deleteProperty(globalThis, "ompHarnessChrome");
+  Reflect.deleteProperty(globalThis, "julingHarnessChrome");
 });
 
 it("switches draft image labels without changing text, image bytes, or sending", () => {
@@ -652,7 +652,7 @@ describe("ChipComposer", () => {
       value: () => Promise.reject(new Error("unreadable")),
     });
     Object.assign(globalThis, {
-      ompHarnessChrome: {
+      julingHarnessChrome: {
         getPathForFile: () => "C:/shots/shot.png",
         resolveDroppedPaths: async () => [
           { ok: true, kind: "image" as const, scope: "absolute" as const, path: "C:/shots/shot.png", name: "shot.png" },
@@ -867,7 +867,7 @@ describe("ChipComposer", () => {
   it("copies and saves from the preview context menu through desktop chrome", async () => {
     const copyImage = vi.fn(async (_input: { mime: string; bytes: Uint8Array }) => ({ ok: true as const }));
     const saveImage = vi.fn(async (_input: { mime: string; bytes: Uint8Array; suggestedName: string }) => ({ ok: true as const }));
-    globalThis.ompHarnessChrome = { copyImage, saveImage } as unknown as NonNullable<typeof globalThis.ompHarnessChrome>;
+    globalThis.julingHarnessChrome = { copyImage, saveImage } as unknown as NonNullable<typeof globalThis.julingHarnessChrome>;
 
     const ref = createRef<ChipComposerHandle>();
     render(<ChipComposer ref={ref} placeholder="msg" />);

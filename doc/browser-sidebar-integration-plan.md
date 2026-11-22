@@ -79,7 +79,7 @@ Bridge 的 `browser.managed.prepare` 只暴露准备能力与描述文件身份�
 | 实际签名 Runtime 产物 | 清单、校验和与签名已生成；实际签名和入口 / 清单校验和验证通过 |
 | overlay / 接缝重放 | 临时干净 checkout 成功应用 240 个 overlay 文件和 4 组接缝；核验后的 checkout 恢复干净 |
 
-Windows Runtime 产物位于 `packages/runtime-installer/dist/artifacts/win32-x64/18.13.2-harness.38/`，包含 `omp.exe`、`runtime-manifest.json`、`checksums.json` 和 `runtime-signature.json`。构建产物和验收截图不进入源码提交。
+Windows Runtime 产物位于 `packages/runtime-installer/dist/artifacts/win32-x64/18.13.2-harness.38/`，包含 `juling.exe`、`runtime-manifest.json`、`checksums.json` 和 `runtime-signature.json`。构建产物和验收截图不进入源码提交。
 
 本轮收尾额外修复了：重叠描述文件反复换连接、旧 Runtime 退出注销新服务、弹窗丢弃 Electron 提供的页面实例、旧浏览器空间监听器取消后续下载、权限查询与请求的来源 / 空间查找不一致、崩溃后向已销毁 frame 注入停止脚本，以及输入时无关 DOM 变动触发停靠布局测量。打包清单同时补齐浏览器能力，并与实际 Runtime 的能力序列对齐。
 
@@ -261,7 +261,7 @@ startScreencast 属实验协议，侧栏可用性取决于目标实际支持及�
 
 ### 5.4 固定 IPC / preload
 
-建议 `window.ompHarnessBrowser` 提供 observe、setView、ackFrame、unobserve，以及 onCatalog / onStatus / onFrame。方法使用固定通道和严格 DTO，不提供 sendCommand / evaluate / invoke。
+建议 `window.julingHarnessBrowser` 提供 observe、setView、ackFrame、unobserve，以及 onCatalog / onStatus / onFrame。方法使用固定通道和严格 DTO，不提供 sendCommand / evaluate / invoke。
 
 observe 绑定当前受信窗口和请求中的 workspace/session 作用域，返回新 observationId 与目录快照；setView 表达面板可见性和选择的 opaque tabId，ackFrame 仅确认当前 streamGeneration 的已发序号。具体目标身份和 epoch 由 Main 解析校验，Renderer 提供的值不能成为授权来源。
 

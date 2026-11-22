@@ -382,7 +382,7 @@ test("symlinked executables are rejected", async () => {
 });
 
 test("path validation rejects relative, missing, and non-file targets", async () => {
-  const relative = await validateExecutablePath("relative\\omp.exe");
+  const relative = await validateExecutablePath("relative\\juling.exe");
   assert.equal(relative.ok, false);
   assert.match(relative.reason ?? "", /absolute path/u);
   const missing = await validateExecutablePath(join(tmpdir(), "juling-harness-missing-xyz"));
@@ -608,7 +608,7 @@ test("process probe reports PROBE_UNAVAILABLE when the bridge bootstrap fails", 
     },
   });
   const outcome = await probe.probe({
-    executablePath: "C:\\runtimes\\omp.exe",
+    executablePath: "C:\\runtimes\\juling.exe",
     platform: "win32",
     arch: "x64",
     workspaceDirectory: tmpdir(),

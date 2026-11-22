@@ -57,7 +57,7 @@ export function AppBackgroundLayer({
   }, [effectiveScrim, settings, strength, visible]);
 
   useEffect(() => {
-    const chrome = globalThis.ompHarnessChrome;
+    const chrome = globalThis.julingHarnessChrome;
     const tint = visible && settings.scope === "app" && activeAvgColor !== undefined
       ? titlebarTint(theme, activeAvgColor)
       : undefined;

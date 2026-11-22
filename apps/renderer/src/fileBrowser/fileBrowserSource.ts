@@ -84,8 +84,8 @@ export function createHostFileBrowserSource(options: {
     },
     async peek(entry): Promise<FsPeek> {
       const client = await options.client();
-      if (fileKind(entry.path) === "image" && globalThis.ompHarnessChrome?.files) {
-        const api = globalThis.ompHarnessChrome.files;
+      if (fileKind(entry.path) === "image" && globalThis.julingHarnessChrome?.files) {
+        const api = globalThis.julingHarnessChrome.files;
         const resource = await api.open({ targetId: options.targetId, workspaceId: "", path: entry.path, source: "system" });
         return { image: resource.url, release: () => { void api.release(resource.id); } };
       }

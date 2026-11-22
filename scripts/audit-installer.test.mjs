@@ -76,7 +76,7 @@ test("auditInstallerOutput fails when trusted-keys.json is missing", async () =>
 
   const versionDir = join(unpacked, "runtime", "versions", expectedVersion);
   await mkdir(versionDir, { recursive: true });
-  await writeFile(join(versionDir, "omp.exe"), "omp");
+  await writeFile(join(versionDir, "juling.exe"), "omp");
   await writeFile(
     join(versionDir, "runtime-manifest.json"),
     JSON.stringify({ runtimeVersion: expectedVersion }),
@@ -116,7 +116,7 @@ test("auditInstallerOutput fails when a trusted key contains a private key marke
 
   const versionDir = join(unpacked, "runtime", "versions", expectedVersion);
   await mkdir(versionDir, { recursive: true });
-  await writeFile(join(versionDir, "omp.exe"), "omp");
+  await writeFile(join(versionDir, "juling.exe"), "omp");
   await writeFile(
     join(versionDir, "runtime-manifest.json"),
     JSON.stringify({ runtimeVersion: expectedVersion }),

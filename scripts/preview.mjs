@@ -272,7 +272,7 @@ async function preparePreviewElectron(runtime) {
     // Desktop Host puts its managed Runtime tree at <previewElectronDir>/runtime.
     // Anything named `runtime` inside the Electron distribution is therefore a
     // leftover from an earlier preview run, and copying it in would resurrect a
-    // stale omp.exe that `rm -rf outputs/preview-electron` cannot reach (it lives
+    // stale juling.exe that `rm -rf outputs/preview-electron` cannot reach (it lives
     // under the gitignored node_modules). Skip it so seeding installs the freshly
     // built, signed artifact instead.
     await cp(electronDist, electronDirectory, {
@@ -433,7 +433,7 @@ async function main() {
   const desktop = start(electronExecutable, desktopArgs, {
     env: {
       ...process.env,
-      OMP_APP_USER_MODEL_ID: previewAumid,
+      JULING_APP_USER_MODEL_ID: previewAumid,
       ...(runtime ? { OMP_PRODUCTION_PREVIEW_STATE: runtime.stateDirectory } : {}),
       ...(production ? {} : { OMP_RENDERER_DEV_URL: rendererEntryUrl }),
     },

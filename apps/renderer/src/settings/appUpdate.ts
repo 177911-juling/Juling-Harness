@@ -132,8 +132,8 @@ function receiveUnifiedUpdate(snapshot: import("@juling-harness/runtime-installe
     },
   });
 }
-const unsubscribeUnified = globalThis.ompHarnessChrome?.subscribeUpdates?.(receiveUnifiedUpdate);
-void globalThis.ompHarnessChrome?.getUpdateSnapshot?.().then(s => { if (s) receiveUnifiedUpdate(s); }).catch(() => {});
+const unsubscribeUnified = globalThis.julingHarnessChrome?.subscribeUpdates?.(receiveUnifiedUpdate);
+void globalThis.julingHarnessChrome?.getUpdateSnapshot?.().then(s => { if (s) receiveUnifiedUpdate(s); }).catch(() => {});
 if (import.meta.hot) import.meta.hot.dispose(() => unsubscribeUnified?.());
 if (import.meta.hot) import.meta.hot.dispose(unsubscribeUpdates);
 
@@ -151,7 +151,7 @@ export async function checkForAppUpdates(options?: {
   readonly silent?: boolean | undefined;
 }): Promise<AppUpdateState["updateInfo"]> {
   const silent = options?.silent ?? true;
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (!chrome || typeof chrome.checkUpdates !== "function") {
     return null;
   }
@@ -180,7 +180,7 @@ export async function checkForAppUpdates(options?: {
 
 /** 下载并验签；由用户另行确认应用并重启。 */
 export async function downloadAndInstallAppUpdate(): Promise<boolean> {
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (!chrome || !currentState.updateInfo?.available) {
     updateState({ downloadError: updateCopy("appUpdate.noAvailableUpdate") });
     return false;
@@ -220,7 +220,7 @@ export async function applyAppUpdate(): Promise<boolean> {
   applyInFlight = true;
   updateState({ applying: true, ...clearedMessages });
   try {
-    const result = await globalThis.ompHarnessChrome?.applyUpdate();
+    const result = await globalThis.julingHarnessChrome?.applyUpdate();
     if (result?.deferred) {
       updateState({ applyNotice: result.message ?? updateCopy("appUpdate.applyDeferred") });
       return false;
@@ -247,7 +247,7 @@ export async function skipAppUpdate(): Promise<void> {
 }
 
 export async function prepareDesktopRollback(): Promise<boolean> {
-  const chrome = globalThis.ompHarnessChrome;
+  const chrome = globalThis.julingHarnessChrome;
   if (!chrome?.rollbackUpdate || !chrome.getUpdateSnapshot) return false;
   updateState({ downloading: true, ...clearedMessages });
   try {
@@ -266,7 +266,7 @@ export async function prepareDesktopRollback(): Promise<boolean> {
 export async function cancelAppUpdate(): Promise<void> {
   updateState({ cancelError: null });
   try {
-    if (unifiedSnapshot) await globalThis.ompHarnessChrome?.cancelUpdate("unified");
+    if (unifiedSnapshot) await globalThis.julingHarnessChrome?.cancelUpdate("unified");
     else {
       const job = getUpdatesState().job;
       if (job?.kind !== "app") return;

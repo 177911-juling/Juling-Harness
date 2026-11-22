@@ -8,7 +8,7 @@ it("joins an outstanding status read across hidden and visible changes", async (
  const first = new Promise(resolve => { finish = resolve; });
  const recordingStatus = vi.fn().mockReturnValueOnce(first).mockResolvedValue({ state: "recording", elapsedMs: 1, bytes: 0 });
  const recordingStop = vi.fn();
- const api = { recordingStatus, recordingStop } as unknown as NonNullable<typeof globalThis.ompHarnessTerminal>;
+ const api = { recordingStatus, recordingStop } as unknown as NonNullable<typeof globalThis.julingHarnessTerminal>;
  const view = render(<TerminalRecordingControls api={api} id="terminal" ended={false} visible />);
  await act(async () => {});
  view.rerender(<TerminalRecordingControls api={api} id="terminal" ended={false} visible={false} />);
@@ -23,7 +23,7 @@ it("stops hidden panel polling without stopping the recording and refreshes on r
   vi.useFakeTimers();
   const recordingStatus = vi.fn(async () => ({ state: "recording", elapsedMs: 0, bytes: 0 }));
   const recordingStop = vi.fn();
-  const api = { recordingStatus, recordingStop } as unknown as NonNullable<typeof globalThis.ompHarnessTerminal>;
+  const api = { recordingStatus, recordingStop } as unknown as NonNullable<typeof globalThis.julingHarnessTerminal>;
   const view = render(<TerminalRecordingControls api={api} id="terminal" ended={false} visible />);
   await act(async () => {});
   expect(recordingStatus).toHaveBeenCalledOnce();

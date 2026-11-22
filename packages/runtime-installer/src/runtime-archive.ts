@@ -4,7 +4,7 @@ import { unzipSync, zipSync } from "fflate";
 import { RUNTIME_ENTRYPOINTS, runtimeEntrypointFor, type RuntimeEntrypoint } from "./runtime-platform.js";
 
 /** Windows layout; `runtimeArchiveFiles` gives the layout for any entrypoint. */
-export const RUNTIME_ARCHIVE_FILES = ["checksums.json", "omp.exe", "runtime-manifest.json", "runtime-signature.json"] as const;
+export const RUNTIME_ARCHIVE_FILES = ["checksums.json", "juling.exe", "runtime-manifest.json", "runtime-signature.json"] as const;
 /** Fixed (sorted) order keeps block reuse stable across releases. */
 export function runtimeArchiveFiles(entrypoint: RuntimeEntrypoint): readonly string[] {
   return ["checksums.json", entrypoint, "runtime-manifest.json", "runtime-signature.json"];
@@ -59,5 +59,5 @@ export async function extractRuntimeArchive(archive: string, destination: string
   await mkdir(destination, { recursive: true });
   for (const name of runtimeArchiveFiles(expected)) await writeFile(join(destination, name), entries[name]!, { flag: "wx" });
   // Zip entries carry no mode bits (os: 0); a POSIX Runtime must be executable for its self-check.
-  if (expected !== "omp.exe") await chmod(join(destination, expected), 0o755);
+  if (expected !== "juling.exe") await chmod(join(destination, expected), 0o755);
 }

@@ -86,9 +86,9 @@ describe("ToolBody: WebSearchBody", () => {
     expect(cites[2]!.querySelector(".tc-cite-title")?.textContent).toBe("https://example.com/raw-url");
   });
 
-  it("handles clicking on citation link via ompHarnessChrome.openUrl or window.open", () => {
+  it("handles clicking on citation link via julingHarnessChrome.openUrl or window.open", () => {
     const openUrlMock = vi.fn();
-    (globalThis as unknown as { ompHarnessChrome?: { openUrl: typeof openUrlMock } }).ompHarnessChrome = {
+    (globalThis as unknown as { julingHarnessChrome?: { openUrl: typeof openUrlMock } }).julingHarnessChrome = {
       openUrl: openUrlMock,
     };
 
@@ -117,7 +117,7 @@ describe("ToolBody: WebSearchBody", () => {
     fireEvent.click(cite!);
     expect(openUrlMock).toHaveBeenCalledWith({ url: "https://github.com/d3" });
 
-    delete (globalThis as unknown as { ompHarnessChrome?: unknown }).ompHarnessChrome;
+    delete (globalThis as unknown as { julingHarnessChrome?: unknown }).julingHarnessChrome;
   });
 
   it("renders empty citations gracefully when no sources are available", () => {

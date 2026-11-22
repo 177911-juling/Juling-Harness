@@ -113,6 +113,6 @@ test("Runtime manifest must match the target platform, entrypoint and series", (
   const manifest = { platform: "darwin-arm64", entrypoint: "omp", runtimeVersion: "18.3.0-harness.12" };
   assertRuntimeManifestPlatform(manifest, "darwin-arm64", "18.3.0-harness.12");
   assert.throws(() => assertRuntimeManifestPlatform(manifest, "win32-arm64", "18.3.0-harness.12"), /does not match target/u);
-  assert.throws(() => assertRuntimeManifestPlatform({ ...manifest, entrypoint: "omp.exe" }, "darwin-arm64", "18.3.0-harness.12"), /entrypoint/u);
+  assert.throws(() => assertRuntimeManifestPlatform({ ...manifest, entrypoint: "juling.exe" }, "darwin-arm64", "18.3.0-harness.12"), /entrypoint/u);
   assert.throws(() => assertRuntimeManifestPlatform(manifest, "darwin-arm64", "18.3.0-harness.13"), /series/u);
 });

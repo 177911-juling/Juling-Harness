@@ -20,7 +20,7 @@ export class MicrophoneDeniedError extends Error {
  */
 export function ensureMicrophoneAccess(
   zh: boolean,
-  api: { readonly platform?: string; requestMicrophoneAccess?(): Promise<"granted" | "denied"> } | undefined = globalThis.ompHarnessChrome,
+  api: { readonly platform?: string; requestMicrophoneAccess?(): Promise<"granted" | "denied"> } | undefined = globalThis.julingHarnessChrome,
 ): Promise<void> | undefined {
   if (api?.platform !== "darwin" || !api.requestMicrophoneAccess) return undefined;
   return api.requestMicrophoneAccess().then((status) => {
@@ -44,7 +44,7 @@ export function microphoneFailureMessage(cause: unknown, zh: boolean): string | 
 }
 
 export function MicrophoneSettingsButton({ zh }: { zh: boolean }) {
-  const open = globalThis.ompHarnessChrome?.openMicrophoneSettings;
+  const open = globalThis.julingHarnessChrome?.openMicrophoneSettings;
   if (!open) return null;
   return (
     <button type="button" className="btn small outline" onClick={() => { void open().catch(() => undefined); }}>

@@ -48,6 +48,7 @@ asarUnpack:
 
 npmRebuild: true
 buildDependenciesFromSource: false
+afterPack: ./scripts/audit-mobile-certificate.mjs
 
 # Renderer is loaded as appPath/../renderer/dist/index.html
 # (`app.asar` → `resources/renderer/dist`). See resolveRendererEntry.
@@ -72,7 +73,7 @@ extraResources:
 
 # Signed Runtime seed next to the exe (not inside asar).
 # Only the current series version is staged by pack:win:prepare.
-# Layout: $INSTDIR\runtime\versions\<ver>\omp.exe
+# Layout: $INSTDIR\runtime\versions\<ver>\juling.exe
 extraFiles:
   - from: packaging/runtime-payload
     to: runtime/versions

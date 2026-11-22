@@ -39,7 +39,7 @@ async function writeSignature(directory: string, manifest: string, checksums: st
 async function artifact(parent: string, version: string, content = `omp-${version}`): Promise<string> {
   const directory = join(parent, `artifact-${version}`);
   await mkdir(directory);
-  await writeFile(join(directory, "omp.exe"), content);
+  await writeFile(join(directory, "juling.exe"), content);
   const manifest = `${JSON.stringify({
     runtimeVersion: version,
     upstreamVersion: "0.0.0",
@@ -50,14 +50,14 @@ async function artifact(parent: string, version: string, content = `omp-${versio
     capabilityHash: "capability-fixture",
     commandManifestHash: "command-fixture",
     platform: "win32-x64",
-    entrypoint: "omp.exe",
+    entrypoint: "juling.exe",
     channel: "stable",
   })}\n`;
   await writeFile(join(directory, "runtime-manifest.json"), manifest);
   const checksums = `${JSON.stringify({
     algorithm: "sha256",
     files: {
-      "omp.exe": createHash("sha256").update(content).digest("hex"),
+      "juling.exe": createHash("sha256").update(content).digest("hex"),
       "runtime-manifest.json": createHash("sha256").update(manifest).digest("hex"),
     },
   })}\n`;
@@ -75,7 +75,7 @@ async function installedRuntime(
   const installer = runtimeInstaller(root, options);
   await installer.install(await artifact(parent, "v1", content));
   await installer.activate("v1", { selfCheck: passingSelfCheck });
-  return { installer, entrypoint: join(root, "versions", "v1", "omp.exe") };
+  return { installer, entrypoint: join(root, "versions", "v1", "juling.exe") };
 }
 
 test("currentManifest publishes the signed entrypoint digest for the execution boundary", async () => {
@@ -132,7 +132,7 @@ test("an entrypoint whose bytes changed is hashed again and rejected", async () 
     assert.equal(installer.verificationStats().contentHashes, 1);
 
     // Same length, so only the modification time can reveal the replacement.
-    await writeFile(join(temporary, "installed", "versions", "v1", "omp.exe"), "B".repeat(content.length));
+    await writeFile(join(temporary, "installed", "versions", "v1", "juling.exe"), "B".repeat(content.length));
     await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
     assert.equal(installer.verificationStats().contentHashes, 2);
   } finally {

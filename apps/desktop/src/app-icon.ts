@@ -13,9 +13,9 @@ import { join } from "node:path";
 /** Must match `packaging/electron-builder.yml` `appId`. */
 export const APP_USER_MODEL_ID = "com.julingharness.desktop";
 
-/** `npm run preview` sets OMP_APP_USER_MODEL_ID so its shortcut never shares the installed app's identity. */
+/** `npm run preview` sets JULING_APP_USER_MODEL_ID so its shortcut never shares the installed app's identity. */
 export function resolveAppUserModelId(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.OMP_APP_USER_MODEL_ID;
+  const override = env.JULING_APP_USER_MODEL_ID;
   return override !== undefined && override.length > 0 ? override : APP_USER_MODEL_ID;
 }
 

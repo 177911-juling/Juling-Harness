@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ConversationMessageItem, ConversationRuntimeEvent, SessionId } from "@juling-harness/client-contract";
+import { tailUtf8, type ConversationMessageItem, type ConversationRuntimeEvent, type SessionId } from "@juling-harness/client-contract";
 import { ConversationStore } from "./conversationStore";
 import { subagentTurnRunning } from "./subagentComposerGate";
 import { timelineStructureToken, tailInterrupted } from "./conversationViewModel";
@@ -37,6 +37,27 @@ it("keeps extension notifications distinct from assistant replies when the live 
   store.hydrate({ items: [extension], headCursor: "h2" as never, hasMoreBefore: false });
   expect(store.getSnapshot().rows).toMatchObject([{ type: "extension", text: "扩展已准备" }]);
   store.dispose();
+});
+
+it("keeps a preserved advisor note in place without restarting an interrupted turn", () => {
+  const { store, sessionId, frames } = create();
+  const reply = item("reply", "assistant", "First attempt");
+  const advice: ConversationMessageItem = {
+    kind: "message", role: "advisor", itemId: "note", parentId: "reply", createdAt: "later",
+    content: [{ type: "text", text: "Review the order.", severity: "concern" }],
+  };
+  store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
+  store.applyEvent({ kind: "conversation.message.completed", sessionId, turnId: "turn", messageId: "reply", item: reply });
+  store.applyEvent({ kind: "conversation.turn.aborted", sessionId, turnId: "turn" });
+  store.applyEvent({ ...started(sessionId, "note"), role: "advisor" });
+  store.applyEvent({ kind: "conversation.message.completed", sessionId, turnId: "turn", messageId: "note", item: advice });
+  frames.flush();
+  const snapshot = store.getSnapshot();
+  expect(snapshot.rows.map(row => row.type)).toEqual(["assistant", "advisor"]);
+  expect(snapshot.state.lastTurnInterrupted).toBe(true);
+  expect(subagentTurnRunning(snapshot.state)).toBe(false);
+  store.hydrate({ items: [reply, advice], headCursor: "h2" as never, hasMoreBefore: false });
+  expect(store.getSnapshot().rows).toMatchObject([{ itemId: "reply" }, { itemId: "note", notes: advice.content }]);
 });
 
 it("keeps intermediate replies as prose through streaming, completion and history reload without duplicating them", () => {
@@ -320,6 +341,26 @@ describe("ConversationStore", () => {
     expect(tool.output!.length).toBeLessThan(output.length);
     expect(tool.output!.endsWith("国")).toBe(true);
     expect(elapsed).toBeLessThan(250);
+  });
+
+  it("keeps published tool output stable while Unicode appends cross the tail limit", () => {
+    const { store, sessionId, frames } = create();
+    const target = { sessionId, turnId: "turn", toolCallId: "tool" };
+    store.applyEvent({ ...target, kind: "conversation.tool.started", messageId: "live", toolName: "bash", startedAt: "now" });
+    const limit = 64 * 1024;
+    const prefix = "a".repeat(limit - 3);
+    store.applyEvent({ ...target, kind: "conversation.tool.updated", output: prefix, updateMode: "replace" });
+    frames.flush();
+    const first = store.getSnapshot().state.liveTools.tool!;
+    let expected = prefix;
+    for (const piece of ["中🚀", "日志".repeat(8000), "\ud83d", "\ude80", "\uFEFF", "b".repeat(limit - 4), "!", "🪐"]) {
+      store.applyEvent({ ...target, kind: "conversation.tool.updated", output: piece, updateMode: "append" });
+      expected = tailUtf8(expected + piece, limit).text;
+      frames.flush();
+      expect(store.getSnapshot().state.liveTools.tool?.output).toBe(expected);
+    }
+    expect(first.output).toBe(prefix);
+    store.dispose();
   });
 
   it("prunes liveOrder when a turn completes, not only when a message completes", () => {

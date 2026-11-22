@@ -105,7 +105,7 @@ export function PredictionSettingsPane({
       const previous = channel.current;
       channel.current = undefined;
       if (previous)
-        void globalThis.ompHarnessChrome
+        void globalThis.julingHarnessChrome
           ?.detachPrediction?.({ channelId: previous.channelId })
           .catch(() => {});
     };
@@ -122,7 +122,7 @@ export function PredictionSettingsPane({
     const previous = channel.current;
     channel.current = undefined;
     if (previous)
-      void globalThis.ompHarnessChrome
+      void globalThis.julingHarnessChrome
         ?.detachPrediction?.({ channelId: previous.channelId })
         .catch(() => {});
   }, [visible]);
@@ -279,7 +279,7 @@ export function PredictionSettingsPane({
         );
       return;
     }
-    const chrome = globalThis.ompHarnessChrome;
+    const chrome = globalThis.julingHarnessChrome;
     if (!chrome?.attachPrediction || !chrome.importPredictionHistory) return;
     lock.current = true;
     setBusy("import");
@@ -461,7 +461,7 @@ export function PredictionSettingsPane({
           disabled={
             !has("prediction.prepare") ||
             !!busy ||
-            (!preview && !globalThis.ompHarnessChrome?.importPredictionHistory)
+            (!preview && !globalThis.julingHarnessChrome?.importPredictionHistory)
           }
           onClick={() => void importHistory()}
         >

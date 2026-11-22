@@ -148,7 +148,7 @@ describe("settings navigation and real preferences", () => {
   it("preserves update preferences across reopen", async () => {
     let prefs: UpdatePrefs = { mirrorPrefix: "", autoCheck: true, skippedAppVersion: "", runtimeChannel: "stable", preferHotUpdate: true, lastIndexSequence: 0 };
     const setUpdatePrefs = vi.fn(async (patch: Partial<UpdatePrefs>) => { prefs = { ...prefs, ...patch }; return prefs; });
-    vi.stubGlobal("ompHarnessChrome", { getUpdatePrefs: vi.fn(async () => prefs), setUpdatePrefs });
+    vi.stubGlobal("julingHarnessChrome", { getUpdatePrefs: vi.fn(async () => prefs), setUpdatePrefs });
     const view = renderSettings();
     openTab("更新与维护");
     const toggle = screen.getByRole("switch", { name: "自动下载更新" });

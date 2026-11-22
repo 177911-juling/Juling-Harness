@@ -19,7 +19,7 @@ export function FileCloseDialog() {
   const [, update] = useState(0), [saving, setSaving] = useState(false), [error, setError] = useState("");
   useEffect(() => { const changed = () => update(value => value + 1); listeners.add(changed); return () => { listeners.delete(changed); }; }, []);
   useEffect(() => {
-    const api = globalThis.ompHarnessChrome?.files;
+    const api = globalThis.julingHarnessChrome?.files;
     if (!api) return;
     const report = () => { void api.setDirty(dirtyFileDocuments().length); };
     report(); const off = subscribeDirtyFiles(report);
@@ -51,7 +51,7 @@ export function FileCloseDialog() {
     return () => portalDoc.removeEventListener("keydown", onKeyDown);
   }, [active, portalDoc, saving]);
   useEffect(() => {
-    if (globalThis.ompHarnessChrome?.files) return;
+    if (globalThis.julingHarnessChrome?.files) return;
     const before = (event: BeforeUnloadEvent) => {
       if (!dirtyFileDocuments().length) return;
       event.preventDefault();

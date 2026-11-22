@@ -223,7 +223,7 @@ const nativeHubs = new WeakMap<HarnessClient, WeakMap<object, BrowserHub>>();
 const noEmbedded = {};
 let previewBackend: BrowserBackend | undefined;
 /** The client selects the native registry, never an Electron-presence test. Old runtimes keep their explicit legacy adapter. */
-export function browserHub(preview: boolean, api: ManagedBrowserApi | undefined = globalThis.ompHarnessChrome?.managedBrowser, client?: HarnessClient): BrowserHub | null {
+export function browserHub(preview: boolean, api: ManagedBrowserApi | undefined = globalThis.julingHarnessChrome?.managedBrowser, client?: HarnessClient): BrowserHub | null {
   if (!preview && client) {
     let byAdapter = nativeHubs.get(client);
     if (!byAdapter) nativeHubs.set(client, byAdapter = new WeakMap());

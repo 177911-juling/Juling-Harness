@@ -141,7 +141,7 @@ function fakePlatform(profileDirectory: string): { port: PlatformPort; calls: st
         calls.push("appDataDirectory");
         return profileDirectory;
       },
-      runtimeExecutableName: () => "omp.exe",
+      runtimeExecutableName: () => "juling.exe",
       createPrivateEndpoint: async () => {
         throw new Error("unused in composition tests");
       },

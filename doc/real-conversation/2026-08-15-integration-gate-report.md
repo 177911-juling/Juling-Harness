@@ -126,7 +126,7 @@
 
 证明位置：`apps/desktop/test/conversation-gate.test.ts`、`packages/testkit/test/conversation-mvp.test.ts`、`apps/renderer/src/conversation/conversation-gate.test.tsx`。
 
-**不可**据此宣称「Composer 在真 Electron 窗口里把 prompt 打进真 omp.exe」。
+**不可**据此宣称「Composer 在真 Electron 窗口里把 prompt 打进真 juling.exe」。
 
 ## MVP-B（交付 3）— 数据路径可宣称；滚动仅 renderer 单测
 
@@ -155,7 +155,7 @@
 | oversize tool output | 通过（validator 拒绝） | conversation-fault / security |
 | 循环 JSON / 过深 JSON | 通过 | conversation-fault |
 | socket 重连 | **skip** | 无 in-process Desktop socket harness；gap resync 已覆盖 |
-| 真 Runtime crash after prompt | **skip** | 需杀 omp.exe；`outcome_unknown` receipt 已覆盖 |
+| 真 Runtime crash after prompt | **skip** | 需杀 juling.exe；`outcome_unknown` receipt 已覆盖 |
 | 旧 cursor / branch navigate | **skip** | 需计划 02 Runtime cursor signing |
 | compaction-during-read | **skip** | 需真 SessionManager |
 | abort 后再来 `message.completed` | **通过（04 已合入）** | `completeMessage` 在 turn 已 abort 时收敛文本但 **保留 aborted view**；client 测试 `message.completed after abort converges text but keeps the aborted view` 通过。真窗口 Abort 仍未测。 |
@@ -202,7 +202,7 @@
 - 隔离临时 workspace 已创建（例：`%TEMP%\juling-harness-conversation-e2e-*`，含无害 `package.json` / README）  
 - `node_modules/electron/cli.js` 与 `apps/desktop/dist/src/main.js` 存在  
 - `OMP_RUNTIME_EXECUTABLE` 未配置 → **exit 2**  
-- 即使配置了 omp.exe，骨架也 **没有** 接好自动化驱动 Electron；仍须人工。不要把 fixture 测试写成真 E2E。
+- 即使配置了 juling.exe，骨架也 **没有** 接好自动化驱动 Electron；仍须人工。不要把 fixture 测试写成真 E2E。
 
 ### 人工步骤
 
@@ -248,7 +248,7 @@
 
 ### MVP-A
 
-- [x] fake：persisted workspace 启动 composition（非真 omp.exe）  
+- [x] fake：persisted workspace 启动 composition（非真 juling.exe）  
 - [x] fake：manifest 来自 hello 视图  
 - [ ] **真** `core.prompt` 到达 OMP — 未测  
 - [x] fake：`session.transcript.read` 空页/两页  

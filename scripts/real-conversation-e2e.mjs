@@ -29,7 +29,7 @@ async function configurationDigests() {
 }
 
 async function query(name, input = {}) {
-  const response = await page.evaluate(async ({ name, input }) => window.ompHarness.query({ queryName: name, input }), { name, input });
+  const response = await page.evaluate(async ({ name, input }) => window.julingHarness.query({ queryName: name, input }), { name, input });
   if (!response.ok) throw new Error(response.error.code + ": " + response.error.message);
   return response.result;
 }
@@ -50,7 +50,7 @@ async function waitUntil(read, accept, label, timeout = timeoutMs) {
 }
 
 async function command(name, input = {}) {
-  return page.evaluate(async ({ name, input }) => window.ompHarness.command({
+  return page.evaluate(async ({ name, input }) => window.julingHarness.command({
     commandName: name,
     input,
     requestId: crypto.randomUUID(),
@@ -131,13 +131,13 @@ async function main() {
   });
   page = await electronApp.firstWindow();
   page.setDefaultTimeout(30000);
-  await page.waitForFunction(() => typeof window.ompHarness?.query === "function");
+  await page.waitForFunction(() => typeof window.julingHarness?.query === "function");
   await page.evaluate(() => {
     localStorage.setItem("omp.previewMode", "0");
     localStorage.setItem("omp.startupNotice.dismissed", "incomplete-v1");
   });
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => typeof window.ompHarness?.query === "function");
+  await page.waitForFunction(() => typeof window.julingHarness?.query === "function");
   const home = page.locator('nav.page-nav a[data-nav="home"]');
   if (await home.count()) await home.click();
   await page.getByRole("button", { name: /打开本地文件夹|Open local folder/i }).first().click();
@@ -177,7 +177,7 @@ async function main() {
   if (cancelled.loop?.status !== "paused" || cancelled.isStreaming) throw new Error("An aborted prompt reactivated the loop");
   report.checks.push("active turn cancellation cannot reactivate a paused loop");
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => typeof window.ompHarness?.query === "function");
+  await page.waitForFunction(() => typeof window.julingHarness?.query === "function");
   const restored = await waitUntil(() => query("session.state"), result => result.sessionId === session.sessionId, "Reload session recovery");
   if (restored.runtimeEpoch !== session.runtimeEpoch) throw new Error("Reload replaced rather than reattached the Runtime");
   const replay = await query("session.transcript.read");

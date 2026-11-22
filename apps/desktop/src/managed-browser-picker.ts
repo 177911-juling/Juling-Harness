@@ -6,9 +6,9 @@ export interface PickedBrowserElement {
 export interface BrowserPickerPoll { active: boolean; selections: PickedBrowserElement[]; }
 
 export const BROWSER_PICKER_START = String.raw`(() => {
-  if (globalThis.__ompHarnessPicker?.active) return true;
+  if (globalThis.__julingHarnessPicker?.active) return true;
   const state = { active: true, queue: [], stop: () => {} };
-  globalThis.__ompHarnessPicker = state;
+  globalThis.__julingHarnessPicker = state;
   const documents = new Map();
   const frames = new Map();
   const shields = new WeakMap();
@@ -133,5 +133,5 @@ export const BROWSER_PICKER_START = String.raw`(() => {
   document.activeElement?.blur();
   return true;
 })()`;
-export const BROWSER_PICKER_POLL = "({active: globalThis.__ompHarnessPicker?.active === true, selections: globalThis.__ompHarnessPicker?.queue.splice(0) ?? []})";
-export const BROWSER_PICKER_STOP = "globalThis.__ompHarnessPicker?.stop(); true";
+export const BROWSER_PICKER_POLL = "({active: globalThis.__julingHarnessPicker?.active === true, selections: globalThis.__julingHarnessPicker?.queue.splice(0) ?? []})";
+export const BROWSER_PICKER_STOP = "globalThis.__julingHarnessPicker?.stop(); true";

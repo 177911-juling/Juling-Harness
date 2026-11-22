@@ -48,7 +48,7 @@ try {
         elseif ($command.Contains('--type=renderer')) { 'renderer' }
         elseif ($command.Contains('network.mojom.NetworkService')) { 'network' }
         elseif ($command.Contains('--harness-session-telemetry-probe')) { 'telemetry-probe' }
-        elseif ($row.Name -eq 'omp.exe' -or $command.Contains('--mode harness-host')) { 'runtime' }
+        elseif ($row.Name -eq 'juling.exe' -or $command.Contains('--mode harness-host')) { 'runtime' }
         else { 'other-child' }
       if (-not $groups.ContainsKey($role)) { $groups[$role] = @{ count = 0; workingSetBytes = 0L; privateWorkingSetBytes = 0L; privateCommitBytes = 0L; cpuCorePercent = 0.0; cpuMachinePercent = 0.0 } }
       $group = $groups[$role]

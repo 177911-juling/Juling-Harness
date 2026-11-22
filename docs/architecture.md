@@ -7,7 +7,7 @@ typed Harness Bridge.
 ```
 Renderer (apps/renderer)
   → @juling-harness/client          HarnessClient + conversation reducer
-  → transport-desktop           preload `window.ompHarness`
+  → transport-desktop           preload `window.julingHarness`
   → apps/desktop                ipc.ts
   → @juling-harness/host-client-api product facade
         ├─ Host-owned: session catalog, archive, models.yml,
@@ -69,7 +69,7 @@ Authoritative lists:
 Harness-owned code lives in `omp-patch/overlay/`. Edits to upstream files are
 four seam patches. See [`omp-patch/README.md`](../omp-patch/README.md).
 
-`omp.exe` is the patched CLI/Runtime. `Juling Harness.exe` is the Electron app.
+`juling.exe` is the patched CLI/Runtime. `Juling Harness.exe` is the Electron app.
 
 ## Historical notes
 

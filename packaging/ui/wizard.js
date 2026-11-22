@@ -289,7 +289,7 @@ if (new URLSearchParams(window.location.search).get("host") === "installer") { d
       document.getElementById("f2Title").textContent = "删除快捷方式";
       document.getElementById("f2Desc").textContent = "开始菜单与桌面的 Juling Harness 快捷方式一并移除。";
       document.getElementById("f3Title").textContent = "删除头像，保留会话";
-      document.getElementById("f3Desc").textContent = "只清 %APPDATA%\\juling-harness\\profile；日志与会话不动。安装目录里的 omp.exe 随程序一起删除。";
+      document.getElementById("f3Desc").textContent = "只清 %APPDATA%\\juling-harness\\profile；日志与会话不动。安装目录里的 juling.exe 随程序一起删除。";
       document.getElementById("welcomeRuntime").innerHTML = "&gt;_ 将删除本机安装";
       document.getElementById("finishRuntime").innerHTML = "&gt;_ 会话与日志仍在 AppData";
       document.getElementById("progressTitle").textContent = "正在卸载 Juling Harness";
@@ -492,7 +492,7 @@ if (new URLSearchParams(window.location.search).get("host") === "installer") { d
     return [
       { t: .05, time: '10:24:01', msg: '准备安装到 ' + path, phase: '正在准备安装…', kind: 'ok' },
       { t: .25, time: '10:24:03', msg: '写入桌面程序与界面资源', phase: '正在写入程序文件…', file: 'resources/app.asar', kind: 'ok' },
-      { t: .6, time: '10:24:05', msg: '写入 OMP Runtime ' + RUNTIME_VERSION, file: 'runtime/versions/' + RUNTIME_VERSION + '/omp.exe', kind: 'hl' },
+      { t: .6, time: '10:24:05', msg: '写入 OMP Runtime ' + RUNTIME_VERSION, file: 'runtime/versions/' + RUNTIME_VERSION + '/juling.exe', kind: 'hl' },
       { t: .85, time: '10:24:07', msg: '应用快捷方式选择并写入卸载信息', phase: '正在完成安装…', file: '', kind: 'ok' },
       { t: 1, time: '10:24:08', msg: '安装完成', kind: 'done' }
     ];
@@ -682,7 +682,7 @@ if (new URLSearchParams(window.location.search).get("host") === "installer") { d
       alt.textContent = "取消";
     } else if (kind === "uninstall") {
       title.textContent = "确认卸载 Juling Harness？";
-      msg.textContent = "将删除程序文件（含安装目录里的 omp.exe）、开始菜单与桌面快捷方式，以及 %APPDATA%\\juling-harness\\profile（头像）。会话与日志会留在 AppData。";
+      msg.textContent = "将删除程序文件（含安装目录里的 juling.exe）、开始菜单与桌面快捷方式，以及 %APPDATA%\\juling-harness\\profile（头像）。会话与日志会留在 AppData。";
       ok.textContent = "卸载";
       alt.textContent = "取消";
     } else {

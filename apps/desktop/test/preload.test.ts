@@ -2,7 +2,7 @@
  * P1 preload bridge security tests (FRONTEND_INTEGRATION.md §9.1).
  *
  * The sandboxed preload exposes exactly one frozen `OmpHarnessDesktopApi`
- * object (window.ompHarness) built by `createDesktopIpcBridge` over a
+ * object (window.julingHarness) built by `createDesktopIpcBridge` over a
  * fixed-channel sender. These tests exercise the bridge headlessly with a
  * fake sender: no Electron import, no display. They defend the preload's
  * hard guarantees — named methods only (no generic invoke), fixed channels
@@ -134,7 +134,7 @@ describe("createDesktopIpcBridge: fixed named surface, no generic invoke", () =>
   });
 
   test("exposes the bridge under the documented window global", () => {
-    assert.equal(DESKTOP_BRIDGE_GLOBAL, "ompHarness");
+    assert.equal(DESKTOP_BRIDGE_GLOBAL, "julingHarness");
   });
 });
 

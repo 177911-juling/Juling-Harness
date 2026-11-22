@@ -381,11 +381,11 @@ test("a failed desktop installation surfaces the incomplete transaction and keep
 async function runtimeFixture(root: string, version: string): Promise<string> {
   const directory = join(root, version); await mkdir(directory, { recursive: true });
   const executable = Buffer.from(`fixture-${version}`);
-  const manifest = Buffer.from(JSON.stringify({ runtimeVersion: version, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "harness.1", harnessProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: "win32-x64", entrypoint: "omp.exe", channel: "stable" }));
+  const manifest = Buffer.from(JSON.stringify({ runtimeVersion: version, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "harness.1", harnessProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: "win32-x64", entrypoint: "juling.exe", channel: "stable" }));
   const hash = (b: Buffer) => createHash("sha256").update(b).digest("hex");
-  const checksums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { "runtime-manifest.json": hash(manifest), "omp.exe": hash(executable) } }));
+  const checksums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { "runtime-manifest.json": hash(manifest), "juling.exe": hash(executable) } }));
   const payload = Buffer.concat([manifest, Buffer.from("\0"), checksums]);
-  for (const [name, bytes] of [["omp.exe", executable], ["runtime-manifest.json", manifest], ["checksums.json", checksums], ["runtime-signature.json", Buffer.from(JSON.stringify({ algorithm: "ed25519", keyId: "test", payloadSha256: hash(payload), signature: sign(null, payload, pair.privateKey).toString("base64url") }))]] as const) await writeFile(join(directory, name), bytes);
+  for (const [name, bytes] of [["juling.exe", executable], ["runtime-manifest.json", manifest], ["checksums.json", checksums], ["runtime-signature.json", Buffer.from(JSON.stringify({ algorithm: "ed25519", keyId: "test", payloadSha256: hash(payload), signature: sign(null, payload, pair.privateKey).toString("base64url") }))]] as const) await writeFile(join(directory, name), bytes);
   return directory;
 }
 test("authorized Runtime activates after restart and failed session startup restores the verified previous Runtime", async () => {
@@ -421,7 +421,7 @@ test("migration copies only a verified Runtime and preserves a newer per-user in
   await target.install(await runtimeFixture(root, "18.0.0-harness.2")); await target.activate("18.0.0-harness.2", activateOptions);
   await migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot, trustedKeys: keys, activateOptions });
   assert.equal((await target.current())?.runtimeVersion, "18.0.0-harness.2");
-  await writeFile(join(legacyInstallRoot, "runtime", "versions", "18.0.0-harness.1", "omp.exe"), "tampered");
+  await writeFile(join(legacyInstallRoot, "runtime", "versions", "18.0.0-harness.1", "juling.exe"), "tampered");
   await assert.rejects(() => migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot, trustedKeys: keys, activateOptions }), /Checksum/);
 });
 
@@ -623,7 +623,7 @@ test("a corrupt active Runtime keeps its prepared same-version repair", async ()
   const updates = join(root, "updates"); await mkdir(updates, { recursive: true });
   await writeFile(join(updates, "transaction-v2.json"), JSON.stringify({ schema: 2, authorized: false, pending: { runtime: signed({ runtime: release }) }, previous: {}, watermarks: {} }));
   const cached = cachedUpdatePath(join(updates, "cache"), release.file); await mkdir(dirname(cached), { recursive: true }); await writeFile(cached, bytes);
-  await writeFile(join(runtimeRoot, "versions", version, "omp.exe"), "corrupt");
+  await writeFile(join(runtimeRoot, "versions", version, "juling.exe"), "corrupt");
   const options = { root: updates, runtimeRoot, repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
     prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {},
     installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([]), activateOptions: { selfCheck } };

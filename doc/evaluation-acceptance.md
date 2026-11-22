@@ -23,8 +23,8 @@
 | 原生 TypeScript | 通过 |
 | 打包工具 | 106 项通过 |
 | 完整 Renderer 回归 | 1387 通过、2 失败；评测页专项通过。失败均位于 App.composerPerf.test.tsx：持续输入布局调用数量、执行目标重挂载草稿测试；第一次全量运行时已存在 |
-| 真正 omp.exe 的 Bridge | 在隔离临时 profile 中认证握手、解析 Detailed／指令遵循／评判计划并正常关闭；没有模型请求 |
-| Runtime 启动 | 新编译 omp.exe 的 --version、--help 和 --smoke-test 通过 |
+| 真正 juling.exe 的 Bridge | 在隔离临时 profile 中认证握手、解析 Detailed／指令遵循／评判计划并正常关闭；没有模型请求 |
+| Runtime 启动 | 新编译 juling.exe 的 --version、--help 和 --smoke-test 通过 |
 | 补丁 | 在固定上游的独立副本／临时 Git index 顺序回放全部接缝补丁；未清理或重置活动 vendor 工作区 |
 | 视觉 | 1280／1440／1920px、650px 窄窗，中英文、浅／深色主题；1920px 实测内容宽度 1080px，650px 文档宽度没有溢出 |
 | 交互 | 四模块切换、结果展开、配置复跑、20 次 Detailed 请求确认、历史与不同配置报告对比；预览不调用 Host |

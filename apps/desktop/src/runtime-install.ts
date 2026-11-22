@@ -8,7 +8,7 @@
  *
  * Unpackaged (`electron .`) keeps that tree under
  * `%APPDATA%\juling-harness\runtimes`. Packaged builds put the live
- * `omp.exe` at `$INSTDIR\runtime\versions\<ver>\` (`extraFiles` already
+ * `juling.exe` at `$INSTDIR\runtime\versions\<ver>\` (`extraFiles` already
  * uses the installer layout). First launch verifies and writes
  * `$INSTDIR\runtime\current.json`; diagnostics updates write the same
  * folder. Uninstall deletes that live Runtime with the app.

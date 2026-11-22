@@ -12,6 +12,11 @@ import type { ShellEventLogEntry } from "../shellMemory";
 import type { LedgerCommandRow } from "../panels/types";
 import type { CommandName, EventCursor, WorkspaceListReadModel, WorkspaceId } from "@juling-harness/client-contract";
 
+export const PREVIEW_WSL_DIRECTORY = "/home/dev/project";
+export const PREVIEW_WSL_DISTROS: import("../../../desktop/src/remote/shared").WslDistribution[] = [
+  { name: "Ubuntu-24.04", version: 2, running: true, isDefault: true },
+  { name: "Debian", version: 2, running: false, isDefault: false },
+];
 export const PREVIEW_SSH_TARGETS = [
   { id: "demo-linux", name: "dev-linux", platform: "linux" as const },
   { id: "demo-windows", name: "build-windows", platform: "win32" as const },
@@ -142,6 +147,7 @@ export type PreviewHistoryStatus = "running" | "completed" | "failed" | "archive
 
 export type PreviewHistoryRow = {
   id: string;
+  threadId?: string;
   title: string;
   project: string;
   branch: string;
@@ -213,7 +219,7 @@ export function getPreviewProjects(zh = isZh()): PreviewProject[] {
       branch: "v0.8.1", worktree: null, dirty: 0, insertions: 0, deletions: 0, running: false,
       attention: false, preview: "stopped",
       threads: [
-        { id: "t6", title: zh ? "对比 v0.8.0 → v0.8.1 变更清单" : "Compare v0.8.0 → v0.8.1 changelog", time: "1d ago", msgs: 22, status: "idle" },
+        { id: "t6", title: zh ? "对比 v0.8.0 → v0.8.1 变更清单" : "Compare v0.8.0 → v0.8.1 changelog", time: "7d ago", msgs: 22, status: "archived" },
       ],
     },
     {
@@ -229,6 +235,10 @@ export function getPreviewProjects(zh = isZh()): PreviewProject[] {
 }
 
 export const PREVIEW_PROJECTS: PreviewProject[] = getPreviewProjects();
+
+export function previewSessionId(threadId: string): string {
+  return "preview-session-" + threadId;
+}
 
 /**
  * 排队栏演示（p1 · t1「跟踪上游 pi-web 更新到 omp-web」流式期间）：
@@ -249,7 +259,7 @@ export const PREVIEW_QUEUED_MESSAGES: readonly { id: number; text: string }[] = 
  */
 export function getPreviewRunActivity(zh = isZh()) {
   return {
-    status: { phase: "tool", label: zh ? "正在运行" : "Running", detail: "npm run check" },
+    status: { phase: "tool", glyph: "bash", label: zh ? "正在运行" : "Running", detail: "npm run check" },
   } as const;
 }
 
@@ -586,16 +596,27 @@ export const PREVIEW_PV_LOGS = getPreviewPvLogs();
 export function getPreviewHistory(zh = isZh()): PreviewHistoryRow[] {
   const c = (usd: string) => (zh ? `¥ ${usd}` : `$ ${usd}`);
   return [
-    { id: "ph1", title: zh ? "跟踪上游 pi-web 更新到 omp-web" : "Track upstream pi-web updates to omp-web", project: "omp-web", branch: "main", time: "32m ago", model: "gemini-3.6-flash", status: "running", files: 4, cost: c("4.62"), forkedFrom: null, checkpoints: 12, pinned: true },
-    { id: "ph2", title: zh ? "Mermaid 渲染优化与全屏缩放拖拽" : "Mermaid rendering optimization and fullscreen zoom & pan", project: "omp-web (feat/mermaid)", branch: "feat/mermaid-zoom", time: "18m ago", model: "gemini-3.6-flash", status: "running", files: 7, cost: c("2.31"), forkedFrom: zh ? "跟踪上游 pi-web 更新…" : "Track upstream pi-web updates…", checkpoints: 5, pinned: false },
-    { id: "ph3", title: "Audit and fix OSS repository issues", project: "omp-web", branch: "main", time: "2h ago", model: "claude-sonnet-4.5", status: "completed", files: 9, cost: c("8.14"), forkedFrom: null, checkpoints: 3, pinned: false },
+    { id: "ph1", threadId: "t1", title: zh ? "跟踪上游 pi-web 更新到 omp-web" : "Track upstream pi-web updates to omp-web", project: "omp-web", branch: "main", time: "32m ago", model: "gemini-3.6-flash", status: "running", files: 4, cost: c("4.62"), forkedFrom: null, checkpoints: 12, pinned: true },
+    { id: "ph2", threadId: "t7", title: zh ? "Mermaid 渲染优化与全屏缩放拖拽" : "Mermaid rendering optimization and fullscreen zoom & pan", project: "omp-web (feat/mermaid)", branch: "feat/mermaid-zoom", time: "18m ago", model: "gemini-3.6-flash", status: "running", files: 7, cost: c("2.31"), forkedFrom: zh ? "跟踪上游 pi-web 更新…" : "Track upstream pi-web updates…", checkpoints: 5, pinned: false },
+    { id: "ph3", threadId: "t2", title: "Audit and fix OSS repository issues", project: "omp-web", branch: "main", time: "2h ago", model: "claude-sonnet-4.5", status: "completed", files: 9, cost: c("8.14"), forkedFrom: null, checkpoints: 3, pinned: false },
     { id: "ph4", title: zh ? "选择 gemini3.6flash 随意发送消息后报错…" : "Error after selecting gemini3.6flash and sending a test message…", project: "omp-web", branch: "main", time: "4d ago", model: "gemini-3.6-flash", status: "failed", files: 0, cost: c("0.42"), forkedFrom: null, checkpoints: 0, pinned: false },
-    { id: "ph5", title: zh ? "修复 Git Bash 路径未找到问题" : "Fix Git Bash path not found issue", project: "omp-web", branch: "main", time: "4d ago", model: "gpt-5.2-codex", status: "completed", files: 2, cost: c("1.08"), forkedFrom: null, checkpoints: 2, pinned: false },
-    { id: "ph6", title: zh ? "重构 session 存储层 (session)" : "Refactor session storage layer (session)", project: "omp-web", branch: "refactor/session-db", time: "6d ago", model: "claude-sonnet-4.5", status: "archived", files: 21, cost: c("22.90"), forkedFrom: null, checkpoints: 9, pinned: false },
+    { id: "ph5", threadId: "t4", title: zh ? "修复 Git Bash 路径未找到问题" : "Fix Git Bash path not found issue", project: "omp-web", branch: "main", time: "4d ago", model: "gpt-5.2-codex", status: "completed", files: 2, cost: c("1.08"), forkedFrom: null, checkpoints: 2, pinned: false },
+    { id: "ph6", threadId: "t5", title: zh ? "重构 session 存储层 (session)" : "Refactor session storage layer (session)", project: "omp-web", branch: "refactor/session-db", time: "6d ago", model: "claude-sonnet-4.5", status: "archived", files: 21, cost: c("22.90"), forkedFrom: null, checkpoints: 9, pinned: false },
+    { id: "ph7", title: zh ? "对比 v0.8.0 → v0.8.1 变更清单" : "Compare v0.8.0 → v0.8.1 changelog", project: "pi-web (upstream)", branch: "v0.8.1", time: "7d ago", model: "gpt-5.2-codex", status: "archived", files: 3, cost: c("1.40"), forkedFrom: null, checkpoints: 4, pinned: false },
   ];
 }
 
 export const PREVIEW_HISTORY: PreviewHistoryRow[] = getPreviewHistory();
+
+/** History and sidebar fixtures that describe the same demo conversation. */
+export const PREVIEW_HISTORY_THREADS: Readonly<Record<string, string>> = {
+  ph1: "t1",
+  ph2: "t7",
+  ph3: "t2",
+  ph5: "t4",
+  ph6: "t5",
+  ph7: "t6",
+};
 
 export function getPreviewTimeTravel(zh = isZh()): PreviewTtNode[] {
   return zh ? [
@@ -882,3 +903,74 @@ export const PREVIEW_LEDGER_COMMANDS: readonly LedgerCommandRow[] = [
   { requestId: "req_e60b3d", commandName: "operator.invoke", status: "outcome_unknown", at: "2026-10-30T14:58:17.552Z", detail: "Runtime restarted before the invocation receipt arrived." },
   { requestId: "req_3fa2c7", commandName: "session.create", status: "completed", at: "2026-10-30T14:58:09.104Z" },
 ] satisfies readonly PreviewLedgerRow[];
+
+/** Mobile access (settings → 手机访问) in preview: two local projects, two LAN addresses, and a code-shaped grid
+ *  that encodes nothing. Actions in preview only move the settings pane's local state. */
+function previewCodeModules(): ReadonlyArray<readonly [number, number]> {
+  const modules: Array<readonly [number, number]> = [];
+  let seed = 20261118;
+  const next = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  for (let row = 0; row < 25; row += 1) {
+    for (let column = 0; column < 25; column += 1) {
+      const finder = (row < 8 && column < 8) || (row < 8 && column > 16) || (row > 16 && column < 8);
+      const logo = row > 8 && row < 16 && column > 8 && column < 16;
+      const on = row === 6 || column === 6 ? (row + column) % 2 === 0 : next() < 0.5;
+      if (!finder && !logo && on) modules.push([row + 1, column + 1]);
+    }
+  }
+  return modules;
+}
+const PREVIEW_MOBILE_PROJECTS = [
+  { id: "preview-mobile-harness" as WorkspaceId, name: "juling-harness" },
+  { id: "preview-mobile-playground" as WorkspaceId, name: "agent-playground" },
+];
+export const PREVIEW_MOBILE_ACCESS = {
+  idle: { addresses: ["192.168.1.20", "10.0.0.8"], projects: PREVIEW_MOBILE_PROJECTS },
+  active(ip: string, workspace: WorkspaceId | undefined, paired = false) {
+    const project = PREVIEW_MOBILE_PROJECTS.find(entry => entry.id === workspace) ?? PREVIEW_MOBILE_PROJECTS[0]!;
+    return {
+      addresses: ["192.168.1.20", "10.0.0.8"],
+      projects: PREVIEW_MOBILE_PROJECTS,
+      active: {
+        origin: `https://${ip || "192.168.1.20"}:7443`,
+        workspaceName: project.name,
+        fingerprint: "9F:2C:7A:1E:04:BD:63:F8:C2:A9:5E:17:D8:4B:0F:6A:31:CE:92:D7:6B:05:E4:A3:7F:18:BC:62:0D:9E:45:A1",
+        paired,
+      },
+    };
+  },
+  codeModules: previewCodeModules(),
+};
+
+/** The phone page (mobile.html?preview=1): chats of the shared project, and the one approval its demo thread asks for. */
+export function getPreviewMobileChats(zh: boolean, now = Date.now()) {
+  const minutes = (count: number) => new Date(now - count * 60_000).toISOString();
+  const rows: ReadonlyArray<readonly [string, string, number, number, boolean?]> = zh ? [
+    ["修复移动端审批布局", "审批浮层改成独立层，键盘弹出时标题收成一行。", 2, 18, true],
+    ["补齐手机端断线重连", "先确认 transport-web 的退避上限，再把重连状态接到标题下方。", 9, 31],
+    ["整理 0.2.5 发布说明", "已经按模块分组，等你确认措辞。", 95, 12],
+    ["Agent Hub 列表虚拟滚动", "改动已提交到 codex/hub-virtual，测试全部通过。", 260, 44],
+    ["终端字体回退", "macOS 上的中文字形改用 PingFang SC。", 60 * 26, 9],
+    ["解释 Harness Bridge 能力协商", "总结了初次连接、重连和旧版兼容三条路径。", 60 * 30, 6],
+    ["为设置页补齐英文文案", "共 38 条，菜单、空态和错误提示都已覆盖。", 60 * 24 * 4, 22],
+  ] : [
+    ["Fix mobile approval layout", "The approval is its own sheet now; the title collapses when the keyboard opens.", 2, 18, true],
+    ["Harden mobile reconnect", "Checking the transport-web backoff cap, then showing reconnect state under the title.", 9, 31],
+    ["Draft 0.2.5 release notes", "Grouped by area and ready for your wording pass.", 95, 12],
+    ["Virtualize the Agent Hub list", "Committed to codex/hub-virtual; all tests pass.", 260, 44],
+    ["Terminal font fallback", "CJK glyphs now fall back to PingFang SC on macOS.", 60 * 26, 9],
+    ["Explain Harness Bridge capability negotiation", "Summarized first connect, reconnect and legacy fallback paths.", 60 * 30, 6],
+    ["Add English copy to Settings", "38 strings, covering menus, empty states and errors.", 60 * 24 * 4, 22],
+  ];
+  return rows.map(([title, summary, ago, messageCount, pinned], index) => ({
+    key: `preview-mobile-${index}`, title, summary, lastActiveAt: minutes(ago), messageCount, pinned: pinned === true,
+  }));
+}
+export function getPreviewMobileApproval(zh: boolean) {
+  return {
+    title: zh ? "OMP 想要执行 Bash 命令" : "OMP wants to run a Bash command",
+    toolLabel: "Bash",
+    command: "npm run check -- --only renderer",
+    reason: zh ? "运行渲染层的类型检查和核心测试，不会修改文件。" : "Runs the renderer type check and core tests. No files are changed.",
+  };
+}

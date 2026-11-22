@@ -564,7 +564,7 @@ export interface ProductionDesktopHostFactory extends DesktopHostFactory {
  * Production factory plus the narrow Main-only workspace lookup used by
  * Desktop chrome (external editor / file manager / local terminal cwd).
  * These methods stay in the Main process and never cross the Host facade.
- * Packaged builds keep the live `omp.exe` under `$INSTDIR\runtime`.
+ * Packaged builds keep the live `juling.exe` under `$INSTDIR\runtime`.
  */
 export function createProductionHostFactory(options?: {
   readonly managedBrowser?: boolean;
@@ -656,6 +656,7 @@ export function createProductionHostFactory(options?: {
         await ensureRegistry();
         return registry.get(workspaceId)?.canonicalPath;
       },
+      async () => { await ensureRegistry(); return registry.list(); },
     ),
     ...(options?.openUrl === undefined ? {} : { openUrl: options.openUrl }),
     ...(options?.revealDirectory === undefined ? {} : { revealDirectory: options.revealDirectory }),

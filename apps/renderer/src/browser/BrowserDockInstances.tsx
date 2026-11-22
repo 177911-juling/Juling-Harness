@@ -45,7 +45,7 @@ export function BrowserDockInstances({ client, sessionId, available, capabilitie
   const scope = useSyncExternalStore(store.subscribe, () => store.getSnapshot().scope);
   const surfaceChrome = useSurfaceChrome();
   const nativeClient = supportsNativeBrowser(available, capabilities) ? client : undefined;
-  const hub = native ? browserHub(preview, surfaceChrome?.managedBrowser ?? globalThis.ompHarnessChrome?.managedBrowser, nativeClient) : null;
+  const hub = native ? browserHub(preview, surfaceChrome?.managedBrowser ?? globalThis.julingHarnessChrome?.managedBrowser, nativeClient) : null;
   const session = useMemo(() => hub && sessionId ? hub.session(sessionId) : null, [hub, sessionId]);
   // Only sync once the dock shows this chat's layout; a half-switched chat must not trade pages.
   const bound = !!session && scope.session === sessionId && !scope.draft;

@@ -29,7 +29,7 @@
 //
 // Entrypoint naming
 // -----------------
-// The managed Runtime CLI is `omp.exe` on Windows and `omp` on macOS, chosen
+// The managed Runtime CLI is `juling.exe` on Windows and `omp` on macOS, chosen
 // from the artifact platform (never the build machine) through the shared
 // table in target-platform.mjs. `juling-harness.exe` is reserved for the desktop
 // application and is rejected here.
@@ -120,6 +120,7 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "advisors.config.get",
   "advisors.config.save",
   "resource.local.list",
+  "resource.local.ensureDir",
   "resource.local.open",
   "resource.local.save",
   "dictation.inspect",
@@ -190,6 +191,7 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "worktrees.session.remove.prepare",
   "worktrees.session.remove.apply",
   "mode.plan.review.details",
+  "mode.plan.review.save",
   "mode.plan.review.resolve",
   "ratchet.list",
   "ratchet.read",
@@ -212,13 +214,17 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "browser.managed.prepare",
   "browser.native.open",
   "browser.native.close",
-  "ida.status.details",
-  "ida.configure",
-  "ida.open",
-  "ida.save",
-  "ida.close",
-  "ida.run",
-  "ida.database.cancel",
+  "disassembler.status",
+  "disassembler.configure",
+  "disassembler.metadata.read",
+  "disassembler.open",
+  "disassembler.close",
+  "disassembler.save",
+  "disassembler.run",
+  "disassembler.cancel",
+  "disassembler.query",
+  "disassembler.edit.prepare",
+  "disassembler.edit.apply",
   "session.budget.get",
   "session.budget.set",
   "session.budget.clearOverride",
@@ -231,11 +237,6 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "models.presets.apply",
   "models.presets.delete",
   "resource.read",
-  "ida.status",
-  "ida.view",
-  "ida.prepare",
-  "ida.commit",
-  "ida.cancel",
   "agent.btw.read",
   "agent.btw.ask",
   "agent.btw.abort",
@@ -296,7 +297,6 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "mcp.auth.reauth",
   "mcp.auth.unauth",
   "mcp.auth.reconnect",
-  "seance.ask",
   "annotations.capture",
   "annotations.prepare",
   "accounts.status",
@@ -428,7 +428,7 @@ export function defaultBinaryPath() {
     "packages",
     "coding-agent",
     "dist",
-    process.platform === "win32" ? "omp.exe" : "omp",
+    process.platform === "win32" ? "juling.exe" : "omp",
   );
 }
 

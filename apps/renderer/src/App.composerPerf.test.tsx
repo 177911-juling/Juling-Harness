@@ -145,7 +145,7 @@ it("publishes the deferred draft once the typing pauses", async () => {
 
 it("keeps draft books across execution-target remounts", async () => {
   const initial = structuredClone(contractFixtures.bootstrap);
-  vi.stubGlobal("ompHarnessRemote", {
+  vi.stubGlobal("julingHarnessRemote", {
     list: async () => ({ profiles: [{ id: "remote", name: "Test", host: "test" }], statuses: [{ id: "remote", state: "connected" }] }),
     onChanged: () => () => {}, onEvent: () => () => {}, select: async () => {},
     bootstrap: async () => ({ ...initial, snapshot: null, selected: { ...initial.selected, workspaceId: "ws-default", sessionId: null }, residents: { ...initial.residents, activeSessionId: null, residents: [] } }),

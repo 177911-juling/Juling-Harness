@@ -13,7 +13,7 @@ afterEach(() => {
   vi.useRealTimers();
   window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY);
   window.sessionStorage.removeItem(DIAGNOSTICS_INTENT_KEY);
-  window.ompHarnessChrome = undefined;
+  window.julingHarnessChrome = undefined;
 });
 
 function fakeClient(): HarnessClient & { readonly query: ReturnType<typeof vi.fn>; readonly command: ReturnType<typeof vi.fn> } {
@@ -82,7 +82,7 @@ const installPrefs = { mirrorPrefix: "", autoCheck: false, skippedAppVersion: ""
 describe("Runtime installation handoff", () => {
   it.each(["stable", "canary"] as const)("installs an imported %s artifact using its verified channel", async (runtimeChannel) => {
     const { client, command, environment } = installHarness();
-    window.ompHarnessChrome = {
+    window.julingHarnessChrome = {
       getUpdatePrefs: async () => installPrefs,
       importLocalUpdate: async () => ({ ok: true, runtimeChannel, runtimeVersion: "2.0.0" }),
     } as never;
@@ -95,7 +95,7 @@ describe("Runtime installation handoff", () => {
   it("keeps the downloaded artifact channel even when preferences now select stable", async () => {
     const { client, command, environment } = installHarness();
     let listener!: (event: UpdateProgressEvent) => void;
-    window.ompHarnessChrome = {
+    window.julingHarnessChrome = {
       getUpdatePrefs: async () => installPrefs,
       subscribeUpdateProgress: (next: typeof listener) => { listener = next; return () => {}; },
       startRuntime: async () => {
@@ -112,7 +112,7 @@ describe("Runtime installation handoff", () => {
 
   it("uses the selected channel for a local reinstall", async () => {
     const { client, command, environment } = installHarness();
-    window.ompHarnessChrome = { getUpdatePrefs: async () => ({ ...installPrefs, runtimeChannel: "canary" }) } as never;
+    window.julingHarnessChrome = { getUpdatePrefs: async () => ({ ...installPrefs, runtimeChannel: "canary" }) } as never;
     renderPage({ preview: false, client, environment });
     fireEvent.click(screen.getByRole("button", { name: "重装" }));
     fireEvent.click(screen.getByRole("button", { name: "确认重装" }));
@@ -121,7 +121,7 @@ describe("Runtime installation handoff", () => {
 
   it("reports a failed install result even when its command receipt is completed", async () => {
     const { client, environment } = installHarness({ status: "failed", message: "Runtime handshake failed" });
-    window.ompHarnessChrome = { importLocalUpdate: async () => ({ ok: true, runtimeChannel: "stable" }) } as never;
+    window.julingHarnessChrome = { importLocalUpdate: async () => ({ ok: true, runtimeChannel: "stable" }) } as never;
     renderPage({ preview: false, client, environment });
     fireEvent.click(screen.getByRole("button", { name: "从本地文件安装…" }));
     await waitFor(() => expect(screen.getByText("Runtime handshake failed")).toBeTruthy());
@@ -130,7 +130,7 @@ describe("Runtime installation handoff", () => {
 
   it("does not silently install stable when an imported artifact has no channel", async () => {
     const { client, command, environment } = installHarness();
-    window.ompHarnessChrome = { importLocalUpdate: async () => ({ ok: true }) } as never;
+    window.julingHarnessChrome = { importLocalUpdate: async () => ({ ok: true }) } as never;
     renderPage({ preview: false, client, environment });
     fireEvent.click(screen.getByRole("button", { name: "从本地文件安装…" }));
     await waitFor(() => expect(screen.getByText("无法确认 Runtime 工件通道，请重新检查更新")).toBeTruthy());
@@ -144,7 +144,7 @@ describe("Runtime update compatibility", () => {
     const blocker = "Runtime 至少需要桌面 0.1.11，请先更新桌面";
     const environment: EnvironmentReadModel = { ...installedEnvironment, installer: { status: "update-available", version: "1.0.0", availableVersion: "2.0.0", signature: "verified" } };
     const prepareUpdates = vi.fn();
-    window.ompHarnessChrome = { getUpdatePrefs: async () => installPrefs, prepareUpdates } as never;
+    window.julingHarnessChrome = { getUpdatePrefs: async () => installPrefs, prepareUpdates } as never;
     __resetUpdatesForTests({ check: { checkedAt: new Date().toISOString(), app: { plan: "full", version: "0.1.11" }, runtime: { plan: "blocked", runtimeVersion: "2.0.0", reason: blocker } } });
     renderPage({ preview: false, client, environment });
     expect(screen.getByText("Runtime 更新需先升级桌面")).toBeTruthy();
@@ -161,7 +161,7 @@ describe("Runtime update compatibility", () => {
 
   it("reports a blocked manual check rather than announcing an installable update", async () => {
     const { client, environment } = installHarness();
-    window.ompHarnessChrome = {
+    window.julingHarnessChrome = {
       getUpdatePrefs: async () => installPrefs,
       checkUpdates: async () => ({ checkedAt: new Date().toISOString(), app: { plan: "none" }, runtime: { plan: "blocked", runtimeVersion: "2.0.0", reason: "请先更新桌面" } }),
     } as never;
@@ -173,7 +173,7 @@ describe("Runtime update compatibility", () => {
 
   it("reports a rejected update check instead of claiming the local Runtime is up to date", async () => {
     const { client, environment } = installHarness();
-    window.ompHarnessChrome = {
+    window.julingHarnessChrome = {
       getUpdatePrefs: async () => installPrefs,
       checkUpdates: async () => { throw new Error("更新请求 HTTP 403（api.github.com），请求受限"); },
     } as never;
@@ -186,7 +186,7 @@ describe("Runtime update compatibility", () => {
   it("keeps a reported update check failure visible when the local environment cannot be read", async () => {
     const { client, environment } = installHarness();
     vi.mocked(client.query).mockRejectedValue(new Error("Local environment unavailable"));
-    window.ompHarnessChrome = {
+    window.julingHarnessChrome = {
       getUpdatePrefs: async () => installPrefs,
       checkUpdates: async () => ({ checkedAt: new Date().toISOString(), error: "HTTP 403，请求受限", app: { plan: "none" }, runtime: { plan: "none" } }),
     } as never;
@@ -208,7 +208,7 @@ describe("Runtime update compatibility", () => {
     const { client, environment } = installHarness();
     let failCheck!: (error: Error) => void;
     const checkUpdates = vi.fn(() => new Promise<never>((_resolve, reject) => { failCheck = reject; }));
-    window.ompHarnessChrome = {
+    window.julingHarnessChrome = {
       getUpdatePrefs: async () => ({ ...installPrefs, autoCheck: true }),
       checkUpdates,
     } as never;
@@ -241,7 +241,7 @@ describe("DiagnosticsPage", () => {
   it("keeps Runtime maintenance local in preview", () => {
     const rollback = vi.fn();
     const prune = vi.fn();
-    window.ompHarnessChrome = { rollbackRuntimeUpdate: rollback, pruneRuntimeUpdates: prune } as never;
+    window.julingHarnessChrome = { rollbackRuntimeUpdate: rollback, pruneRuntimeUpdates: prune } as never;
     renderPage({ preview: true });
     fireEvent.click(screen.getByRole("button", { name: "回滚 Runtime 并重启应用" }));
     fireEvent.click(screen.getByRole("button", { name: "清理旧版工件缓存" }));
@@ -252,7 +252,7 @@ describe("DiagnosticsPage", () => {
   it("reports rollback errors and blocks other maintenance while rollback is running", async () => {
     let finish!: (value: { ok: boolean; message: string }) => void;
     const rollback = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
-    window.ompHarnessChrome = { rollbackRuntimeUpdate: rollback, pruneRuntimeUpdates: vi.fn() } as never;
+    window.julingHarnessChrome = { rollbackRuntimeUpdate: rollback, pruneRuntimeUpdates: vi.fn() } as never;
     renderPage({ preview: false });
     fireEvent.click(screen.getByRole("button", { name: "回滚 Runtime 并重启应用" }));
     expect((screen.getByRole("button", { name: "清理旧版工件缓存" }) as HTMLButtonElement).disabled).toBe(true);
@@ -675,10 +675,10 @@ describe("DiagnosticsPage", () => {
   it("opens Host logs through chrome in real mode", async () => {
     const openLogDir = vi.fn(async () => ({ ok: true as const }));
     const exportLogs = vi.fn(async () => ({ ok: true as const }));
-    window.ompHarnessChrome = {
+    window.julingHarnessChrome = {
       openLogDir,
       exportLogs,
-    } as unknown as NonNullable<typeof window.ompHarnessChrome>;
+    } as unknown as NonNullable<typeof window.julingHarnessChrome>;
     renderPage({
       preview: false,
       client: fakeClient(),

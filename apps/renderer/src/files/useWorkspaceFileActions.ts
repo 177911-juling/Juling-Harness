@@ -5,16 +5,16 @@ import { useI18n } from "../i18n";
 import type { IconName } from "../icons";
 import { PLATFORM } from "../platform";
 
-export function useWorkspaceFileActions({ workspace, remote, onNotice, onOpenIda }: {
-  workspace: WorkspaceListReadModel["workspaces"][number] | undefined; remote: boolean;
-  onNotice(notice: { text: string; icon: IconName }): void; onOpenIda(path: string): void;
+export function useWorkspaceFileActions({ workspace, remote, targetId, onNotice, onOpenDisassembler }: {
+  workspace: WorkspaceListReadModel["workspaces"][number] | undefined; remote: false | "ssh" | "wsl"; targetId: string | null;
+  onNotice(notice: { text: string; icon: IconName }): void; onOpenDisassembler(path: string): void;
 }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [fileOpeners, setFileOpeners] = useState<ReadonlyArray<FileOpenerOption>>([]);
   useEffect(() => {
     const activeWorkspace = workspace;
-    const list = globalThis.ompHarnessChrome?.listFileOpeners;
+    const list = globalThis.julingHarnessChrome?.listFileOpeners;
     if (activeWorkspace === undefined || list === undefined) {
       setFileOpeners([]);
       return;
@@ -31,14 +31,14 @@ export function useWorkspaceFileActions({ workspace, remote, onNotice, onOpenIda
       cancelled = true;
     };
   }, [workspace]);
-  const fileShellUnavailable = remote
+  const fileShellUnavailable = remote === "ssh"
     ? (zh ? "远程文件请先下载，再使用系统应用打开" : "Download remote files before opening with a system app")
-    : globalThis.ompHarnessChrome?.openFile === undefined
+    : globalThis.julingHarnessChrome?.openFile === undefined
       ? (zh ? "仅桌面端可用" : "Desktop app only")
       : undefined;
 
-  const runFileShellAction = (workspaceId: string, action: FileMenuAction, target: FileMenuTarget) => {
-    const desktop = globalThis.ompHarnessChrome;
+  const runFileShellAction = (workspaceId: string, action: FileMenuAction, target: FileMenuTarget, ownerId: string | null = targetId) => {
+    const desktop = globalThis.julingHarnessChrome;
     const messageOf = (cause: unknown): string => (cause instanceof Error && cause.message ? cause.message : String(cause));
     const notice = (text: string, icon: IconName): void => {
       onNotice({ text, icon });
@@ -50,10 +50,11 @@ export function useWorkspaceFileActions({ workspace, remote, onNotice, onOpenIda
         .catch(() => notice(zh ? "复制相对路径失败" : "Failed to copy relative path", "alert"));
       return;
     }
-    const input = { workspaceId, path: target.path, kind: target.kind };
-    if(action.type==="ida"){
+    const input = { workspaceId, ...(ownerId ? { targetId: ownerId } : {}), path: target.path, kind: target.kind };
+    if(action.type==="disassembler"){
+      if (ownerId) return;
       const resolve=desktop?.resolveFileAbsolutePath;if(!resolve)return;
-      void resolve(input).then(absolute=>{onOpenIda(absolute);}).catch(cause=>notice(`IDA: ${messageOf(cause)}`,"alert"));return;
+      void resolve(input).then(absolute=>{onOpenDisassembler(absolute);}).catch(cause=>notice(`${zh ? "反汇编器" : "Disassembler"}: ${messageOf(cause)}`,"alert"));return;
     }
     if (action.type === "copyAbsolute") {
       const resolve = desktop?.resolveFileAbsolutePath;

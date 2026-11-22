@@ -220,7 +220,7 @@ export function useWordPrediction(
       (!preview && (!options.available || !options.sessionId))
     )
       return;
-    const chrome = window.ompHarnessChrome;
+    const chrome = window.julingHarnessChrome;
     if (
       !preview &&
       (!chrome?.attachPrediction ||
