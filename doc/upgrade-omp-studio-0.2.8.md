@@ -27,6 +27,7 @@
 | `npm run test:tooling` | 157 项：156 通过、0 失败、1 跳过（overlay 已应用） |
 | `npm run omp:verify:patches` | overlay 312 文件 + 6 个接缝补丁 apply/typecheck/Bun 套件通过，`smoke-test: ok`，vendor 还原干净 |
 | `npm run runtime:verify-source` | `Verified OMP source commit f40f335845f0b136453d12fec8d6057011082766` |
+| `npm run omp:build:host` | 生成 `19.0.1-harness.7` 的 `juling.exe`；`juling/19.0.1`、`smoke-test: ok`、Bridge 身份与命令清单探测通过，Ed25519 签名与 SHA-256 复核通过 |
 
 提交：`ee2c2120` 应用层合并 → `b3f01c2b` 收尾 → `1bb79063` Runtime 重定基 → `8d171710` vendor pin。
 

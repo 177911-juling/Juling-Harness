@@ -27,6 +27,6 @@ Harness Runtime 的上游固定为 `can1357/oh-my-pi` 的正式标签 `v19.0.1`�
 
 ## Windows x64 Canary
 
-`npm run omp:build:host` 使用 Bun 1.4.4 和 Rust `nightly-2026-11-08` 生成了 `19.0.1-harness.1`。编译后的 `juling.exe` 通过冒烟、认证 Bridge 身份与命令清单探测，以及正常退出检查。
+`npm run omp:build:host` 使用 Bun 1.4.4 和 Rust `nightly-2026-11-08` 生成了 `19.0.1-harness.7`。编译后的 `juling.exe` 通过 `--version`（`juling/19.0.1`）、`--smoke-test`、认证 Bridge 身份与命令清单探测，以及正常退出检查。Windows 主机只构建本机 ISA 变体，嵌入所需的 baseline addon 取自同版本的 `@oh-my-pi/pi-natives-win32-x64` 包。
 
-产物位于 `outputs/canary/omp-19.0.1-harness.1-win32-x64/`。使用独立开发公钥复核了 Ed25519 签名，也复核了二进制和清单的 SHA-256。二进制摘要为 `0cd00733f68da8bd199b79c5e907c4fbeb8f1102a5a6600caf40c5acf239f829`。
+产物位于 `packages/runtime-installer/dist/artifacts/win32-x64/19.0.1-harness.7/`。使用本地开发公钥复核了 Ed25519 签名，也复核了二进制和清单的 SHA-256。二进制摘要为 `68ce8ca8cc4134e4f50db8974abd8b03283a6489d83d7438e06dad2edae5a5d7`，`capabilityHash` 为 `sha256:92272875d1421aeed86c82095bf2310065ff3cc7876dbaa241df7374f268cb7a`。
