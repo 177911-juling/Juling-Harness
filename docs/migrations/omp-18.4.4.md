@@ -69,7 +69,7 @@ Cache warming 可能在空闲时发出计费请求；free-only 搜索链仍可�
 - 工件元数据检查 47/47 通过。日志：`%TEMP%/omp-1844-final-metadata.log`。
 - Runtime 全包源码检查通过。回归覆盖新增配置注册表、原生真实队列/RPC 取消、Benchmark profiles/cache，以及全部 Harness overlay 测试。
 - 审批测试改为等待原生异步预检完成后出现的卡片；RPC 错误测试改为先 await/catch，再断言相同的 command 字段。未放宽超时或业务断言。直接 JSONL 帧及独立 RpcClient 探针均确认原生错误回包正确；原 Promise matcher 写法在本机 Bun 1.3.14 和 1.4.2 均可复现等待超时。
-- 使用独立 Bun 1.4.2 与上游固定 Rust 工具链构建本机 Windows x64 原生模块及 Runtime。`omp.exe --version`、`--smoke-test`、认证 Bridge 身份探针通过。探针版本为 **18.4.4-harness.18**，目标提交为 `8ac1309bd8adaddc891eeb389c545345073875be`。日志：`%TEMP%/omp-1844-host-build.log`。
+- 使用独立 Bun 1.4.2 与上游固定 Rust 工具链构建本机 Windows x64 原生模块及 Runtime。`juling.exe --version`、`--smoke-test`、认证 Bridge 身份探针通过。探针版本为 **18.4.4-harness.18**，目标提交为 `8ac1309bd8adaddc891eeb389c545345073875be`。日志：`%TEMP%/omp-1844-host-build.log`。
 - 本地签名工件：`packages/runtime-installer/dist/artifacts/win32-x64/18.4.4-harness.18/`。未使用发布签名流程。
 - 隔离安装、自检、回滚、重新激活通过：`18.3.0-harness.11 → 18.4.4-harness.18 → 18.3.0-harness.11 → 18.4.4-harness.18`。原始源码基线是 harness.12；本机可用回滚工件是 harness.11。日志：`%TEMP%/omp-1844-install-e2e.log`。
 

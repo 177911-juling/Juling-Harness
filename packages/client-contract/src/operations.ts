@@ -88,6 +88,7 @@ import type {
   RuntimeConnection,
   RuntimeInstallState,
   ResidentsReadModel,
+  SessionHistoryMatch,
   SessionHistoryReadModel,
   SessionHistoryStatus,
   TokenUsageReadModel,
@@ -123,8 +124,11 @@ export interface QueryInputMap extends RuntimeViewQueryMap, ContextViewQueryMap,
   "capabilities.get": EmptyInput;
   "commands.getManifest": EmptyInput;
   "diagnostics.get": EmptyInput;
+  "history.locate": { readonly sessionId: SessionId };
   "history.list": {
     readonly limit?: number;
+    readonly offset?: number;
+    readonly sessionId?: SessionId;
     readonly status?: SessionHistoryStatus;
     readonly workspaceId?: WorkspaceId;
   };
@@ -144,6 +148,7 @@ export interface QueryInputMap extends RuntimeViewQueryMap, ContextViewQueryMap,
   "workspace.file.inspect": import("./files.js").WorkspaceFileTarget;
   "workspace.file.readText": import("./files.js").WorkspaceFileTarget;
   "workspace.file.readChunk": import("./files.js").WorkspaceFileChunkInput;
+  "workspace.paths.resolve": import("./files.js").WorkspacePathResolveInput;
   "fs.places": Record<string, never>;
   "fs.list": import("./system-files.js").SystemListInput;
   "fs.file.inspect": import("./system-files.js").SystemFileTarget;
@@ -220,6 +225,7 @@ export interface QueryResultMap extends RuntimeViewResultMap, ContextViewResultM
   /** Operator command manifest; reused from the protocol as a public shape. */
   "commands.getManifest": OperatorCommandManifest;
   "diagnostics.get": DiagnosticReadModel;
+  "history.locate": readonly SessionHistoryMatch[];
   "history.list": SessionHistoryReadModel;
   "residents.list": ResidentsReadModel;
   /** Reused from the protocol as a public shape. */
@@ -241,6 +247,7 @@ export interface QueryResultMap extends RuntimeViewResultMap, ContextViewResultM
   "workspace.file.inspect": import("./files.js").WorkspaceFileInfo;
   "workspace.file.readText": import("./files.js").WorkspaceFileText;
   "workspace.file.readChunk": import("./files.js").WorkspaceFileChunk;
+  "workspace.paths.resolve": import("./files.js").WorkspacePathResolveResult;
   "fs.places": import("./system-files.js").SystemPlaces;
   "fs.list": import("./system-files.js").SystemDirectory;
   "fs.file.inspect": import("./system-files.js").SystemFileInfo;
@@ -504,7 +511,7 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, Upgra
   "session.clearContext": EmptyInput;
   "session.fork": EmptyInput;
   /**
-   * Generate a handoff document from the current session and start a fresh
+   * Generate a handoff summary in the background and compact the current
    * session seeded with it. The Runtime switches to the new session, so the
    * post-command snapshot carries the new sessionId.
    */
@@ -612,6 +619,8 @@ interface CoreCommandInputMap {
    * file first. Destructive and irreversible; the Renderer confirms first.
    */
   "session.delete": { readonly threadId: ThreadId; readonly deleteManagedArtifacts?: boolean };
+  /** Permanently delete a cold-archived thread while retaining its managed artifacts. */
+  "session.deleteArchived": { readonly threadId: ThreadId };
   /** Answer an `interaction_required` prompt issued by the Host. */
   "interaction.respond": {
     readonly interactionId: InteractionId;
@@ -798,6 +807,7 @@ interface CoreCommandResultMap {
   "session.unarchive": ConfigWriteResult;
   /** `cleanup: "partial"` means some native history/stats or artifact residue may remain; `message` says which. */
   "session.delete": ConfigWriteResult & { readonly cleanup?: "complete" | "partial" };
+  "session.deleteArchived": ConfigWriteResult & { readonly cleanup?: "complete" | "partial" };
   "interaction.respond": OperatorStateSnapshot;
   "permissions.mode.set": {
     readonly mode: ApprovalMode;

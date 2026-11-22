@@ -1,10 +1,45 @@
 # OMP Studio 0.2.8 升级分析与执行方案
 
-> 状态：**分析完成，等待确认后执行**。本文只描述改动与步骤，尚未修改任何源码。
-> 分析日期：2026-11-22。
+> 状态：**已执行并验证**：应用层合入 0.2.8，Runtime 重定基到 OMP 19.0.1（`19.0.1-harness.7`）。
+> 分析日期：2026-11-22；执行日期：2026-11-22。
 > 上游输入：`G:\源码\omp-studio-0.2.8`（无 `.git`，按文件对比）。
 > 基线：本仓库 `c08f52a3`（`upstream: projected omp-studio v0.2.4 (studio->harness, lf)`）。
-> 当前 HEAD：`4907841f`，分支 `runtime/18.20.2`，产品版本 `1.0.1`。
+> 升级前 HEAD：`4907841f`，产品版本 `1.0.1`；升级后目标版本 `1.1.0`。
+
+## 执行状态（2026-11-22）
+
+| 阶段 | 状态 | 说明 |
+|---|---|---|
+| Phase 0 冻结 | ✅ | 提交待处理改动；创建 `upgrade/0.2.8` 分支与 `pre-0.2.8-20261122` 回滚标签 |
+| Phase 1 投影 | ✅ | `scripts/project-omp-studio.mjs` 固化；`upstream/omp-studio-0.2.8` 分支 |
+| Phase 2 合并 | ✅ | 140 个重叠文件；82 个冲突按域解决 |
+| Phase 3 Runtime | ✅ | vendor 切到 `f40f335…`（OMP 19.0.1）；overlay 312 文件三方合并；0001–0004 取上游、0005/0006 重放；`series.json` = `19.0.1-harness.7` |
+| Phase 4 i18n/预览/文档 | ✅ | 六语补齐 0.2.8 新增键；文档与版本号更新到 `1.1.0` |
+| Phase 5 验证 | ✅ | 自动化门禁全绿（见下）；§5 的手工 UI / 设备验收清单尚未逐项执行 |
+
+### 验证记录
+
+| 命令 | 结果 |
+|---|---|
+| `npm run check -- --all` | 28 个编译/测试步骤全绿，`all checks passed in 210.7s` |
+| `npm run check -- --production` | 架构、类型、核心测试、Vite 生产包与远端 Host 产物全绿 |
+| `npm run build` | 渲染层、桌面主进程、`remote-host` 产物构建成功 |
+| `npm run test:tooling` | 157 项：156 通过、0 失败、1 跳过（overlay 已应用） |
+| `npm run omp:verify:patches` | overlay 312 文件 + 6 个接缝补丁 apply/typecheck/Bun 套件通过，`smoke-test: ok`，vendor 还原干净 |
+| `npm run runtime:verify-source` | `Verified OMP source commit f40f335845f0b136453d12fec8d6057011082766` |
+| `npm run omp:build:host` | 生成 `19.0.1-harness.7` 的 `juling.exe`；`juling/19.0.1`、`smoke-test: ok`、Bridge 身份与命令清单探测通过，Ed25519 签名与 SHA-256 复核通过 |
+| 生产预览（Windows x64） | 真实 Host 连接 `19.0.1-harness.7`；设置页出现子代理预走查、Advisor 折叠、Worktree 默认值与会话预算；能力中心显示「反汇编器」；历史页显示「已归档」筛选。预览缓存漏项（`juling-ssh-askpass.exe`）已修复 |
+
+提交：`ee2c2120` 应用层合并 → `b3f01c2b` 收尾 → `1bb79063` Runtime 重定基 → `8d171710` vendor pin。
+
+**Runtime 现为 `19.0.1-harness.7`。** 反汇编、Plan 正文保存、会话本地目录（`resource.local.ensureDir`）
+等 13 个能力随 OMP 19.0.1 生效；`disassembler.*` 设置取代原 `ida.*`。
+
+OMP 18 → 19 的接缝改动已按 §4.1 / 附录 C 落位：
+`ida` → `disasm`（Ghidra 在 `ghidra/`）、`launch` → `daemon`、`predict/daemon` → `daemon/modules/predict`、
+`crates/pi-natives` → `crates/natives`、`crates/pi-vcs` → `crates/vcs`；
+`scripts/omp-seam.mjs` 采用 0.2.8 的 166 条路径加本地 0005（22）/0006（57），
+13 个 OMP 19 才有的能力在 `scripts/runtime-artifact.test.mjs` 中被显式放行。
 
 ## 0. 结论
 
@@ -47,11 +82,12 @@
 | 桌面更新 | Windows/macOS/Linux（AppImage+deb） | 同 | 本地双签名域继续保留 |
 | 入口名 | `juling.exe` / `juling` | `omp.exe` / `omp` | 投影后必须改回 `juling` |
 
-工作区现状（升级前必须先处理）：
+升级前工作区快照（历史记录，已处理）：
 
-- 未提交：`apps/renderer/vite.config.ts`、`scripts/audit-linux.mjs`。
-- 未跟踪：`.release-backup/`、`.release-work/`（不要提交）。
-- 当前分支 `runtime/18.20.2`；已有 tag：`v1.0.0`、`local-0.2.0-snapshot`、`shell-0.2.2-verified`。
+- 未提交：`apps/renderer/vite.config.ts`、`scripts/audit-linux.mjs`（已单独提交）。
+- 未跟踪：`.release-backup/`、`.release-work/`（保持未跟踪，未提交）。
+- 升级前分支 `runtime/18.20.2`；当时已有 tag：`v1.0.0`、`local-0.2.0-snapshot`、`shell-0.2.2-verified`。
+- 当前分支 `upgrade/0.2.8`，回滚 tag `pre-0.2.8-20261122`。
 
 ## 2. 上游 0.2.5 – 0.2.8 升级了什么
 
@@ -98,7 +134,7 @@
 | 活动图标 / Advisor 批次 | 桌面与 Web 对话（含手机页复用的渲染层）为等待、思考、回复、重试和工具执行显示专用活动图标，遵循减弱动效；Advisor 多条意见按批折叠，含阻断问题的批次默认展开，可复制整批；手动展开态在新消息、语言切换和虚拟滚动时保持 | 新增 `conversation/{ActivityGlyph,activityGlyphDrawing}.ts`、`advisorTranscript` 合并逻辑；`mobile/entry.tsx` 复用；`preview` 同步 |
 | 表格与 Office 预览 | `.xlsm`、`.xlsb`、`.ods` 内置预览，方向键/Home/End/PageUp/Down 导航、Shift 扩选复制、支持 Excel 行列上限内的稀疏数据；可选 Office 组件增加 `.docm`、`.pptm`，转换时禁用宏 | 新增 `files/{SpreadsheetPane,spreadsheet.worker}`、`fileTypes` 扩展；桌面 `office-component.ts`、`file-resources.ts`、`file-io.ts` |
 | SSH/WSL 准备流程 | 连接、认证与准备对话框展示目标、安装目录、网络选项及准备阶段，确认/上传阶段保持键盘焦点；SSH 文件传输显示远端实际接收进度，校验大小与 SHA-256，按目标系统选择传输方式，可重试失败后回退；演示连接与实际表单共用配置（端口/网络策略/安装目录） | 新增 `apps/desktop/src/remote/{file-transfer,channel}.ts`、`workspaces/{SshPasswordDialog,SshPreparationDialog,sshParts}`、`ssh.css` |
-| 模型目录 | 随 OMP 19 更新内置目录（6,392 → 6,402 条），收录 Kiro、Modal、Bifrost 供应商定义；账号模型由 Runtime 连接后发现 | `catalog/model-catalog-v1.json`、`packages/host-client-api/src/model-catalog.generated.ts`、`scripts/model-catalog.mjs` |
+| 模型目录 | 随 OMP 19 更新内置目录（6,303 条，与上游 0.2.8 一致），收录 Kiro、Modal、Bifrost 供应商定义；账号模型由 Runtime 连接后发现 | `catalog/model-catalog-v1.json`、`packages/host-client-api/src/model-catalog.generated.ts`、`scripts/model-catalog.mjs` |
 | 修复：删除与清理 | 批量删除跳过已取消归档；原生统计或产物清理只完成一部分时，界面报告残留 | `session-delete-service.ts`、`session-purge-maintenance.ts` |
 | 修复：SSH / 预览 | SSH 密码认证在 SFTP 批量传输中失效；预览连接未沿用所选端口、网络策略和安装目录 | `remote/{file-transfer,manager,terminal}.ts` |
 | 修复：表格 / Office | 超大选区复制可能卡住预览；CSV 更新后跳失选区；Office 更新期间收尾的转换可能清掉新组件；Office 缓存清理保留仍被文件窗口使用的 PDF | `files/SpreadsheetPane`、`spreadsheet.worker`、`office-component.ts` |
@@ -140,7 +176,7 @@
 | 0.2.8 | 修复 SSH 密码 SFTP、预览连接端口/网络策略/安装目录 | 2.4 |
 | 0.2.8 | 修复超大选区复制卡顿、CSV 跳选区、Office 转换竞态、Office 缓存保留 PDF | 2.4 |
 | 0.2.8 | 修复演示对话切语言时 Advisor 批次重新折叠 | 2.4 |
-| 0.2.7* | 模型目录随 OMP 19 更新（Kiro/Modal/Bifrost，6,402 条） | 2.4 |
+| 0.2.7* | 模型目录随 OMP 19 更新（Kiro/Modal/Bifrost，6,303 条） | 2.4 |
 
 带 `*` 的条目来自 `docs/migrations/omp-19.0.1.md`，是对 CHANGELOG 的补充；其余逐条对应上游 `CHANGELOG.md`。
 
@@ -181,7 +217,7 @@
 - 桌面新增依赖：`qrcode`、`ws`、`@peculiar/x509`、`@peculiar/asn1-schema`、`asn1js`、`reflect-metadata`
   （手机访问的证书、扫码与 WebSocket）。新增 devDeps：`@types/qrcode`、`@types/ws`。
 - 渲染层新增依赖：`@juling-harness/transport-web`（手机页复用 browser transport）。
-- `packages/transport-web` 新增 `./browser` 子路径导出；本地目前只有 `browser-client.ts`，未声明导出。
+- `packages/transport-web` 新增 `./browser` 子路径导出，本地已声明并供手机页与浏览器端复用。
 - `packaging/electron-builder.yml` 增加 `afterPack: ./scripts/audit-mobile-certificate.mjs`，
   并新增该脚本与证书打包检查。
 - 新增入口：`apps/renderer/mobile.html`、`mobile-access-harness.html`、`runtime-migration-harness.html`；

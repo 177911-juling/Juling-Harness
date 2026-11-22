@@ -67,8 +67,8 @@ Runtime 签名使用本轮临时生成的 Ed25519 canary key，与正式发布�
 
 ## 最初后端交付证据（harness.3）
 
-- 签名 Runtime：`tmp/verification/build-AesS44/artifacts/`，包含 `omp.exe`、manifest、checksums 和 Ed25519 signature；仅为 canary，不属于正式发布信任链。
-- `omp.exe` SHA-256：`d1bb33181b51d9075b92d410f4dfb315bac71ddbd2d8cc18706e5a8409cc4869`。
+- 签名 Runtime：`tmp/verification/build-AesS44/artifacts/`，包含 `juling.exe`、manifest、checksums 和 Ed25519 signature；仅为 canary，不属于正式发布信任链。
+- `juling.exe` SHA-256：`d1bb33181b51d9075b92d410f4dfb315bac71ddbd2d8cc18706e5a8409cc4869`。
 - 最终 patchset digest：`sha256:64bf9a5b75d300299dd6b08b99e28bd1447ad5ccfbcf2eb5988d2f2a0917285a`。
 - 完整重放、production、最终构建、tooling、独立 NSIS、真实 Bridge、隔离安装和官方 ACP 的八份完成日志已保存在 `tmp/verification/evidence/`。
 - 五个跳过用例涉及三项原生观察链路、一项缺少短 socket 目录时的音频降级、一项 Host 被终止后的 watcher 退出；未把这些可选/平台用例计入通过数。

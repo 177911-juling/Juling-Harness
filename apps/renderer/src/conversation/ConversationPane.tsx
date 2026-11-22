@@ -87,6 +87,7 @@ export function ConversationPane({
   onRetryTurn,
   retryTurnDisabledReason,
   supplement,
+  previewThreadId,
 }: {
   runtimeTools?: RuntimeToolScope | undefined;
   snapshot?: ConversationSnapshot;
@@ -127,6 +128,7 @@ export function ConversationPane({
   retryTurnDisabledReason?: string;
   /** Display-only content following the transcript, captured with its switch transition. */
   supplement?: ReactNode;
+  previewThreadId?: string;
 }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
@@ -371,6 +373,7 @@ export function ConversationPane({
         <RuntimeToolProvider {...runtimeTools} sourceSessionId={state.identity?.sessionId}><ConvoTranscript
           scrollerRef={scrollerRef}
           rows={displayRows}
+          stateScopeKey={previewThreadId ?? state.identity?.sessionId ?? ""}
           demo={demo}
           {...(onRestore === undefined ? {} : { onRestore })}
           {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}

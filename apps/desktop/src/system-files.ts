@@ -1,11 +1,14 @@
 import { lstat, mkdir, opendir, readdir, realpath, stat, statfs } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
+import { windowsVolumes } from "./platform/windows-volumes.js";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import type { SystemDirectory, SystemEntry, SystemFileTarget, SystemListInput, SystemPlaces, SystemQuickKind, WorkspaceId } from "@juling-harness/client-contract";
 import type { HostSystemFileService } from "@juling-harness/host-client-api";
 import type { WorkspaceRegistry } from "@juling-harness/harness-host";
+import { fileURLToPath } from "node:url";
 import { inspectFile, readFileChunk, readFileText, writeFileText } from "./file-io.js";
 import { renameWithoutOverwrite } from "./platform/file-rename.js";
+import { probeFilePaths } from "./platform/path-probe.js";
 import { desktopText } from "./desktop-language-shared.js";
 
 const DIRECTORY_LIMIT = 5_000;
@@ -17,6 +20,8 @@ const inside = (root: string, path: string) => { const suffix = relative(root, p
 /** Shared by the executing file service and the local shell actions, never by forwarding layers. */
 export function normalizeSystemPath(value: string): string {
   if (typeof value !== "string" || value.includes("\0")) throw new Error(desktopText("文件路径无效：不能包含 NUL", "Invalid file path: NUL is not allowed"));
+  if (/^file:/i.test(value)) value = fileURLToPath(value);
+  if (process.platform === "win32" && /^\/[A-Za-z]:[\\/]/.test(value)) value = value.slice(1);
   const expanded = value === "~" ? homedir() : /^~[\\/]/.test(value) ? join(homedir(), value.slice(2)) : value;
   if (!isAbsolute(expanded)) throw new Error(desktopText("文件路径必须是绝对路径", "File path must be absolute"));
   if (process.platform === "win32") {
@@ -66,7 +71,7 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
 
   async function volume(path: string): Promise<SystemPlaces["volumes"][number] | undefined> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const label = platform === "win32" ? path.slice(0, 2) : path === "/" ? "/" : basename(path);
+    const label = path === "/" ? "/" : basename(path);
     try {
       const info = await Promise.race([statfs(path), new Promise<undefined>(resolveTimeout => { timer = setTimeout(() => resolveTimeout(undefined), 400); })]);
       return info ? { path, label, totalBytes: info.blocks * info.bsize, freeBytes: info.bavail * info.bsize, ready: true } : { path, label, ready: false };
@@ -85,11 +90,14 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
       const path = knownFolders?.[kind] ?? (kind === "home" ? home : join(home, label));
       return await stat(path).then(info => info.isDirectory() ? { kind, label, path } : undefined, () => undefined);
     }))).filter(item => item !== undefined);
-    const paths = platform === "win32" ? Array.from({ length: 26 }, (_, index) => `${String.fromCharCode(65 + index)}:\\`)
-      : platform === "darwin" ? ["/", "/Applications", ...await mountFolders("/Volumes")]
-      : ["/", ...await mountFolders("/mnt"), ...await mountFolders(join("/media", userInfo().username))];
-    const volumes = (await Promise.all(paths.map(volume))).filter(item => item !== undefined);
+    const volumes = platform === "win32" ? await windowsVolumes() : await localVolumes();
     return { platform, separator: platform === "win32" ? "\\" : "/", home, quick, volumes, trash: !!trash };
+  }
+
+  async function localVolumes() {
+    const paths = platform === "darwin" ? ["/", "/Applications", ...await mountFolders("/Volumes")]
+      : ["/", ...await mountFolders("/mnt"), ...await mountFolders(join("/media", userInfo().username))];
+    return (await Promise.all(paths.map(volume))).filter(item => item !== undefined);
   }
 
   async function directoryPath(input: SystemListInput): Promise<string> {
@@ -163,6 +171,7 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
   }
   return {
     places, list, inspect,
+    resolveAll: ({ paths, explicit }) => probeFilePaths(paths, normalizeSystemPath, explicit),
     async readText(input) { return readFileText(await fileTarget(input), () => inspect(input)); },
     async readChunk(input) { return readFileChunk(await fileTarget(input), input); },
     async writeText(input) { return writeFileText(await fileTarget(input, true), input, () => inspect(input)); },

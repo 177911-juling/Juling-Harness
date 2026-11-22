@@ -53,7 +53,7 @@
 ### 当前制品身份
 
 - 制品目录：`tmp/verification/build-6quBgr/artifacts/`。
-- `omp.exe` SHA-256：`009af5dd3474d06f3f13475c1c7912996cc5bb7040de1735df43638cc2d653a9`。
+- `juling.exe` SHA-256：`009af5dd3474d06f3f13475c1c7912996cc5bb7040de1735df43638cc2d653a9`。
 - patchset digest：`sha256:6025630281b487bf4469207313a02f1a737d65a8ca73fc25dbfcd4a402cc883d`。
 - 版本与输入以 [`series.json`](../../omp-patch/patches/series.json) 和 canary manifest 为准。接缝只经 `omp:patches:regen` 生成，没有手工编辑 `.patch`。
 - 这是临时 Ed25519 key 签名的本地 canary，不属于正式发布信任链；没有发布或提供它作为用户升级包。临时 key、依赖、日志、截图和 build 输出不进入版本控制。

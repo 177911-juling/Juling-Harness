@@ -1,5 +1,16 @@
 import type { FeatureSettingRow, PoolAccountOption } from "@juling-harness/harness-protocol";
 export const PREVIEW_FEATURE_SETTINGS: FeatureSettingRow[] = [
+  {key:"providers.webKeyless",value:true,source:"default"},
+  {key:"mcp.builtinTransforms",value:true,source:"default"},
+  {key:"mcp.evalNamespaces",value:true,source:"project"},
+  {key:"task.agentPrewalkAuto",value:{reviewer:"on"},source:"project"},
+  {key:"task.crossInstance",value:true,source:"project"},
+  {key:"task.enableLsp",value:true,source:"project"},
+  {key:"mnemopi.recallRelevance",value:"off",source:"default"},
+  {key:"mnemopi.embeddingQueryPrefix",value:"query: ",source:"global"},
+  {key:"mnemopi.embeddingInputType",value:"search_query",source:"global"},
+  {key:"tools.intentTracing",value:false,source:"default"},
+  {key:"providers.cacheWarmingStrategy",value:"auto",source:"default"},
   { key: "models.noJudge", value: false, source: "default" },
   { key: "models.noSpotlight", value: true, source: "global" },
   { key: "models.offline", value: false, source: "default" },

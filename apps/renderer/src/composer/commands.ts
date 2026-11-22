@@ -226,6 +226,8 @@ function onOffStatus(extra: string): readonly SlashSubcommand[] {
   ];
 }
 
+const LOCAL_FILES_COMMAND = cmd("local", "Edit native session files", "context", { ui: "local-files", allowArgs: true, hint: "[file]" });
+
 /** Full OMP builtin catalog for the composer `/` menu. Hidden entries stay resolvable by alias. */
 export const BUILTIN_SLASH_CATALOG: readonly HarnessSlashCommand[] = [
   cmd("help", "List available slash commands", "help", { select: "native-ui", ui: "command-palette" }),
@@ -342,7 +344,7 @@ export const BUILTIN_SLASH_CATALOG: readonly HarnessSlashCommand[] = [
   }),
   cmd("new", "Start a new session", "session", { select: "native-ui", ui: "new-chat" }),
   cmd("rename", "Rename current session", "session", { allowArgs: true, hint: "<title>", select: "complete-args", invokeId: "builtin.rename" }),
-  cmd("handoff", "Hand off context to new session", "session", {
+  cmd("handoff", "Summarize this session in the background", "session", {
     select: "run-now",
     typed: { name: "session.handoff" },
   }),
@@ -419,7 +421,7 @@ export const BUILTIN_SLASH_CATALOG: readonly HarnessSlashCommand[] = [
   cmd("jobs", "Background jobs", "capability", { select: "run-now", invokeId: "builtin.jobs" }),
   cmd("usage", "Provider usage", "help", { select: "run-now", invokeId: "builtin.usage" }),
   cmd("stats", "Open usage dashboard", "help", { select: "run-now", invokeId: "builtin.stats" }),
-  cmd("local", "Edit native session files", "context", { ui: "local-files", allowArgs: true }),
+  LOCAL_FILES_COMMAND,
   cmd("context", "Inspect context body and token estimate", "context", { ui: "context-viewer" }),
   cmd("changelog", "Changelog", "help", { select: "run-now", invokeId: "builtin.changelog" }),
   cmd("hotkeys", "Open command palette", "help", { select: "native-ui", ui: "command-palette" }),
@@ -515,7 +517,7 @@ const SLASH_ZH_OVERRIDES: Record<string, SlashZhOverride> = {
   delete: { description: "删除当前会话并开新会话" },
   new: { description: "开始新会话" },
   rename: { description: "重命名当前会话" },
-  handoff: { description: "交接上下文到新会话" },
+  handoff: { description: "在后台生成当前会话的交接摘要" },
   resume: { description: "切换到另一会话" },
   retry: { description: "重试上一轮失败" },
   fork: { description: "从先前消息分叉" },
@@ -675,6 +677,13 @@ export function lookupSlashCommand(name: string, catalog?: readonly HarnessSlash
 
 export function visibleSlashCatalog(zh = isZh()): HarnessSlashCommand[] {
   return BUILTIN_SLASH_CATALOG.filter((command) => command.availability !== "hidden").map((command) => localizeSlashCommand(command, zh));
+}
+
+/** /local belongs to the workbench and is available before the Runtime catalog arrives. */
+export function composerSlashCatalog(manifest?: OperatorCommandManifest, zh = isZh()): HarnessSlashCommand[] {
+  if (manifest === undefined) return visibleSlashCatalog(zh);
+  const projected = mergeSlashCatalogWithManifest(manifest, zh);
+  return [localizeSlashCommand(LOCAL_FILES_COMMAND, zh), ...projected.filter(command => normalizedSlashName(command.name) !== LOCAL_FILES_COMMAND.name)];
 }
 
 function scoreCommand(command: HarnessSlashCommand, needle: string): number {
@@ -905,7 +914,7 @@ export function planComposerSend(snapshot: ComposerSnapshot, catalog?: readonly 
   const chipApplies = appliesOf(peeled.names, catalog);
 
   if (command !== undefined && draft !== null) {
-    if (command.name === "btw") return { kind: "execute", command, args: draft.args };
+    if (command.name === "btw" || command.ui === "local-files") return { kind: "execute", command, args: draft.args };
     if (command.select === "chip") {
       if (isModeControlArgs(command, draft.args)) {
         return { kind: "execute", command, args: draft.args };

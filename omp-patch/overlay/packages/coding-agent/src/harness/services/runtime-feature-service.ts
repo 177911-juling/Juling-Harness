@@ -8,7 +8,6 @@ import { clearApprovalGrants } from "../../tools/approval-cache";
 import { type RuntimeFeatureOperation } from "../runtime-features-protocol";
 import { inspectHarnessJob } from "./job-inspect";
 import { HarnessMcpAuthService } from "./mcp-auth-service";
-import { askHarnessSeance } from "./seance-service";
 import { SessionControlError } from "./session-control-service";
 import { ownedHarnessSessions } from "./owned-sessions";
 
@@ -75,8 +74,6 @@ export class HarnessRuntimeFeatureService {
 				return this.mcpAuth.unauth(operation.name);
 			case "mcp.auth.reconnect":
 				return this.mcpAuth.reconnect(operation.name);
-			case "seance.ask":
-				return askHarnessSeance(this.session, operation);
 		}
 	}
 }

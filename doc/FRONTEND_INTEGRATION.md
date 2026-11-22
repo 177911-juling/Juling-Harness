@@ -153,7 +153,7 @@ Renderer 只负责：
 
 Renderer 不负责：
 
-- 发现或启动 `omp.exe`；
+- 发现或启动 `juling.exe`；
 - 生成 Bridge token；
 - 读取 OMP session/config 文件；
 - 决定 Runtime fallback 路径；
@@ -358,7 +358,7 @@ Electron Main
   -> 初始化 HostBackend
   -> 解析或安装受信 Runtime
   -> 创建 current-user-only Named Pipe/bootstrap token
-  -> 启动 omp.exe harness-host
+  -> 启动 juling.exe harness-host
   -> hello + challenge proof
   -> snapshot
   -> 建立 renderer client session
@@ -641,8 +641,8 @@ lint/typecheck
 
 - 必须使用发布 Ed25519 私钥重新生成 Runtime artifact；
 - 私钥不得进入仓库、Renderer、日志或安装包；
-- 刚构建的 `omp.exe` 必须通过 manifest、snapshot 和 graceful shutdown probe；
-- `juling-harness.exe` 与 `omp.exe` 保持不同产物身份；
+- 刚构建的 `juling.exe` 必须通过 manifest、snapshot 和 graceful shutdown probe；
+- `juling-harness.exe` 与 `juling.exe` 保持不同产物身份；
 - 测试 Runtime 不得被打包或标记 Full Parity。
 
 ## 16. macOS Readiness Checklist

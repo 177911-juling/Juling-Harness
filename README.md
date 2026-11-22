@@ -11,7 +11,7 @@
 
 | Version | Bundled runtime | Platforms | License |
 |:--:|:--:|:--:|:--:|
-| **1.0.1** | OMP **18.20.2** · `harness.18` | Windows · macOS · Linux | MIT |
+| **1.1.0** | OMP **19.0.1** · `harness.7` | Windows · macOS · Linux | MIT |
 
 <p align="center">
   <img src="docs/readme/app-workbench.png" width="100%" alt="Juling Harness workbench with a conversation, tool cards, subagents and context panels" />
@@ -21,7 +21,7 @@
 
 ## Overview
 
-Juling Harness is the desktop console for the Juling Runtime, a signed build of the OpenMP coding engine pinned to OMP 18.20.2. It gives long-running coding agents a real workspace: persistent sessions, visible subagents, typed model configuration, and tools that can be rearranged instead of buried in a terminal.
+Juling Harness is the desktop console for the Juling Runtime, a signed build of the OpenMP coding engine pinned to OMP 19.0.1. It gives long-running coding agents a real workspace: persistent sessions, visible subagents, typed model configuration, and tools that can be rearranged instead of buried in a terminal.
 
 Every action goes through the typed **Harness Bridge** — requests, receipts, events and snapshots — rather than screen scraping, ANSI parsing or key macros. The result is a desktop application that stays predictable as sessions grow.
 
@@ -117,7 +117,7 @@ Agent Hub opens on the command deck. The left side holds formation, timeline, or
 ├──────────────────────────────┤
 │ Harness Host                 │  sessions, archive, Time Travel, ledger
 ├──────────── Harness Bridge ──┤  typed frames · request / receipt / event / snapshot
-│ Juling Runtime (OMP 18.20.2) │  models, tools, agents, compaction, prediction
+│ Juling Runtime (OMP 19.0.1) │  models, tools, agents, compaction, prediction
 └──────────────────────────────┘
 ```
 

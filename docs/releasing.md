@@ -130,7 +130,7 @@ behavior. Upstream's warm-cache timings are not a prediction for Harness's first
 GitHub-hosted Bazel build.
 
 Local validation on 2026-11-17 used an isolated Ubuntu 22.04 environment and the
-patched OMP 18.20.2 tree. The Windows x64 baseline target built successfully with
+patched OMP 19.0.1 tree. The Windows x64 baseline target built successfully with
 Bazel 9.2.0; the addon was then stamped and loaded on Windows with Bun 1.4.4,
 including Harness's `DesktopSession.observationOnly` and `settle` APIs. The cold
 Bazel invocation took 22m07s including LLVM/MSVC preparation on that local network.
