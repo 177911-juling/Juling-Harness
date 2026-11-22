@@ -164,7 +164,7 @@ OMP_PREVIEW_DATA=1 npm run preview
 
 ### 连接本机 Runtime
 
-另需 Bun 和 Rust 工具链；版本以 `omp-patch/upstream.json`、vendor 的 `rust-toolchain.toml` 及 [Runtime 开发说明](../omp-patch/README.md) 为准。当前 OMP 18.20.2 使用 Bun 1.4.4。请在与目标架构一致的 Linux 机器上构建：
+另需 Bun 和 Rust 工具链；版本以 `omp-patch/upstream.json`、vendor 的 `rust-toolchain.toml` 及 [Runtime 开发说明](../omp-patch/README.md) 为准。当前 OMP 19.0.1 使用 Bun 1.4.4。请在与目标架构一致的 Linux 机器上构建：
 
 ```bash
 npm run omp:install-deps

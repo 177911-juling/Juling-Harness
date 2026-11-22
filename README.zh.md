@@ -11,7 +11,7 @@
 
 | 版本 | 内置运行时 | 平台 | 许可 |
 |:--:|:--:|:--:|:--:|
-| **1.1.0** | OMP **18.20.2** · `harness.18` | Windows · macOS · Linux | MIT |
+| **1.1.0** | OMP **19.0.1** · `harness.7` | Windows · macOS · Linux | MIT |
 
 <p align="center">
   <img src="docs/readme/app-workbench.png" width="100%" alt="Juling Harness 工作台：对话、工具卡、子 Agent 与上下文面板" />
@@ -21,7 +21,7 @@
 
 ## 概览
 
-Juling Harness 是 Juling Runtime 的桌面控制台。Runtime 固定在上游 OMP 18.20.2，由签名产物分发。它为长时间运行的编码 Agent 提供真正的工作区：持久会话、可见的子 Agent、类型化的模型配置，以及可以重新排列而不是埋在终端里的工具。
+Juling Harness 是 Juling Runtime 的桌面控制台。Runtime 固定在上游 OMP 19.0.1，由签名产物分发。它为长时间运行的编码 Agent 提供真正的工作区：持久会话、可见的子 Agent、类型化的模型配置，以及可以重新排列而不是埋在终端里的工具。
 
 所有操作都通过类型化的 **Harness Bridge** 完成——请求、回执、事件与快照——不解析终端文本，不解析 ANSI，也不模拟按键。会话越长，行为越可预测。
 
@@ -117,7 +117,7 @@ Agent Hub 默认进入指挥台视图。左侧是编队、时间线、星图与�
 ├──────────────────────────────┤
 │ Harness Host                 │  会话、归档、Time Travel、账本
 ├──────────── Harness Bridge ──┤  类型化帧 · 请求 / 回执 / 事件 / 快照
-│ Juling Runtime（OMP 18.20.2）│  模型、工具、Agent、压缩、预测
+│ Juling Runtime（OMP 19.0.1）│  模型、工具、Agent、压缩、预测
 └──────────────────────────────┘
 ```
 

@@ -14,8 +14,8 @@
 | 已归档批量删除 | `history/{DeleteSessionDialog,useArchivedHistory,sessionDeletion}.tsx` | Host `session.deleteArchived`、`session-delete-service.ts`、`session-purge-maintenance.ts` |
 | 活动图标 / Advisor 批次 | `conversation/{ActivityGlyph,activityGlyphDrawing}.ts`、`conversation/advisorTranscript`、`preview/conversationFixtures.ts` | 会话事件投影（overlay `conversation-live-projector`、Host `session-archive-reader`） |
 | 表格 / Office 预览 | `files/{SpreadsheetPane,spreadsheet.worker,OfficePane,logDisplay}.tsx`、`fileTypes.ts` | `apps/desktop/src/{office-component,file-io,file-resources,file-viewer-shared}.ts` |
-| 统一反汇编 | `capabilities/Disassembler*`、`preview/disassemblerPreview.ts` | 协议 `contracts/disassembler.ts`；overlay `disassembler-protocol.ts`、`services/disassembler-service.ts`（在 OMP 19.0.1 Runtime 上启用；当前 pin 为空态） |
-| Plan 编辑 / 会话文件浮窗 | `deck/{PlanWorkspace,PlanSourceEditor,planDocument}.tsx`、`conversation/{SpillLink,markdownSource,toolOutputTail}`、`capabilities/{LocalFilesPane,ResourcesPane,ResourceTextView}.tsx` | 协议 `plan-review.ts`、`local-resources.ts`；overlay `services/resource-service.ts`（在 OMP 19.0.1 Runtime 上启用；当前 pin 隐藏） |
+| 统一反汇编 | `capabilities/Disassembler*`、`preview/disassemblerPreview.ts` | 协议 `contracts/disassembler.ts`；overlay `disassembler-protocol.ts`、`services/disassembler-service.ts`（OMP 19.0.1 Runtime） |
+| Plan 编辑 / 会话文件浮窗 | `deck/{PlanWorkspace,PlanSourceEditor,planDocument}.tsx`、`conversation/{SpillLink,markdownSource,toolOutputTail}`、`capabilities/{LocalFilesPane,ResourcesPane,ResourceTextView}.tsx` | 协议 `plan-review.ts`、`local-resources.ts`；overlay `services/resource-service.ts`（OMP 19.0.1 Runtime） |
 
 ## OMP 18.19.0 适配入口
 

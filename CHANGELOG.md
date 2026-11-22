@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - 桌面与全部 workspace 包版本统一为 `1.1.0`，上游基线为 OMP Studio 0.2.8。
+- 内置 Runtime 升级到 **OMP 19.0.1**（`19.0.1-harness.7`）；上行目录改为 `disasm`/`ghidra`/`daemon`/`irc`，供应商与平台检测表随上游重排。
 - 移除上游已删除的 Seance 入口；IDA 面板并入统一反汇编器（`disassembler.*` 设置）。
 
 ### Fixed

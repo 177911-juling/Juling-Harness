@@ -12,20 +12,19 @@
 |---|---|---|
 | Phase 0 冻结 | ✅ | 提交待处理改动；创建 `upgrade/0.2.8` 分支与 `pre-0.2.8-20261122` 回滚标签 |
 | Phase 1 投影 | ✅ | `scripts/project-omp-studio.mjs` 固化；`upstream/omp-studio-0.2.8` 分支 |
-| Phase 2 合并 | ✅ | 140 个重叠文件；82 个冲突已按域解决；核心/渲染/桌面/安装器测试通过 |
-| Phase 3 Runtime | ⛔ | 本机无法从 GitHub 取得 `f40f335…`（多次 clone/fetch/codeload 均被重置或截断）；vendor 仍为 `7c49c11…` |
-| Phase 4 i18n/预览/文档 | ✅ | 六语补齐 0.2.8 新增键；新页面 fixture 随上游合入；文档与版本号更新 |
-| Phase 5 验证 | ✅（pin 内） | `npm run check -- --all`（313 文件 / 2,295 项）、`npm run build`、`BUN_EXE=… npm run test:tooling`（156 通过 / 1 跳过）、`runtime:verify-source` 均通过 |
+| Phase 2 合并 | ✅ | 140 个重叠文件；82 个冲突按域解决 |
+| Phase 3 Runtime | ✅ | vendor 切到 `f40f335…`（OMP 19.0.1）；overlay 312 文件三方合并；0001–0004 取上游、0005/0006 重放；`series.json` = `19.0.1-harness.7` |
+| Phase 4 i18n/预览/文档 | ✅ | 六语补齐 0.2.8 新增键；文档与版本号更新到 `1.1.0` |
+| Phase 5 验证 | ⏳ | `check --all`、`build`、`test:tooling` 待重跑；`omp:verify:patches` 与 `runtime:verify-source` 见下 |
 
-**当前 Runtime 仍为 `18.20.2-harness.18`**。依赖 OMP 19 的入口按能力列表降级：
-统一反汇编数据库、Plan 正文保存、会话本地目录、Advisor 原生投影、Daemon 单元等
-在旧 Runtime 上显示为空态或隐藏；不依赖 Runtime 的功能（WSL、手机访问、会话引用、
-已归档批量删除、表格/Office 预览、SSH 传输、活动图标）已可用。
-`scripts/runtime-artifact.test.mjs` 显式记录这条 13 项能力缺口，缺口扩大即测试失败；
-§5 Phase 3 换 pin 后删除该清单即可。
+**Runtime 现为 `19.0.1-harness.7`。** 反汇编、Plan 正文保存、会话本地目录（`resource.local.ensureDir`）
+等 13 个能力随 OMP 19.0.1 生效；`disassembler.*` 设置取代原 `ida.*`。
 
-恢复网络后继续执行 §5 Phase 3：取 `f40f335845f0b136453d12fec8d6057011082766`，
-按 §4.1 重放 overlay/0005/0006 并 `omp:patches:regen`。
+OMP 18 → 19 的接缝改动已按 §4.1 / 附录 C 落位：
+`ida` → `disasm`（Ghidra 在 `ghidra/`）、`launch` → `daemon`、`predict/daemon` → `daemon/modules/predict`、
+`crates/pi-natives` → `crates/natives`、`crates/pi-vcs` → `crates/vcs`；
+`scripts/omp-seam.mjs` 采用 0.2.8 的 166 条路径加本地 0005（22）/0006（57），
+13 个 OMP 19 才有的能力在 `scripts/runtime-artifact.test.mjs` 中被显式放行。
 
 ## 0. 结论
 
