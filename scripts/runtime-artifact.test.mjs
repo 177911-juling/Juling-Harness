@@ -37,7 +37,7 @@ import {
 } from "./omp-seam.mjs";
 import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.js";
 
-const REAL_UPSTREAM_COMMIT = "f40f335845f0b136453d12fec8d6057011082766";
+const REAL_UPSTREAM_COMMIT = "7c49c11aa5bbaf3f418406583096168ad5b8c6dc";
 const FIXTURE_COMMAND_MANIFEST_HASH = `sha256:${"c".repeat(64)}`;
 
 test("packaged capability order and hash match the Runtime protocol", () => {
@@ -165,7 +165,12 @@ test("artifact manifest carries the contract fields derived from real pin/series
   const typedCapabilities = [...COMPUTER_WORKSPACE_QUERY_KINDS, ...CONTEXT_VIEW_KINDS,
     "settings.approval", "prediction.query", "composer.predictions",
     ...WORKBENCH_OPERATION_KINDS, ...UPGRADE_OPERATION_KINDS, ...RUNTIME_VIEW_KINDS];
-  assert.deepEqual(new Set(IMPLEMENTED_CAPABILITIES.filter(id => typedCapabilities.includes(id))), new Set(typedCapabilities));
+  // The 0.2.8 app contract types the OMP 19 Runtime surface; this branch pins
+  // 18.20.2, so those operations stay capability-gated until Phase 3.
+  const omp19Only = new Set(["resource.local.ensureDir","mode.plan.review.save","disassembler.status","disassembler.configure","disassembler.metadata.read","disassembler.open","disassembler.close","disassembler.save","disassembler.run","disassembler.cancel","disassembler.query","disassembler.edit.prepare","disassembler.edit.apply"]);
+  const pinnedCapabilities = typedCapabilities.filter(id => !omp19Only.has(id));
+  assert.deepEqual(new Set(IMPLEMENTED_CAPABILITIES.filter(id => pinnedCapabilities.includes(id))), new Set(pinnedCapabilities));
+  assert.deepEqual(new Set(typedCapabilities.filter(id => !IMPLEMENTED_CAPABILITIES.includes(id))), omp19Only);
   assert.equal(new Set(IMPLEMENTED_CAPABILITIES).size, IMPLEMENTED_CAPABILITIES.length);
   assert.equal(manifest.capabilityHash, implementedManifestHash("capabilities"));
   assert.equal(manifest.commandManifestHash, FIXTURE_COMMAND_MANIFEST_HASH);
@@ -302,11 +307,11 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   assert.equal(upstream.entrypoint, "juling.exe");
   assert.deepEqual(upstream.entrypoints, { win32: "juling.exe", darwin: "juling", linux: "juling" });
   assert.deepEqual(upstream.platforms, ["win32-x64", "win32-arm64", "darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"]);
-  assert.equal(upstreamVersion, "19.0.1");
+  assert.equal(upstreamVersion, "18.20.2");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^harness\.\d+$/u);
   assert.equal(patchsetVersion, series.patchsetVersion);
-  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `19.0.1-${patchsetVersion}`);
+  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.20.2-${patchsetVersion}`);
   for (const name of series.patches) {
     assert.ok(existsSync(join(PATCHES_DIRECTORY, name)), `series patch must exist: ${name}`);
   }
