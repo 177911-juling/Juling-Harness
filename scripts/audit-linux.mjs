@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { assertPublicRuntimeKeys, findPrivateKeyFiles } from "./audit-installer.mjs";
 import { LINUX_APPIMAGE_LAUNCHER, LINUX_DESKTOP_FILE, LINUX_EXECUTABLE, LINUX_INSTALL_DIRECTORY, LINUX_MIN_GLIBC, LINUX_PACKAGE_NAME, LINUX_TARGET_PLATFORM, LINUX_UNPACKED_DIRECTORY, linuxAppImageName, linuxDebName } from "./linux-bundle.mjs";
 import { REPOSITORY_ROOT, SERIES_JSON_PATH, VENDOR_CODING_AGENT_PACKAGE_JSON, deriveRuntimeVersion } from "./runtime-artifact.mjs";
-import { assertExecutableTarget, assertRuntimeManifestPlatform } from "./target-platform.mjs";
+import { assertExecutableTarget, assertRuntimeManifestPlatform, runtimeEntrypointFor } from "./target-platform.mjs";
 
 const require = createRequire(import.meta.url);
 const exec = (file, args, options = {}) => execFileSync(file, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 16 * 1024 * 1024, ...options });
@@ -65,7 +65,7 @@ async function auditAppDirectory(appPath, version, runtimeVersion) {
   const versionsRoot = join(resources, "runtime/versions");
   const versions = readdirSync(versionsRoot).filter(name => !name.startsWith("."));
   if (versions.length !== 1 || versions[0] !== runtimeVersion) throw new Error(`Expected exactly Runtime ${runtimeVersion}; found ${versions}`);
-  const runtime = join(versionsRoot, runtimeVersion), omp = join(runtime, "omp");
+  const runtime = join(versionsRoot, runtimeVersion), omp = join(runtime, runtimeEntrypointFor(LINUX_TARGET_PLATFORM));
   assertRuntimeManifestPlatform(JSON.parse(readFileSync(join(runtime, "runtime-manifest.json"), "utf8")), LINUX_TARGET_PLATFORM, runtimeVersion);
   executable(omp);
   const keysDirectory = join(resources, "runtime-keys");
