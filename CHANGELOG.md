@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 新建对话欢迎区「活动轨迹」标题前的 π 图标去掉，只保留标题文字。
+
 ## [1.0.1] - 2026-11-20
 
 ### Added

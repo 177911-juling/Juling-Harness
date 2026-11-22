@@ -7025,12 +7025,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   color: var(--text-faint);
   letter-spacing: 0.04em;
 }
-.ce-heat-pi {
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: calc(13px * var(--text-font-scale));
-  font-weight: 700;
-  color: #7b5cf0;
-}
 .ce-heat-stats { margin-left: auto; font-size: var(--fs-11); color: var(--text-faint); }
 .ce-heat-stats b { color: var(--text-2); font-weight: var(--fw-semibold); }
 
@@ -7247,7 +7241,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 :root[data-theme="dark"] .ce-hc:hover {
   box-shadow: 0 0 0 1px var(--accent-border), 0 2px 12px var(--glow);
 }
-:root[data-theme="dark"] .ce-heat-pi { color: var(--accent); }
 
 @media (max-width: 640px) {
   .ce-heat-board { grid-template-columns: max-content; }

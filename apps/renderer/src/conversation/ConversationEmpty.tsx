@@ -142,7 +142,7 @@ export function ConversationEmpty({
 
       <section className="ce-heat" aria-labelledby="ceHeatH">
         <div className="ce-heat-head ce-anim" style={{ ["--beat" as string]: 6 }}>
-          <h2 id="ceHeatH"><span className="ce-heat-pi" aria-hidden="true">π</span>{t("home.activityHeatmap")}{preview && marks ? <span className="chip purple xs">{t("common.demo")}</span> : null}</h2>
+          <h2 id="ceHeatH">{t("home.activityHeatmap")}{preview && marks ? <span className="chip purple xs">{t("common.demo")}</span> : null}</h2>
           <span className="ce-heat-stats">
             {usageReason
               ? usageReason
