@@ -28,6 +28,7 @@
 | `npm run omp:verify:patches` | overlay 312 文件 + 6 个接缝补丁 apply/typecheck/Bun 套件通过，`smoke-test: ok`，vendor 还原干净 |
 | `npm run runtime:verify-source` | `Verified OMP source commit f40f335845f0b136453d12fec8d6057011082766` |
 | `npm run omp:build:host` | 生成 `19.0.1-harness.7` 的 `juling.exe`；`juling/19.0.1`、`smoke-test: ok`、Bridge 身份与命令清单探测通过，Ed25519 签名与 SHA-256 复核通过 |
+| 生产预览（Windows x64） | 真实 Host 连接 `19.0.1-harness.7`；设置页出现子代理预走查、Advisor 折叠、Worktree 默认值与会话预算；能力中心显示「反汇编器」；历史页显示「已归档」筛选。预览缓存漏项（`juling-ssh-askpass.exe`）已修复 |
 
 提交：`ee2c2120` 应用层合并 → `b3f01c2b` 收尾 → `1bb79063` Runtime 重定基 → `8d171710` vendor pin。
 

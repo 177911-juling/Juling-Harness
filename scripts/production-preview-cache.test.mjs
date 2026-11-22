@@ -48,7 +48,7 @@ async function fixture(t) {
     "apps/desktop/dist/src/main.js": "built desktop",
     "apps/desktop/dist/preload.cjs": "built preload",
     "apps/desktop/dist/remote-host/host.json": "built remote host",
-    "apps/desktop/dist/ssh-askpass/omp-ssh-askpass.exe": "built askpass",
+    "apps/desktop/dist/ssh-askpass/juling-ssh-askpass.exe": "built askpass",
     "apps/desktop/resources/icon.ico": "icon",
     "packages/client/src/index.ts": "client source",
     "packages/client/dist/index.js": "built client",
@@ -191,7 +191,7 @@ export async function stageProductionPreviewRuntime(runtime,directory){await mkd
   await put(root, "fixture-build.cjs", `
 const fs=require('node:fs');const path=require('node:path');
 fs.appendFileSync('build-count.txt','1');
-for(const file of ['apps/renderer/dist/index.html','apps/desktop/dist/src/main.js','apps/desktop/dist/remote-host/host.json','apps/desktop/dist/ssh-askpass/omp-ssh-askpass.exe','packages/client/dist/index.js']){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'built');}
+for(const file of ['apps/renderer/dist/index.html','apps/desktop/dist/src/main.js','apps/desktop/dist/remote-host/host.json','apps/desktop/dist/ssh-askpass/juling-ssh-askpass.exe','packages/client/dist/index.js']){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'built');}
 if(process.env.TEST_BUILD_FAIL==='1')process.exit(23);
 `);
   const launch = promisify(execFile);
