@@ -15,7 +15,7 @@
 | Phase 2 合并 | ✅ | 140 个重叠文件；82 个冲突按域解决 |
 | Phase 3 Runtime | ✅ | vendor 切到 `f40f335…`（OMP 19.0.1）；overlay 312 文件三方合并；0001–0004 取上游、0005/0006 重放；`series.json` = `19.0.1-harness.7` |
 | Phase 4 i18n/预览/文档 | ✅ | 六语补齐 0.2.8 新增键；文档与版本号更新到 `1.1.0` |
-| Phase 5 验证 | ✅ | `check --all`、`check --production`、`build`、`test:tooling`、`omp:verify:patches`、`runtime:verify-source` 全绿；记录见下 |
+| Phase 5 验证 | ✅ | 自动化门禁全绿（见下）；§5 的手工 UI / 设备验收清单尚未逐项执行 |
 
 ### 验证记录
 
