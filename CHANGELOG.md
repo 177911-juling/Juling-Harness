@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 新建对话欢迎区「活动轨迹」标题前的 π 图标去掉，只保留标题文字。
 
+## [1.1.0] - 2026-11-22
+
+### Added
+
+- 合入 OMP Studio 0.2.5–0.2.8：WSL 2 工作区、手机访问、统一反汇编工作台、Plan 源码/预览编辑、会话本地文件与日志浮窗、Ask 折叠与 BTW、会话 ID 引用、已归档批量删除、活动图标与 Advisor 批次折叠、`.xlsm`/`.xlsb`/`.ods` 与 `.docm`/`.pptm` 预览、SSH 准备与传输校验。
+- 模型目录随上游更新到 6,402 条，收录 Kiro、Modal、Bifrost 供应商定义；模型参数新增压缩形态。
+
+### Changed
+
+- 桌面与全部 workspace 包版本统一为 `1.1.0`，上游基线为 OMP Studio 0.2.8。
+- 移除上游已删除的 Seance 入口；IDA 面板并入统一反汇编器（`disassembler.*` 设置）。
+
+### Fixed
+
+- 会话行归属、文件路径链接、Advisor 顺序与来源、表格选区、Office 转换竞态、批量删除跳过已取消归档等上游修复随版合入。
+
 ## [1.0.1] - 2026-11-20
 
 ### Added
