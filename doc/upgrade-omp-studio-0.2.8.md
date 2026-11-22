@@ -32,6 +32,21 @@
 | `npm run pack:win -- --skip-host --skip-build` | `outputs/installer/Juling-Harness-Setup-1.1.0-windows-x64.exe`（282,623,996 B，sha256 `883ca87c…`）；audit 通过：内置 Runtime `19.0.1-harness.7`、仅公钥、WinPTY helper 在 asar 外。本机未签名（`CSC_IDENTITY_AUTO_DISCOVERY=false`），发布签名仍走 CI |
 | 静默覆盖安装 1.0.0 → 1.1.0 | 安装目录的 Runtime 由 `18.20.2-harness.18` 替换为 `19.0.1-harness.7`；启动已安装应用（隔离 appdata）后 Runtime `connected` / `managed`，版本与 `upstreamCommit` 一致 |
 
+### 本机手工验收（2026-11-22）
+
+已在生产预览与预览数据中实际点击验证：
+
+| 项 | 结果 |
+|---|---|
+| 反汇编器 | 能力中心只有「反汇编器」入口，IDA Pro / Ghidra / 自动 三种引擎与数据库列表可用；IDA / Seance 页面已不存在 |
+| 已归档批量删除 | 筛选出 2 条归档会话；「全选当前结果」显示「已选 2 条」；「删除所选」弹出确认框，说明记录与会话文件永久删除、托管产物保留；确认后列表为空。仅操作演示数据 |
+| Advisor 批次 | 折叠摘要显示「2 条需关注 · 1 条小建议 · 1 条未分级意见」，可展开/收起，批次正文完整 |
+| Plan 编辑 | 计划卡「编辑计划」进入 Markdown 源码 + 实时预览双栏，含「保存计划」「全文批注」；批准/请求修改动作仍在 |
+| 会话引用 | 会话菜单存在「复制会话 ID」；粘贴只接受标准 UUID，演示 fixture 的 `preview-session-*` 不满足，因此 chip → 摘录流程未在预览数据中完成 |
+| 表格格式 | 用与 `spreadsheet.worker.ts` 相同的 SheetJS 0.20.3 解析 `.xlsm`、`.xlsb`、`.ods`，三份都读出 `Usage` 表与单元格值；文件窗口内的视觉渲染未自动化验证 |
+
+需要设备或外部环境、本次未执行：手机扫码配对/撤销、WSL 发行版重启恢复、SSH 实际传输校验、真实 IDA/Ghidra 数据库、Office 可选组件、macOS/Linux 桌面流程。
+
 提交：`ee2c2120` 应用层合并 → `b3f01c2b` 收尾 → `1bb79063` Runtime 重定基 → `8d171710` vendor pin → `1c2a1423` 合入 `runtime/18.20.2`。
 
 **Runtime 现为 `19.0.1-harness.7`。** 反汇编、Plan 正文保存、会话本地目录（`resource.local.ensureDir`）
