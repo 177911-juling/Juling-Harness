@@ -15,7 +15,7 @@
 | Phase 2 合并 | ✅ | 140 个重叠文件；82 个冲突按域解决 |
 | Phase 3 Runtime | ✅ | vendor 切到 `f40f335…`（OMP 19.0.1）；overlay 312 文件三方合并；0001–0004 取上游、0005/0006 重放；`series.json` = `19.0.1-harness.7` |
 | Phase 4 i18n/预览/文档 | ✅ | 六语补齐 0.2.8 新增键；文档与版本号更新到 `1.1.0` |
-| Phase 5 验证 | ✅ | 自动化门禁全绿（见下）；§5 的手工 UI / 设备验收清单尚未逐项执行 |
+| Phase 5 验证 | ✅ | 自动化门禁、Runtime 构建、安装包与静默覆盖安装已验证；§5 中的设备类手工验收（手机/WSL/SSH/IDA/Ghidra/Office/macOS/Linux）仍未执行 |
 
 ### 验证记录
 
@@ -29,8 +29,10 @@
 | `npm run runtime:verify-source` | `Verified OMP source commit f40f335845f0b136453d12fec8d6057011082766` |
 | `npm run omp:build:host` | 生成 `19.0.1-harness.7` 的 `juling.exe`；`juling/19.0.1`、`smoke-test: ok`、Bridge 身份与命令清单探测通过，Ed25519 签名与 SHA-256 复核通过 |
 | 生产预览（Windows x64） | 真实 Host 连接 `19.0.1-harness.7`；设置页出现子代理预走查、Advisor 折叠、Worktree 默认值与会话预算；能力中心显示「反汇编器」；历史页显示「已归档」筛选。预览缓存漏项（`juling-ssh-askpass.exe`）已修复 |
+| `npm run pack:win -- --skip-host --skip-build` | `outputs/installer/Juling-Harness-Setup-1.1.0-windows-x64.exe`（282,623,996 B，sha256 `883ca87c…`）；audit 通过：内置 Runtime `19.0.1-harness.7`、仅公钥、WinPTY helper 在 asar 外。本机未签名（`CSC_IDENTITY_AUTO_DISCOVERY=false`），发布签名仍走 CI |
+| 静默覆盖安装 1.0.0 → 1.1.0 | 安装目录的 Runtime 由 `18.20.2-harness.18` 替换为 `19.0.1-harness.7`；启动已安装应用（隔离 appdata）后 Runtime `connected` / `managed`，版本与 `upstreamCommit` 一致 |
 
-提交：`ee2c2120` 应用层合并 → `b3f01c2b` 收尾 → `1bb79063` Runtime 重定基 → `8d171710` vendor pin。
+提交：`ee2c2120` 应用层合并 → `b3f01c2b` 收尾 → `1bb79063` Runtime 重定基 → `8d171710` vendor pin → `1c2a1423` 合入 `runtime/18.20.2`。
 
 **Runtime 现为 `19.0.1-harness.7`。** 反汇编、Plan 正文保存、会话本地目录（`resource.local.ensureDir`）
 等 13 个能力随 OMP 19.0.1 生效；`disassembler.*` 设置取代原 `ida.*`。
