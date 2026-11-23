@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Project an upstream omp-studio tree into the Juling Harness fork identity.
+ * Project an upstream tree into the Juling Harness fork identity.
  *
- * usage: node scripts/project-omp-studio.mjs <upstream-dir> <output-dir>
+ * usage: node scripts/project-upstream.mjs <upstream-dir> <output-dir>
  *
  * Two layers:
  *   1. studio -> harness  (product/project rename, applied to text and paths)
@@ -18,7 +18,7 @@ import path from "node:path";
 
 const [, , source, destination] = process.argv;
 if (!source || !destination) {
-  console.error("usage: node scripts/project-omp-studio.mjs <upstream-dir> <output-dir>");
+  console.error("usage: node scripts/project-upstream.mjs <upstream-dir> <output-dir>");
   process.exit(2);
 }
 
