@@ -1,4 +1,4 @@
-# OMP Studio 0.2.4 升级分析与执行方案
+# Juling Harness 0.2.4 升级分析与执行方案
 
 > 状态：**分析完成，等待确认后执行**。本文只描述改动与步骤，尚未修改任何源码。
 > 分析日期：2026-11-19。上游输入：`G:\源码\omp-studio-0.2.4`（无 `.git`，按文件对比）；
@@ -25,7 +25,7 @@
 
 | 项 | 当前仓库 | 上游 0.2.4 | 结论 |
 |---|---|---|---|
-| 产品名 | `juling-harness` / Juling Harness | `omp-studio` / OMP Studio | 继续用本地投影规则 |
+| 产品名 | `juling-harness` / Juling Harness | `omp-studio` / Juling Harness | 继续用本地投影规则 |
 | 版本 | `0.2.2` | `0.2.4` | 统一升到 `0.2.4`（见 §6 决策） |
 | Runtime pin | `7c49c11…`（18.20.2） | 同左 | 不换子模块 |
 | patchset | `harness.11`（已提交）/ `harness.16`（工作区，6 个补丁） | `studio.14`（4 个补丁） | 合并上游 4 个补丁内容后 regen，版本号自动递增 |

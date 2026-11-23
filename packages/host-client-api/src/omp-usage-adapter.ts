@@ -35,11 +35,11 @@ const SYNC_THROTTLE_MS = 30_000;
 const SYNC_TIMEOUT_MS = 60_000;
 const YEAR_LOOKBACK_DAYS = 400;
 
-/** Preferred dashboard port; upstream's default, shared with the OMP Studio build. */
+/** Preferred dashboard port; upstream's default, shared with the Juling Harness build. */
 const DASHBOARD_PORT = 3847;
 /**
  * Ports tried in order when the preferred one is held by another product. A
- * machine that runs OMP Studio alongside Harness keeps `omp stats` on 3847, and
+ * machine that runs Juling Harness alongside Harness keeps `omp stats` on 3847, and
  * that dashboard carries the same identity header while showing foreign data.
  */
 const DASHBOARD_FALLBACK_PORTS: readonly number[] = [3848, 3849, 3850, 3851, 3852];
@@ -214,8 +214,8 @@ export function isOwnDashboardHtml(html: string): boolean {
 
 /**
  * A live dashboard on this port must be *ours*. The identity header is shared
- * with the upstream OMP Studio build, so a machine running both products would
- * otherwise embed OMP Studio's panel — and its database — into this page.
+ * with the upstream Juling Harness build, so a machine running both products would
+ * otherwise embed Juling Harness's panel — and its database — into this page.
  */
 async function defaultProbeDashboard(port: number): Promise<boolean> {
   const ac = new AbortController();
@@ -428,7 +428,7 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
    * share one spawn instead of racing two servers onto the same port.
    *
    * Ports are tried in order because 3847 belongs to the upstream product too:
-   * an OMP Studio dashboard there answers the shared identity header while
+   * a Juling Harness dashboard there answers the shared identity header while
    * serving a different database, so the probe also checks the title and moves
    * to the next free port when it finds a foreign panel.
    */

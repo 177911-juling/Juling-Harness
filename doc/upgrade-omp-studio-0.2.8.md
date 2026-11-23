@@ -1,4 +1,4 @@
-# OMP Studio 0.2.8 升级分析与执行方案
+# Juling Harness 0.2.8 升级分析与执行方案
 
 > 状态：**已执行并验证**：应用层合入 0.2.8，Runtime 重定基到 OMP 19.0.1（`19.0.1-harness.7`）。
 > 分析日期：2026-11-22；执行日期：2026-11-22。
@@ -61,7 +61,7 @@ OMP 18 → 19 的接缝改动已按 §4.1 / 附录 C 落位：
 ## 0. 结论
 
 1. **你的源码不是 0.2.4，而是 1.0.1**。代码基线是上游 0.2.4，产品版本已经走到 `1.0.0/1.0.1`
-   （`CHANGELOG.md` 的 `[1.0.0]` 明确写了「合入 OMP Studio 0.2.4」）。所以本次是
+   （`CHANGELOG.md` 的 `[1.0.0]` 明确写了「合入 Juling Harness 0.2.4」）。所以本次是
    **上游 0.2.4 → 0.2.8** 的升级，本地版本建议升到 **`1.1.0`**，不要改成 `0.2.8`
    （否则已发布的 1.0.1 用户会被更新通道判定为「降级」）。
 2. **0.2.8 不是一次 UI 小更新。0.2.7 把内置 Runtime 从 OMP 18.20.2 提到了 OMP 19.0.1**，
@@ -87,7 +87,7 @@ OMP 18 → 19 的接缝改动已按 §4.1 / 附录 C 落位：
 
 | 项 | 当前仓库 | 上游 0.2.8 | 结论 |
 |---|---|---|---|
-| 产品名 | `juling-harness` / Juling Harness | `omp-studio` / OMP Studio | 继续用本地投影规则 |
+| 产品名 | `juling-harness` / Juling Harness | `omp-studio` / Juling Harness | 继续用本地投影规则 |
 | 产品版本 | `1.0.1`（root + 14 个 workspace） | `0.2.8` | 本地建议升 `1.1.0` |
 | 上游代码基线 | 0.2.4（提交 `c08f52a3`） | 0.2.8 | 本次合并目标 |
 | Runtime pin | `7c49c11…`（OMP 18.20.2） | `f40f335…`（OMP 19.0.1 / tag `v19.0.1`） | **必须升级子模块** |
@@ -383,7 +383,7 @@ npm run check -- --fast            # 确认基线绿
      `omp-patch/` 目录名、`oh-my-pi` 包名做替换。
 2. 投影到仓库外，逐项核对：
    ```bash
-   grep -rIl "omp-studio\|OMP Studio\|@omp-studio/" proj028   # 只应剩 .bin/.webp 等二进制
+   grep -rIl "omp-studio\|OMP[ ]Studio\|@omp-studio/" proj028   # 只应剩 .bin/.webp 等二进制
    grep -rIl "ompHarness" proj028                             # 应为 0
    grep -rIn "omp\.exe" proj028 | wc -l                        # 只允许兼容读取/测试
    ```

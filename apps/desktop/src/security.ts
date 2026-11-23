@@ -36,7 +36,7 @@ export const RENDERER_CSP =
   "form-action 'self'; " +
   // The statistics page embeds the native `omp stats` dashboard. The adapter
   // probes 3847 first and falls back to 3848-3852 when another product (e.g.
-  // upstream OMP Studio) holds the default port, so the frame allows exactly
+  // upstream Juling Harness) holds the default port, so the frame allows exactly
   // that loopback port range: no wildcard port, no loopback for scripts,
   // connections, images or media. `'self'` stays listed because naming any
   // source in `frame-src` replaces the `default-src` fallback. Packaged
