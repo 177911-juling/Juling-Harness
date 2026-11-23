@@ -68,15 +68,15 @@ test("POSIX install restores execute bits before activation and on same-version 
   try {
     const root = join(temporary, "installed"), installer = runtimeInstaller(root);
     const source = await artifact(temporary, "v1", "signed executable", "stable", "darwin-arm64");
-    await chmod(join(source, "omp"), 0o644);
+    await chmod(join(source, "juling"), 0o644);
     await installer.install(source);
-    const installed = join(root, "versions", "v1", "omp");
+    const installed = join(root, "versions", "v1", "juling");
     const checkMode = { run: async () => { assert.equal((await stat(installed)).mode & 0o777, 0o755); } };
     await installer.activate("v1", { selfCheck: checkMode });
     await chmod(installed, 0o644);
     await installer.install(source);
     await installer.activate("v1", { selfCheck: checkMode });
-    assert.equal((await stat(join(source, "omp"))).mode & 0o777, 0o644);
+    assert.equal((await stat(join(source, "juling"))).mode & 0o777, 0o644);
     assert.equal(await readFile(installed, "utf8"), "signed executable");
   } finally { await rm(temporary, { recursive: true, force: true }); }
 });
