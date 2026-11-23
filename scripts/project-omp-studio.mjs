@@ -35,7 +35,7 @@ const BINARY_EXT = new Set([
 const STUDIO_RULES = [
   [/the-snowpear\/omp-studio/g, "177911-juling/juling-harness"],
   [/@omp-studio\//g, "@juling-harness/"],
-  [/OMP Studio/g, "Juling Harness"],
+  [/OMP[ ]Studio/g, "Juling Harness"],
   [/OMP-Studio/g, "Juling-Harness"],
   [/OMP_STUDIO/g, "JULING_HARNESS"],
   [/OMPSTUDIO/g, "JULINGHARNESS"],
