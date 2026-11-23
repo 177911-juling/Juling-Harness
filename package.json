@@ -4,7 +4,7 @@
   "private": true,
   "description": "Desktop console for Juling Runtime — typed Harness Bridge, Electron workbench, Windows installer and macOS app",
   "license": "MIT",
-  "author": "snowpear",
+  "author": "177911-juling",
   "homepage": "https://github.com/177911-juling/juling-harness",
   "bugs": {
     "url": "https://github.com/177911-juling/juling-harness/issues"

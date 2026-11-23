@@ -122,8 +122,8 @@
   MR.providers = [
     {
       id: 'anthropic', name: 'Anthropic', source: 'builtin', status: 'available',
-      statusDetail: '已登录 snowpear@anthropic.com · 延迟 142ms',
-      auth: { type: 'oauth', account: 'snowpear@anthropic.com' },
+      statusDetail: '已登录 177911-juling@anthropic.com · 延迟 142ms',
+      auth: { type: 'oauth', account: '177911-juling@anthropic.com' },
       api: 'anthropic-messages', endpoint: { url: 'https://api.anthropic.com/v1' },
       local: false, enabled: true, website: 'https://www.anthropic.com',
       note: '', presetId: 'anthropic',
@@ -149,8 +149,8 @@
     },
     {
       id: 'google', name: 'Google Gemini', source: 'builtin', status: 'available',
-      statusDetail: '已登录 snowpear@gmail.com · 延迟 182ms',
-      auth: { type: 'oauth', account: 'snowpear@gmail.com' },
+      statusDetail: '已登录 177911-juling@gmail.com · 延迟 182ms',
+      auth: { type: 'oauth', account: '177911-juling@gmail.com' },
       api: 'google-generative', endpoint: { url: 'https://generativelanguage.googleapis.com/v1beta' },
       local: false, enabled: true, website: 'https://aistudio.google.com',
       note: '', presetId: 'google-gemini',

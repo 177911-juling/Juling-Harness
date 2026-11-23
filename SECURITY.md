@@ -17,7 +17,7 @@ Juling Harness is in public preview (`0.1.0`). Only the latest `main` commit and
 **Do not open a public issue** for a security vulnerability.
 
 1. Open a [private GitHub security advisory](https://github.com/177911-juling/juling-harness/security/advisories/new), or
-2. Contact the maintainer through GitHub (@the-snowpear) with a brief description and a request for a private channel.
+2. Contact the maintainer through GitHub (@177911-juling) with a brief description and a request for a private channel.
 
 Please include:
 

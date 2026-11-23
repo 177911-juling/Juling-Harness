@@ -10,7 +10,7 @@ describe("operator profile after the Harness rename", () => {
   });
 
   it("keeps a name the operator chose", () => {
-    expect(parseOperatorProfile(JSON.stringify({ displayName: "snowpear" }))).toEqual({ displayName: "snowpear" });
+    expect(parseOperatorProfile(JSON.stringify({ displayName: "177911-juling" }))).toEqual({ displayName: "177911-juling" });
   });
 
   it("derives the avatar initial from the effective name", () => {

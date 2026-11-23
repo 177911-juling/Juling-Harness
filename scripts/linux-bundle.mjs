@@ -63,7 +63,7 @@ export function deriveLinuxBuilderConfig(base, { outputDirectory }) {
     deb: {
       artifactName,
       packageName: LINUX_PACKAGE_NAME,
-      maintainer: "Juling Harness contributors <the-snowpear@users.noreply.github.com>",
+      maintainer: "Juling Harness contributors <177911-juling@users.noreply.github.com>",
       depends: [
         `libc6 (>= ${LINUX_MIN_GLIBC})`, "libstdc++6 (>= 13.2)", "libgcc-s1",
         "libgtk-3-0t64 | libgtk-3-0", "libasound2t64 | libasound2",
