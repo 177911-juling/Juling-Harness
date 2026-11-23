@@ -735,7 +735,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     ? t("conversation.newChat")
     : t("conversation.untitledSession");
   const threadTitle = state.loading && mdi ? mdi.document.title : previewMode.preview
-    ? (previewThread?.thread.title ?? "跟踪上游 pi-web 更新到 juling-web")
+    ? (previewThread?.thread.title ?? "跟踪上游 pi-web 更新到 juling-harness")
     : currentThreadTitle ?? (state.route === "history" ? t("menu.history") : state.route === "home" ? t("menu.home") : state.route === "agent-hub" ? "Agent Hub" : state.route === "capabilities" ? t("menu.capabilities") : state.route === "model-config" ? t("menu.modelConfig") : untitledThreadTitle);
   const selectedTitleIsPlaceholder = isPlaceholderSessionTitle(selected?.title);
   const onProvisionalSessionChange = useCallback((change: {
@@ -2215,6 +2215,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       case "toggleSidebar":
         toggleSidebar();
         return;
+      case "toggleRail":
+        setRailCollapsedWithFlight(!railCollapsed);
+        return;
       case "toggleBottom":
         go("workbench");
         toggleBottom();
@@ -2744,6 +2747,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         menus={
           <>
             <TitleMenu id="file" label={t("menu.file")} openId={openMenu} onToggle={setOpenMenu}>
+              <button className="menu-item" role="menuitem" onClick={() => { setOpenMenu(null); setCreateProjectNonce(n => n + 1); }}>{t("nav.createProject")}</button>
               <button className="menu-item" role="menuitem" onClick={() => startNewChat()}>{t("menu.newThread")}<span className="kbd">{formatShortcut(SHORTCUTS.newChat)}</span></button>
               <button className="menu-item" role="menuitem" onClick={() => go("history")}>{t("menu.history")}</button>
               <button className="menu-item" role="menuitem" onClick={() => go("agent-hub")}>Agent Hub</button>
@@ -2783,6 +2787,14 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
                   rail: { visible: railPresented, presented: railPresented },
                 }}
               />
+              <div className="menu-sep" />
+              {/* 主导航（rail）的收起/展开：收起后它只剩左缘的手柄，菜单里必须有
+                  一条与侧栏、底栏同级的开关，否则用户只能在边缘上碰运气。 */}
+              <button className="menu-item" role="menuitemcheckbox" aria-checked={!railCollapsed} onClick={() => { setOpenMenu(null); setRailCollapsedWithFlight(!railCollapsed); }}>
+                <Icon name="workbench" extra="sm" />
+                <span>{t("menu.toggleRail")}</span>
+                <span className="dock-menu-check">{railCollapsed ? null : <Icon name="check" extra="sm" />}</span>
+              </button>
               <div className="menu-sep" />
               <button className="menu-item" role="menuitem" onClick={() => runMenu(() => chrome.onToggleTheme())}>{theme === "dark" ? t("menu.lightTheme") : t("menu.darkTheme")}</button>
             </TitleMenu>

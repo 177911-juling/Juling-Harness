@@ -667,6 +667,7 @@ export const ko: LocaleDictionary = {
     "docs": "문서",
     "newChat": "새 채팅",
     "toggleSidebar": "사이드바 전환",
+    "toggleRail": "기본 내비게이션 전환",
     "skillsAndPlugins": "Skills 및 플러그인",
     "bottomPanel": "하단 패널",
     "closeMenuOrPanel": "메뉴 또는 패널 닫기",

@@ -89,7 +89,7 @@ export function previewGalleryItems(zh = isZh()): readonly ConversationItem[] {
   ];
 }
 
-/** omp-web upstream sync: realistic project turn used for workbench preview conversation. */
+/** juling-harness upstream sync: realistic project turn used for workbench preview conversation. */
 function buildStoryCards(zh: boolean): readonly { readonly [key: string]: JsonValue }[] {
   return [
     {
@@ -101,8 +101,8 @@ function buildStoryCards(zh: boolean): readonly { readonly [key: string]: JsonVa
         ? "先核对 package.json 钉住的上游版本，再扫 docs 里现有同步说明。本地 Harness Bridge 和会话目录不要写回 pi-web。"
         : "Check the pinned upstream version in package.json first, then scan docs for existing sync notes. Keep Harness Bridge and the session directory out of pi-web.",
       full: zh
-        ? "目标：把 pi-web v0.8.1 合进 omp-web。\n保留 packages/harness-bridge 与 ~/.omp/agent/sessions。\n文档落到 docs/UPSTREAM-SYNC.md，README 加入口。"
-        : "Goal: merge pi-web v0.8.1 into omp-web.\nPreserve packages/harness-bridge and ~/.omp/agent/sessions.\nWrite docs to docs/UPSTREAM-SYNC.md and add a link in README.",
+        ? "目标：把 pi-web v0.8.1 合进 juling-harness。\n保留 packages/harness-bridge 与 ~/.omp/agent/sessions。\n文档落到 docs/UPSTREAM-SYNC.md，README 加入口。"
+        : "Goal: merge pi-web v0.8.1 into juling-harness.\nPreserve packages/harness-bridge and ~/.omp/agent/sessions.\nWrite docs to docs/UPSTREAM-SYNC.md and add a link in README.",
     },
     {
       kind: "read",
@@ -116,7 +116,7 @@ function buildStoryCards(zh: boolean): readonly { readonly [key: string]: JsonVa
       offset: 1,
       preview: [
         "{",
-        "  \"name\": \"omp-web\",",
+        "  \"name\": \"juling-harness\",",
         "  \"version\": \"0.8.0\",",
         "  \"dependencies\": {",
         "    \"@earendil-works/pi-web\": \"0.8.0\"",
@@ -259,8 +259,8 @@ export function getPreviewConvoItems(zh = isZh()): readonly ConversationItem[] {
       content: [{
         type: "text",
         text: zh
-          ? "用 /skill:upstream-sync 把上游 pi-web v0.8.1 同步进 omp-web。保留本地 Harness Bridge 和会话目录，不要写回 pi-web 路径。先读 @docs/ 和 @package.json，再出文档。"
-          : "Run /skill:upstream-sync to merge pi-web v0.8.1 into omp-web. Keep local Harness Bridge and session paths intact without writing back to pi-web paths. Read @docs/ and @package.json first, then update the docs.",
+          ? "用 /skill:upstream-sync 把上游 pi-web v0.8.1 同步进 juling-harness。保留本地 Harness Bridge 和会话目录，不要写回 pi-web 路径。先读 @docs/ 和 @package.json，再出文档。"
+          : "Run /skill:upstream-sync to merge pi-web v0.8.1 into juling-harness. Keep local Harness Bridge and session paths intact without writing back to pi-web paths. Read @docs/ and @package.json first, then update the docs.",
       }],
     },
     {
@@ -475,7 +475,7 @@ export function getPreviewConvoLive(zh = isZh()): readonly ConversationRuntimeEv
       messageId: "preview-live-assistant",
       toolCallId: "preview-bash-live",
       toolName: "Bash",
-      arguments: { command: "npm run typecheck", cwd: "D:/Project/omp-web" },
+      arguments: { command: "npm run typecheck", cwd: "D:/Project/juling-harness" },
       startedAt: at(21),
     },
     {

@@ -400,7 +400,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     setSelectedPlanDoc(undefined);
     setPlanDialogOpen(false);
   }, [selectedSessionId, previewThreadId]);
-  // 预览模式的排队栏演示：t1「跟踪上游 pi-web 更新到 omp-web」流式中显示 fixture
+  // 预览模式的排队栏演示：t1「跟踪上游 pi-web 更新到 juling-harness」流式中显示 fixture
   // 两条消息；操作只改本地列表，不触 Host（AGENTS.md 预览规则）。
   const previewQueueActive = preview === true && previewThreadId === "t1";
   const [previewQueue, setPreviewQueue] = useState<QueuedMessage[]>([]);

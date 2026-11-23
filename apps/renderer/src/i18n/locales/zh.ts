@@ -435,6 +435,7 @@ const zhRaw = {
     "docs": "文档",
     "newChat": "新建对话",
     "toggleSidebar": "展开 / 收起侧栏",
+    "toggleRail": "展开 / 收起主导航",
     "skillsAndPlugins": "技能与插件",
     "bottomPanel": "底部面板",
     "closeMenuOrPanel": "关闭菜单或面板",

@@ -79,5 +79,5 @@ it("keeps the picker actionable when real workspace inventory cannot be read", a
   render(<I18nProvider forcedLanguage="en"><PreviewModeProvider switchEnabled><WorkspaceRecoveryPane client={client} /></PreviewModeProvider></I18nProvider>);
   await screen.findByRole("alert");
   expect(screen.getByRole("button", { name: "Choose project and start conversation" }).getAttribute("disabled")).toBeNull();
-  expect(screen.queryByText("omp-web")).toBeNull();
+  expect(screen.queryByText("juling-harness")).toBeNull();
 });

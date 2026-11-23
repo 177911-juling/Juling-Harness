@@ -6995,6 +6995,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .convo-wrap.is-empty .convo-scroll {
   display: flex;
   flex-direction: column;
+  /* 水平居中必须由容器负责：flex 列里子项的 auto 左右边距不生效，
+     宽屏下欢迎列会贴在左侧、右侧留大片空白（bug015）。 */
+  align-items: center;
   padding-right: var(--sp-16);
   background: radial-gradient(620px 340px at 50% 16%, var(--accent-softer), transparent 72%);
 }
@@ -7003,7 +7006,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
    滚动容器不会把顶部内容顶到够不着的地方。水平方向仍由 auto 边距居中。 */
 .convo-wrap.is-empty .convo-doc {
   margin-block: auto;
-  width: 100%;
   max-width: 960px;
   /* 与顶部 24px 对称：doc 自己的上下内边距不相等时，居中后的内容仍会整体偏上 4px。
      欢迎态没有 minimap，左右按普通留白对称（.convo-doc 的基础左让位要在这里收回）。 */
@@ -7013,7 +7015,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .convo-wrap.is-empty .minimap { display: none; }
 .convo-wrap[data-reading-column].is-empty > .convo-scroll { padding-right: 0; }
 .convo-wrap[data-reading-column].is-empty > .convo-scroll > .convo-doc {
-  /* 欢迎插画保持独立的 960px 上限；仅 Composer 跟随阅读宽度预设。 */
+  /* 欢迎插画保持独立的 960px 上限；仅 Composer 跟随阅读宽度预设。
+     欢迎态回归居中列（bug015）：覆盖基础阅读列的左对齐 margin-left:0，
+     在 flex 列容器里用 auto 左右边距水平居中。 */
+  margin-inline: auto;
   max-width: 960px;
   flex: none;
   padding-inline: var(--reading-gutter);

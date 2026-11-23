@@ -76,7 +76,7 @@ function buildMarkdown(zh: boolean): readonly ConversationItem[] {
         "## 类型与结构化数据",
         "下面的 TypeScript 是代码片段，JSON 是检查结果记录。",
         fence("ts", 'type CheckResult = { name: string; passed: boolean; durationMs: number };\n\nexport function summarize(results: CheckResult[]) {\n  const passed = results.filter(result => result.passed).length;\n  return { passed, total: results.length, ready: passed === results.length };\n}'),
-        fence("json", '{\n  "project": "omp-web",\n  "checks": ["types", "markdown", "terminal"],\n  "result": { "passed": 18, "failed": 0 },\n  "pending": null\n}'),
+        fence("json", '{\n  "project": "juling-harness",\n  "checks": ["types", "markdown", "terminal"],\n  "result": { "passed": 18, "failed": 0 },\n  "pending": null\n}'),
         "### 图片与说明",
         `![预览布局参考：山峦、湖面与天空](${landscape})`,
         "图片沿用本地素材，可以检查宽高比、正文留白和深色主题下的边界。",
@@ -131,7 +131,7 @@ function buildMarkdown(zh: boolean): readonly ConversationItem[] {
         "## Types & Structured Data",
         "Below is a TypeScript helper alongside a JSON check summary.",
         fence("ts", 'type CheckResult = { name: string; passed: boolean; durationMs: number };\n\nexport function summarize(results: CheckResult[]) {\n  const passed = results.filter(result => result.passed).length;\n  return { passed, total: results.length, ready: passed === results.length };\n}'),
-        fence("json", '{\n  "project": "omp-web",\n  "checks": ["types", "markdown", "terminal"],\n  "result": { "passed": 18, "failed": 0 },\n  "pending": null\n}'),
+        fence("json", '{\n  "project": "juling-harness",\n  "checks": ["types", "markdown", "terminal"],\n  "result": { "passed": 18, "failed": 0 },\n  "pending": null\n}'),
         "### Image & Caption",
         `![Preview layout reference: mountains, lake, and sky](${landscape})`,
         "The image uses a local asset so aspect ratio, margins, and dark-theme borders can be verified offline.",
@@ -229,7 +229,7 @@ function buildRecovery(zh: boolean): readonly ConversationItem[] {
             { file: "hooks/useCodeTheme.ts", line: "8", text: "export function getCodeTheme(): MermaidTheme {" },
           ],
         }),
-        ...tool("failed", "bash", { command: "npm run typecheck", cwd: demoPath("omp-web") }, { exit: 2, wallTimeMs: 1240 },
+        ...tool("failed", "bash", { command: "npm run typecheck", cwd: demoPath("juling-harness") }, { exit: 2, wallTimeMs: 1240 },
           '\u001b[33m> tsc --noEmit\u001b[0m\ncomponents/MermaidBlock.tsx(147,7): error TS2322:\n  Type \'string\' is not assignable to type \'MermaidTheme\'.\n\nFound 1 error.\n', true),
         text("已定位：局部变量被标成宽泛的 `string`，丢失了 `getCodeTheme()` 返回的主题联合类型。修复只需保留原返回类型。"),
       ],
@@ -243,7 +243,7 @@ function buildRecovery(zh: boolean): readonly ConversationItem[] {
           ["+", "", "144", "const codeTheme = getCodeTheme();"],
           [" ", "145", "145", "mermaid.initialize({ theme: codeTheme });"],
         ] }),
-        ...tool("passed", "bash", { command: "npm run typecheck", cwd: demoPath("omp-web") }, { exit: 0, wallTimeMs: 980 },
+        ...tool("passed", "bash", { command: "npm run typecheck", cwd: demoPath("juling-harness") }, { exit: 0, wallTimeMs: 980 },
           '\u001b[32m✓ TypeScript compiled\u001b[0m\n0 errors\n'),
         ...tool("empty", "grep", { pattern: "codeTheme: string", path: "components" }, { matchCount: 0, fileCount: 0, matches: [] }, "No matches found."),
         text("**复查通过**：类型检查为 0 错误，旧写法检索为 0 命中。第一次失败记录保留在上一轮，可对照错误卡、Diff 和成功输出。"),
@@ -252,7 +252,7 @@ function buildRecovery(zh: boolean): readonly ConversationItem[] {
     {
       user: "再给我完整的检查日志和结构化摘要，长输出也要能检查。",
       answer: [
-        ...tool("long-output", "bash", { command: "npm run check -- --only renderer", cwd: demoPath("omp-web") }, { exit: 0, wallTimeMs: 18420 },
+        ...tool("long-output", "bash", { command: "npm run check -- --only renderer", cwd: demoPath("juling-harness") }, { exit: 0, wallTimeMs: 18420 },
           Array.from({ length: 72 }, (_, i) => `${String(i + 1).padStart(2, "0")}  PASS  ${["conversation", "composer", "dock", "files", "terminal", "preview"][i % 6]}/${["render", "keyboard", "selection", "scroll", "restore", "theme"][Math.floor(i / 6) % 6]}.test.tsx  (${i % 5 + 1} checks)`).join("\n") + "\n\n72 suites passed · 213 checks passed · 18.42s"),
         ...tool("summary", "eval", { code: "summarize(checks)" }, { cells: [{ code: "summarize(checks)", status: "ok", stdout: '{"passed":72,"failed":0}', views: [{ text: "检查结果", view: { kind: "json", value: { passed: 72, failed: 0, repaired: ["MermaidBlock.tsx:144"], platforms: { windows: "passed", macOS: "pending" } } } }] }] }),
         text("检查记录已整理。长日志可在工具卡内部滚动，结构化摘要可展开字段；macOS 复查仍标为待完成。"),
@@ -274,7 +274,7 @@ function buildRecovery(zh: boolean): readonly ConversationItem[] {
             { file: "hooks/useCodeTheme.ts", line: "8", text: "export function getCodeTheme(): MermaidTheme {" },
           ],
         }),
-        ...tool("failed", "bash", { command: "npm run typecheck", cwd: demoPath("omp-web") }, { exit: 2, wallTimeMs: 1240 },
+        ...tool("failed", "bash", { command: "npm run typecheck", cwd: demoPath("juling-harness") }, { exit: 2, wallTimeMs: 1240 },
           '\u001b[33m> tsc --noEmit\u001b[0m\ncomponents/MermaidBlock.tsx(147,7): error TS2322:\n  Type \'string\' is not assignable to type \'MermaidTheme\'.\n\nFound 1 error.\n', true),
         text("Root cause found: the local variable was widened to `string`, dropping the `MermaidTheme` union returned by `getCodeTheme()`. Keeping the inferred return type resolves it."),
       ],
@@ -288,7 +288,7 @@ function buildRecovery(zh: boolean): readonly ConversationItem[] {
           ["+", "", "144", "const codeTheme = getCodeTheme();"],
           [" ", "145", "145", "mermaid.initialize({ theme: codeTheme });"],
         ] }),
-        ...tool("passed", "bash", { command: "npm run typecheck", cwd: demoPath("omp-web") }, { exit: 0, wallTimeMs: 980 },
+        ...tool("passed", "bash", { command: "npm run typecheck", cwd: demoPath("juling-harness") }, { exit: 0, wallTimeMs: 980 },
           '\u001b[32m✓ TypeScript compiled\u001b[0m\n0 errors\n'),
         ...tool("empty", "grep", { pattern: "codeTheme: string", path: "components" }, { matchCount: 0, fileCount: 0, matches: [] }, "No matches found."),
         text("**Re-check passed**: typecheck reports 0 errors and grep for the old annotation returned 0 matches. The initial failure stays visible above for before/after comparison."),
@@ -297,7 +297,7 @@ function buildRecovery(zh: boolean): readonly ConversationItem[] {
     {
       user: "Also give me the full check log and a structured summary so we can verify long outputs.",
       answer: [
-        ...tool("long-output", "bash", { command: "npm run check -- --only renderer", cwd: demoPath("omp-web") }, { exit: 0, wallTimeMs: 18420 },
+        ...tool("long-output", "bash", { command: "npm run check -- --only renderer", cwd: demoPath("juling-harness") }, { exit: 0, wallTimeMs: 18420 },
           Array.from({ length: 72 }, (_, i) => `${String(i + 1).padStart(2, "0")}  PASS  ${["conversation", "composer", "dock", "files", "terminal", "preview"][i % 6]}/${["render", "keyboard", "selection", "scroll", "restore", "theme"][Math.floor(i / 6) % 6]}.test.tsx  (${i % 5 + 1} checks)`).join("\n") + "\n\n72 suites passed · 213 checks passed · 18.42s"),
         ...tool("summary", "eval", { code: "summarize(checks)" }, { cells: [{ code: "summarize(checks)", status: "ok", stdout: '{"passed":72,"failed":0}', views: [{ text: "Check summary", view: { kind: "json", value: { passed: 72, failed: 0, repaired: ["MermaidBlock.tsx:144"], platforms: { windows: "passed", macOS: "pending" } } } }] }] }),
         text("Verification log recorded. The full output scrolls inside the tool card, structured fields expand inline, and the macOS check remains marked pending."),
@@ -424,9 +424,9 @@ export function getPreviewThreadItems(zh = isZh()): Readonly<Record<string, read
       { user: "Diagram how zoom state is shared between the inline view and fullscreen overlay.", answer: ["## Shared Viewport State", fence("mermaid", 'flowchart LR\n  A[Inline view] --> C[Shared pan / zoom]\n  B[Fullscreen view] --> C\n  C --> D[Drag & wheel]\n  D --> E[Update viewport]\n  E --> A\n  E --> B'), "Both views read the same viewport state so toggling fullscreen preserves your position.", "- [x] Inline zoom controls\n- [x] Preserve position in fullscreen\n- [ ] Trackpad inertia review"].join("\n\n") },
     ]),
     t8: conversation("directory", zh ? [
-      { user: "DirectoryPicker 需要覆盖哪些目录和文件名？", answer: ["## 目录选择检查", fence("text", 'omp-web/\n├── app/routes/session.tsx\n├── components/DirectoryPicker.tsx\n├── docs/上游同步检查记录 v0.8.1.md\n├── tests/fixtures/session with spaces.json\n└── .github/workflows/ci.yml'), "检查中文、空格、隐藏目录、空目录和深层路径。选择文件时保留原始路径，搜索过滤后仍能回到父目录。"].join("\n\n") },
+      { user: "DirectoryPicker 需要覆盖哪些目录和文件名？", answer: ["## 目录选择检查", fence("text", 'juling-harness/\n├── app/routes/session.tsx\n├── components/DirectoryPicker.tsx\n├── docs/上游同步检查记录 v0.8.1.md\n├── tests/fixtures/session with spaces.json\n└── .github/workflows/ci.yml'), "检查中文、空格、隐藏目录、空目录和深层路径。选择文件时保留原始路径，搜索过滤后仍能回到父目录。"].join("\n\n") },
     ] : [
-      { user: "Which folders and filename patterns should DirectoryPicker cover?", answer: ["## Directory Picker Checklist", fence("text", 'omp-web/\n├── app/routes/session.tsx\n├── components/DirectoryPicker.tsx\n├── docs/upstream sync notes v0.8.1.md\n├── tests/fixtures/session with spaces.json\n└── .github/workflows/ci.yml'), "Verify UTF-8 characters, spaces, hidden folders, empty directories, and deep nesting. Preserve verbatim paths on selection and let clearing filters return to parent folders."].join("\n\n") },
+      { user: "Which folders and filename patterns should DirectoryPicker cover?", answer: ["## Directory Picker Checklist", fence("text", 'juling-harness/\n├── app/routes/session.tsx\n├── components/DirectoryPicker.tsx\n├── docs/upstream sync notes v0.8.1.md\n├── tests/fixtures/session with spaces.json\n└── .github/workflows/ci.yml'), "Verify UTF-8 characters, spaces, hidden folders, empty directories, and deep nesting. Preserve verbatim paths on selection and let clearing filters return to parent folders."].join("\n\n") },
     ]),
     t9: conversation("pagination", zh ? [
       { user: "会话分页有哪些容易漏掉的情况？", answer: "需要覆盖三种情况：首次打开短会话、向上加载长会话、加载过程中切换到另一场会话。\n\n| 操作 | 预期 |\n| --- | --- |\n| 向上加载 | 当前段落留在原位置 |\n| 切换会话 | 不混入上一场的工具结果 |\n| 到达最早记录 | 显示结束状态 |\n\n- [x] 连续加载两页\n- [x] 同时收到新消息\n- [ ] 窄列调整后恢复滚动位置" },

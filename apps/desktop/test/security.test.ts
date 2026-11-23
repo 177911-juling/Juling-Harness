@@ -554,8 +554,9 @@ test("rendererCspFor keeps packaged CSP strict and permits Vite refresh only in 
   assert.match(packaged, /connect-src 'self' omp-artifact: omp-file:;/u);
   assert.equal(packaged.includes("localhost"), false);
   // Loopback stays closed for code and data in packaged builds. The one
-  // deliberate exception is the statistics frame, pinned to the single port
-  // the local `omp stats` dashboard binds — never a wildcard.
+  // deliberate exception is the statistics frame, pinned to the fixed ports
+  // the local `omp stats` dashboard may bind (3847 plus the adapter's
+  // 3848-3852 fallback) — never a wildcard.
   for (const directive of ["script-src", "connect-src", "img-src", "media-src", "frame-ancestors"]) {
     const value = packaged.split(";").map(part => part.trim()).find(part => part.startsWith(directive)) ?? "";
     assert.equal(value.includes("127.0.0.1"), false, `${directive} must not reach loopback`);
@@ -564,7 +565,7 @@ test("rendererCspFor keeps packaged CSP strict and permits Vite refresh only in 
   // `'self'` keeps the same-origin graphic-preview frame: any source listed in
   // `frame-src` replaces the `default-src` fallback, so omitting it would blank
   // the X3D preview as well as the dashboard.
-  assert.equal(frameSrc, "frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847");
+  assert.equal(frameSrc, "frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847 http://127.0.0.1:3848 http://127.0.0.1:3849 http://127.0.0.1:3850 http://127.0.0.1:3851 http://127.0.0.1:3852");
   assert.equal(packaged.includes("127.0.0.1:*"), false, "no wildcard loopback port");
   const dev = rendererCspFor({ kind: "url", url: "http://127.0.0.1:5173" });
   assert.match(dev, /script-src 'self' 'unsafe-inline'/u);

@@ -34,14 +34,15 @@ export const RENDERER_CSP =
   "object-src 'none'; " +
   "base-uri 'self'; " +
   "form-action 'self'; " +
-  // The statistics page embeds the native `omp stats` dashboard. That server
-  // only ever binds 127.0.0.1:3847 (the adapter probes and spawns that exact
-  // endpoint), so the frame is pinned to one origin: no wildcard port, no
-  // loopback for scripts, connections, images or media. `'self'` stays listed
-  // because naming any source in `frame-src` replaces the `default-src`
-  // fallback. Packaged graphics use their own read-only origin so the opaque
-  // iframe can import modules without allowing file: access or same-origin.
-  "frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847; " +
+  // The statistics page embeds the native `omp stats` dashboard. The adapter
+  // probes 3847 first and falls back to 3848-3852 when another product (e.g.
+  // upstream OMP Studio) holds the default port, so the frame allows exactly
+  // that loopback port range: no wildcard port, no loopback for scripts,
+  // connections, images or media. `'self'` stays listed because naming any
+  // source in `frame-src` replaces the `default-src` fallback. Packaged
+  // graphics use their own read-only origin so the opaque iframe can import
+  // modules without allowing file: access or same-origin.
+  "frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847 http://127.0.0.1:3848 http://127.0.0.1:3849 http://127.0.0.1:3850 http://127.0.0.1:3851 http://127.0.0.1:3852; " +
   "frame-ancestors 'none'";
 
 /** Development-only policy required by Vite's React Refresh preamble. */

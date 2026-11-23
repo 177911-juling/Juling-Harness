@@ -258,7 +258,7 @@ export function statsPreviewData(zh: boolean): StatsPreviewData {
       columns: [["项目", "Project"], ["会话", "Sessions"], ["请求", "Requests"], ["Token", "Tokens"]],
       rows: [
         ["juling-harness", "18", "9,140", "2.1B"],
-        ["omp-web", "12", "3,260", "412M"],
+        ["juling-web", "12", "3,260", "412M"],
         ["docs-site", "4", "801", "88M"],
       ],
     },

@@ -37,7 +37,7 @@ export function getNativeToolGallery(zh = isZh()): readonly { readonly [key: str
     },
     {
       kind: "bash", name: "Bash", target: "npm run typecheck", status: "done", dur: "11.2s",
-      cmd: "npm run typecheck", cwd: demoPath("omp-web"),
+      cmd: "npm run typecheck", cwd: demoPath("juling-harness"),
       output: [["> tsc --noEmit", "dim"], ["", ""], ["0 errors, 0 warnings", "ok"]], exit: 0,
       hasExecutionTrace: true,
       meta: { minimized: { filter: "tsc", inputBytes: 18240, outputBytes: 94, artifactId: "preview-typecheck-output" } },
@@ -82,8 +82,8 @@ export function getNativeToolGallery(zh = isZh()): readonly { readonly [key: str
       answer: zh ? "修复它" : "Fix it",
     },
     {
-      kind: "debug", name: "Debug", target: "launch · omp-web", status: "done", dur: "3.4s",
-      action: "launch", program: "bin/omp-web.js",
+      kind: "debug", name: "Debug", target: "launch · juling-harness", status: "done", dur: "3.4s",
+      action: "launch", program: "bin/juling-harness.js",
       snapshot: "paused at MermaidBlock.tsx:147",
       output: ["Debugger attached", "Breakpoint hit: TS2322 site"],
     },
@@ -115,7 +115,7 @@ export function getNativeToolGallery(zh = isZh()): readonly { readonly [key: str
     },
     {
       kind: "browser", name: "Browser", target: "run · waitForSelector", status: "done", dur: "1.9s",
-      action: "run", tab: "omp-web", nativeWindowIds: ["w17"], url: "http://127.0.0.1:30141",
+      action: "run", tab: "juling-harness", nativeWindowIds: ["w17"], url: "http://127.0.0.1:30141",
       code: "await page.waitForSelector(\".mermaid\")",
       output: "ok · 1 node",
     },
@@ -222,11 +222,11 @@ export function getNativeToolGallery(zh = isZh()): readonly { readonly [key: str
     },
     {
       kind: "retain", name: "Retain", status: "done", dur: "0.3s",
-      stored: 2, items: zh ? ["omp-web 会话目录是 ~/.omp/agent/sessions/", "代码主题走 useCodeTheme"] : ["omp-web session dir is ~/.omp/agent/sessions/", "Code theme uses useCodeTheme"],
+      stored: 2, items: zh ? ["juling-harness 会话目录是 ~/.omp/agent/sessions/", "代码主题走 useCodeTheme"] : ["juling-harness session dir is ~/.omp/agent/sessions/", "Code theme uses useCodeTheme"],
     },
     {
-      kind: "recall", name: "Recall", target: zh ? "omp-web 路径适配" : "omp-web path adaptation", status: "done", dur: "0.4s",
-      query: zh ? "omp-web 路径适配" : "omp-web path adaptation", count: 1,
+      kind: "recall", name: "Recall", target: zh ? "juling-harness 路径适配" : "juling-harness path adaptation", status: "done", dur: "0.4s",
+      query: zh ? "juling-harness 路径适配" : "juling-harness path adaptation", count: 1,
       excerpts: [zh ? "会话、models.json、config.yml 都在 ~/.omp/agent/ 下，不要写回 pi-web 路径。" : "Sessions, models.json, and config.yml live under ~/.omp/agent/; do not write back pi-web paths."],
     },
     {
@@ -261,7 +261,7 @@ export function getNativeToolGallery(zh = isZh()): readonly { readonly [key: str
     },
     {
       kind: "generate_image", name: "GenerateImage", target: zh ? "graft 演进链示意" : "Graft history diagram", status: "done", dur: "5.1s",
-      subject: zh ? "git replace --graft 把 omp-web 接到 pi-web v0.8.0" : "Connect omp-web onto pi-web v0.8.0 via git replace --graft",
+      subject: zh ? "git replace --graft 把 juling-harness 接到 pi-web v0.8.0" : "Connect juling-harness onto pi-web v0.8.0 via git replace --graft",
       images: 1, output: "image attached · 1024×576",
     },
     {

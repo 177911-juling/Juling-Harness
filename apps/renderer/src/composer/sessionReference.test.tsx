@@ -203,7 +203,7 @@ it("keeps selected preview messages through language switching and shows saved m
   fireEvent.click(screen.getByRole("menuitem", { name: "复制会话 ID" }));
   await screen.findByText("已复制会话 ID");
   paste(screen.getByRole("textbox"), sessionId);
-  fireEvent.click(screen.getByRole("button", { name: "跟踪上游 pi-web 更新到 omp-web" }));
+  fireEvent.click(screen.getByRole("button", { name: "跟踪上游 pi-web 更新到 juling-harness" }));
   const check = await screen.findByRole("checkbox", { name: "附带第 1 条消息" });
   fireEvent.click(check);
   rerender(renderView("en"));

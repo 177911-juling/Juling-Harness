@@ -667,6 +667,7 @@ export const ja: LocaleDictionary = {
     "docs": "ドキュメント",
     "newChat": "新しいチャット",
     "toggleSidebar": "サイドバーの表示を切り替え",
+    "toggleRail": "メインナビゲーションの表示を切り替え",
     "skillsAndPlugins": "Skills とプラグイン",
     "bottomPanel": "下パネル",
     "closeMenuOrPanel": "メニューまたはパネルを閉じる",

@@ -7,6 +7,7 @@
   overflow: auto;
   background: var(--surface);
   color: var(--text);
+  border-radius: var(--r-8);
   font-family: var(--font-ui);
 }
 
@@ -59,16 +60,18 @@
 .sp-main h1 { margin: 0; font-size: var(--fs-18); font-weight: var(--fw-semibold); }
 .sp-lead { margin: var(--sp-4) 0 var(--sp-16); color: var(--text-3); font-size: var(--fs-12); }
 
+/* 统计数据块各自成卡：分隔线网格读起来像一张方角表，右侧混杂空网格时更像
+   一个没画完的方框。改成独立圆角卡片，与页面其余卡片同一套边角。 */
 .sp-kpis {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  border: 1px solid var(--border); border-radius: var(--r-8); overflow: hidden;
+  gap: var(--sp-8);
 }
 .sp-kpis.secondary { margin-top: var(--sp-12); }
 .sp-kpi {
   display: flex; flex-direction: column; gap: 2px;
   padding: var(--sp-12) var(--sp-14);
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
   background: var(--surface);
 }
 .sp-kpi-label { font-size: var(--fs-11); color: var(--text-3); }

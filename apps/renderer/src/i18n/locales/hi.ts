@@ -667,6 +667,7 @@ export const hi: LocaleDictionary = {
     "docs": "दस्तावेज़",
     "newChat": "नई चैट",
     "toggleSidebar": "साइडबार टॉगल करें",
+    "toggleRail": "मुख्य नेविगेशन टॉगल करें",
     "skillsAndPlugins": "Skills और Plugins",
     "bottomPanel": "निचला पैनल",
     "closeMenuOrPanel": "मेनू या पैनल बंद करें",

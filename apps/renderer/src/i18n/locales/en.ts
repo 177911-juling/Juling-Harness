@@ -435,6 +435,7 @@ export const en: LocaleDictionary = {
     "docs": "Documentation",
     "newChat": "New Chat",
     "toggleSidebar": "Toggle Sidebar",
+    "toggleRail": "Toggle Primary Navigation",
     "skillsAndPlugins": "Skills & Plugins",
     "bottomPanel": "Bottom Panel",
     "closeMenuOrPanel": "Close Menu or Panel",

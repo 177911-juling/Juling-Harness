@@ -195,13 +195,13 @@ export type PreviewSideAgent = {
 export function getPreviewProjects(zh = isZh()): PreviewProject[] {
   return [
     {
-      id: "p1", name: "omp-web", path: demoPath("omp-web"),
+      id: "p1", name: "juling-harness", path: demoPath("juling-harness"),
       branch: "main", worktree: null, dirty: 3, insertions: 214, deletions: 58, running: true,
       attention: true, preview: "running", pinned: true,
       threads: [
         { id: "t0", title: zh ? "新建对话（空白）" : "New chat (empty)", time: "now", msgs: 0, status: "idle" },
         { id: "t15", title: zh ? "内容图鉴：全部工具卡与正文格式" : "Content gallery: all tool cards & formats", time: "now", msgs: 58, status: "idle", pinned: true },
-        { id: "t1", title: zh ? "跟踪上游 pi-web 更新到 omp-web" : "Track upstream pi-web updates to omp-web", time: "32m ago", msgs: 45, status: "running", pinned: true, hasSub: true, unread: 3 },
+        { id: "t1", title: zh ? "跟踪上游 pi-web 更新到 juling-harness" : "Track upstream pi-web updates to juling-harness", time: "32m ago", msgs: 45, status: "running", pinned: true, hasSub: true, unread: 3 },
         { id: "t2", title: "Audit and fix OSS repository issues", time: "2h ago", msgs: 12, status: "idle", wait: "ask", unread: 0 },
         { id: "t3", title: zh ? "Mermaid 全屏缩放计划与交互确认" : "Mermaid fullscreen zoom plan & confirmation", time: "4d ago", msgs: 16, status: "idle", wait: "plan", hasSub: true, unread: 1 },
         { id: "t4", title: zh ? "修复 Git Bash 路径未找到问题" : "Fix Git Bash path not found issue", time: "4d ago", msgs: 8, status: "idle", wait: "approval" },
@@ -223,7 +223,7 @@ export function getPreviewProjects(zh = isZh()): PreviewProject[] {
       ],
     },
     {
-      id: "p3", name: "omp-web (feat/mermaid)", path: demoPath("omp-web", ".worktrees", "mermaid"),
+      id: "p3", name: "juling-harness (feat/mermaid)", path: demoPath("juling-harness", ".worktrees", "mermaid"),
       branch: "feat/mermaid-zoom", worktree: "mermaid", dirty: 7, insertions: 1263, deletions: 341, running: true,
       attention: false, preview: "building",
       threads: [
@@ -241,7 +241,7 @@ export function previewSessionId(threadId: string): string {
 }
 
 /**
- * 排队栏演示（p1 · t1「跟踪上游 pi-web 更新到 juling-web」流式期间）：
+ * 排队栏演示（p1 · t1「跟踪上游 pi-web 更新到 juling-harness」流式期间）：
  * 流式时按 Enter 入队的两条本地消息，预览模式下覆盖真实排队状态展示。
  */
 export function getPreviewQueuedMessages(zh = isZh()): readonly { id: number; text: string }[] {
@@ -281,7 +281,7 @@ export function getPreviewFileTree(zh = isZh()): PreviewFileNode[] {
         { type: "file", name: "home.tsx" },
       ] },
     ] },
-    { type: "dir", name: "bin", children: [{ type: "file", name: "omp-web.js" }] },
+    { type: "dir", name: "bin", children: [{ type: "file", name: "juling-harness.js" }] },
     { type: "dir", name: "components", open: true, children: [
       { type: "file", name: "DirectoryPicker.tsx", status: "added", writing: true },
       { type: "file", name: "MermaidBlock.tsx", status: "modified", turn: true, diagnostic: "error" },
@@ -596,12 +596,12 @@ export const PREVIEW_PV_LOGS = getPreviewPvLogs();
 export function getPreviewHistory(zh = isZh()): PreviewHistoryRow[] {
   const c = (usd: string) => (zh ? `¥ ${usd}` : `$ ${usd}`);
   return [
-    { id: "ph1", threadId: "t1", title: zh ? "跟踪上游 pi-web 更新到 omp-web" : "Track upstream pi-web updates to omp-web", project: "omp-web", branch: "main", time: "32m ago", model: "gemini-3.6-flash", status: "running", files: 4, cost: c("4.62"), forkedFrom: null, checkpoints: 12, pinned: true },
-    { id: "ph2", threadId: "t7", title: zh ? "Mermaid 渲染优化与全屏缩放拖拽" : "Mermaid rendering optimization and fullscreen zoom & pan", project: "omp-web (feat/mermaid)", branch: "feat/mermaid-zoom", time: "18m ago", model: "gemini-3.6-flash", status: "running", files: 7, cost: c("2.31"), forkedFrom: zh ? "跟踪上游 pi-web 更新…" : "Track upstream pi-web updates…", checkpoints: 5, pinned: false },
-    { id: "ph3", threadId: "t2", title: "Audit and fix OSS repository issues", project: "omp-web", branch: "main", time: "2h ago", model: "claude-sonnet-4.5", status: "completed", files: 9, cost: c("8.14"), forkedFrom: null, checkpoints: 3, pinned: false },
-    { id: "ph4", title: zh ? "选择 gemini3.6flash 随意发送消息后报错…" : "Error after selecting gemini3.6flash and sending a test message…", project: "omp-web", branch: "main", time: "4d ago", model: "gemini-3.6-flash", status: "failed", files: 0, cost: c("0.42"), forkedFrom: null, checkpoints: 0, pinned: false },
-    { id: "ph5", threadId: "t4", title: zh ? "修复 Git Bash 路径未找到问题" : "Fix Git Bash path not found issue", project: "omp-web", branch: "main", time: "4d ago", model: "gpt-5.2-codex", status: "completed", files: 2, cost: c("1.08"), forkedFrom: null, checkpoints: 2, pinned: false },
-    { id: "ph6", threadId: "t5", title: zh ? "重构 session 存储层 (session)" : "Refactor session storage layer (session)", project: "omp-web", branch: "refactor/session-db", time: "6d ago", model: "claude-sonnet-4.5", status: "archived", files: 21, cost: c("22.90"), forkedFrom: null, checkpoints: 9, pinned: false },
+    { id: "ph1", threadId: "t1", title: zh ? "跟踪上游 pi-web 更新到 juling-harness" : "Track upstream pi-web updates to juling-harness", project: "juling-harness", branch: "main", time: "32m ago", model: "gemini-3.6-flash", status: "running", files: 4, cost: c("4.62"), forkedFrom: null, checkpoints: 12, pinned: true },
+    { id: "ph2", threadId: "t7", title: zh ? "Mermaid 渲染优化与全屏缩放拖拽" : "Mermaid rendering optimization and fullscreen zoom & pan", project: "juling-harness (feat/mermaid)", branch: "feat/mermaid-zoom", time: "18m ago", model: "gemini-3.6-flash", status: "running", files: 7, cost: c("2.31"), forkedFrom: zh ? "跟踪上游 pi-web 更新…" : "Track upstream pi-web updates…", checkpoints: 5, pinned: false },
+    { id: "ph3", threadId: "t2", title: "Audit and fix OSS repository issues", project: "juling-harness", branch: "main", time: "2h ago", model: "claude-sonnet-4.5", status: "completed", files: 9, cost: c("8.14"), forkedFrom: null, checkpoints: 3, pinned: false },
+    { id: "ph4", title: zh ? "选择 gemini3.6flash 随意发送消息后报错…" : "Error after selecting gemini3.6flash and sending a test message…", project: "juling-harness", branch: "main", time: "4d ago", model: "gemini-3.6-flash", status: "failed", files: 0, cost: c("0.42"), forkedFrom: null, checkpoints: 0, pinned: false },
+    { id: "ph5", threadId: "t4", title: zh ? "修复 Git Bash 路径未找到问题" : "Fix Git Bash path not found issue", project: "juling-harness", branch: "main", time: "4d ago", model: "gpt-5.2-codex", status: "completed", files: 2, cost: c("1.08"), forkedFrom: null, checkpoints: 2, pinned: false },
+    { id: "ph6", threadId: "t5", title: zh ? "重构 session 存储层 (session)" : "Refactor session storage layer (session)", project: "juling-harness", branch: "refactor/session-db", time: "6d ago", model: "claude-sonnet-4.5", status: "archived", files: 21, cost: c("22.90"), forkedFrom: null, checkpoints: 9, pinned: false },
     { id: "ph7", title: zh ? "对比 v0.8.0 → v0.8.1 变更清单" : "Compare v0.8.0 → v0.8.1 changelog", project: "pi-web (upstream)", branch: "v0.8.1", time: "7d ago", model: "gpt-5.2-codex", status: "archived", files: 3, cost: c("1.40"), forkedFrom: null, checkpoints: 4, pinned: false },
   ];
 }
@@ -646,16 +646,16 @@ export const PREVIEW_TIME_TRAVEL: PreviewTtNode[] = getPreviewTimeTravel();
 
 export function getPreviewActivity(zh = isZh()): PreviewActivity[] {
   return zh ? [
-    { icon: "bot", color: "blue", text: "omp-web · 主 Agent 正在执行 npm run typecheck", time: "刚刚" },
-    { icon: "diff", color: "purple", text: "omp-web · docs/UPSTREAM-SYNC.md 已写入（+214）", time: "4m ago" },
-    { icon: "globe", color: "green", text: "omp-web · Preview 热更新完成（127.0.0.1:30141）", time: "6m ago" },
-    { icon: "alert", color: "amber", text: "omp-web (feat/mermaid) · preview 子 Agent 等待用户确认", time: "12m ago" },
+    { icon: "bot", color: "blue", text: "juling-harness · 主 Agent 正在执行 npm run typecheck", time: "刚刚" },
+    { icon: "diff", color: "purple", text: "juling-harness · docs/UPSTREAM-SYNC.md 已写入（+214）", time: "4m ago" },
+    { icon: "globe", color: "green", text: "juling-harness · Preview 热更新完成（127.0.0.1:30141）", time: "6m ago" },
+    { icon: "alert", color: "amber", text: "juling-harness (feat/mermaid) · preview 子 Agent 等待用户确认", time: "12m ago" },
     { icon: "check", color: "green", text: "pi-web · 「对比 v0.8.0 → v0.8.1 变更清单」已完成", time: "1d ago" },
   ] : [
-    { icon: "bot", color: "blue", text: "omp-web · Main Agent is running npm run typecheck", time: "Just now" },
-    { icon: "diff", color: "purple", text: "omp-web · docs/UPSTREAM-SYNC.md written (+214)", time: "4m ago" },
-    { icon: "globe", color: "green", text: "omp-web · Preview HMR finished (127.0.0.1:30141)", time: "6m ago" },
-    { icon: "alert", color: "amber", text: "omp-web (feat/mermaid) · preview subagent waiting for user confirmation", time: "12m ago" },
+    { icon: "bot", color: "blue", text: "juling-harness · Main Agent is running npm run typecheck", time: "Just now" },
+    { icon: "diff", color: "purple", text: "juling-harness · docs/UPSTREAM-SYNC.md written (+214)", time: "4m ago" },
+    { icon: "globe", color: "green", text: "juling-harness · Preview HMR finished (127.0.0.1:30141)", time: "6m ago" },
+    { icon: "alert", color: "amber", text: "juling-harness (feat/mermaid) · preview subagent waiting for user confirmation", time: "12m ago" },
     { icon: "check", color: "green", text: 'pi-web · "Compare v0.8.0 → v0.8.1 changelog" completed', time: "1d ago" },
   ];
 }

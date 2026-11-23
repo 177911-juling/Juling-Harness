@@ -667,6 +667,7 @@ export const ru: LocaleDictionary = {
     "docs": "Документация",
     "newChat": "Новый чат",
     "toggleSidebar": "Показать или скрыть боковую панель",
+    "toggleRail": "Показать или скрыть основную навигацию",
     "skillsAndPlugins": "Skills и плагины",
     "bottomPanel": "Нижняя панель",
     "closeMenuOrPanel": "Закрыть меню или панель",

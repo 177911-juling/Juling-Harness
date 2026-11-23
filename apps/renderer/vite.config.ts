@@ -12,7 +12,7 @@ import react from "@vitejs/plugin-react";
 // any source there replaces the `default-src` fallback.
 // Vite dev still needs HMR.
 const PACKAGED_RENDERER_CSP =
-  "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: omp-artifact: omp-file:; media-src 'self' blob: omp-artifact: omp-file:; font-src 'self' data:; connect-src 'self' omp-artifact: omp-file:; frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847; object-src 'none'; base-uri 'self'; form-action 'self'";
+  "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: omp-artifact: omp-file:; media-src 'self' blob: omp-artifact: omp-file:; font-src 'self' data:; connect-src 'self' omp-artifact: omp-file:; frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847 http://127.0.0.1:3848 http://127.0.0.1:3849 http://127.0.0.1:3850 http://127.0.0.1:3851 http://127.0.0.1:3852; object-src 'none'; base-uri 'self'; form-action 'self'";
 
 function packagedCspPlugin() {
   return {
