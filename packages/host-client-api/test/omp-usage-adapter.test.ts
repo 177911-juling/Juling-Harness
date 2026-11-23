@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 
-import { createOmpUsageService } from "../src/omp-usage-adapter.js";
+import { createOmpUsageService, isOwnDashboardHtml } from "../src/omp-usage-adapter.js";
 
 const NOW = new Date(2026, 7, 14, 15, 0, 0).getTime();
 
@@ -72,7 +72,7 @@ describe("createOmpUsageService", () => {
         let execCalls = 0;
         const service = createOmpUsageService({
           statsDbPath: dbPath,
-          locateOmp: async () => "C:\\tools\\omp.exe",
+          locateOmp: async () => "C:\\tools\\juling.exe",
           exec: async () => {
             execCalls += 1;
             return { stdout: "", stderr: "", code: 0 };
@@ -110,7 +110,7 @@ describe("createOmpUsageService", () => {
     const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     const opened: string[] = [];
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\\tools\\omp.exe",
+      locateOmp: async () => "C:\\tools\\juling.exe",
       spawnDashboard: (exe, options) => {
         spawned.push({ exe, ...(options === undefined ? {} : { options }) });
       },
@@ -118,13 +118,14 @@ describe("createOmpUsageService", () => {
         opened.push(url);
       },
       probeDashboard: async () => false,
+      probePortOccupied: async () => false,
       now: () => NOW,
     });
     const result = await service.openDashboard();
     assert.equal(result.applied, true);
     // The explicit browser request keeps `omp stats` opening one; only the
     // embedded dashboard start suppresses it.
-    assert.deepEqual(spawned, [{ exe: "C:\\tools\\omp.exe", options: { open: true } }]);
+    assert.deepEqual(spawned, [{ exe: "C:\\tools\\juling.exe", options: { open: true } }]);
     assert.deepEqual(opened, []);
     assert.equal(JSON.stringify(result).includes("C:\\\\tools"), false);
   });
@@ -133,7 +134,7 @@ describe("createOmpUsageService", () => {
     const spawned: string[] = [];
     const opened: string[] = [];
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\\tools\\omp.exe",
+      locateOmp: async () => "C:\\tools\\juling.exe",
       spawnDashboard: (exe) => {
         spawned.push(exe);
       },
@@ -141,6 +142,7 @@ describe("createOmpUsageService", () => {
         opened.push(url);
       },
       probeDashboard: async () => true,
+      probePortOccupied: async () => false,
       now: () => NOW,
     });
     const result = await service.openDashboard();
@@ -155,7 +157,7 @@ describe("createOmpUsageService", () => {
     const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     let probes = 0;
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\tools\omp.exe",
+      locateOmp: async () => "C:\tools\juling.exe",
       spawnDashboard: (exe, options) => {
         spawned.push({ exe, ...(options === undefined ? {} : { options }) });
       },
@@ -163,6 +165,7 @@ describe("createOmpUsageService", () => {
         probes += 1;
         return true;
       },
+      probePortOccupied: async () => false,
       now: () => NOW,
     });
     const result = await service.dashboard?.();
@@ -177,12 +180,13 @@ describe("createOmpUsageService", () => {
     const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     let live = false;
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\tools\omp.exe",
+      locateOmp: async () => "C:\tools\juling.exe",
       spawnDashboard: (exe, options) => {
         spawned.push({ exe, ...(options === undefined ? {} : { options }) });
         live = true;
       },
       probeDashboard: async () => live,
+      probePortOccupied: async () => false,
       delay: async () => undefined,
       now: (() => {
         let t = NOW;
@@ -194,7 +198,7 @@ describe("createOmpUsageService", () => {
     assert.equal(a?.available, true);
     assert.equal(b?.available, true);
     // The embedded start must not also open the panel in the system browser.
-    assert.deepEqual(spawned, [{ exe: "C:\tools\omp.exe" }], "two mounts must not race two servers onto one port");
+    assert.deepEqual(spawned, [{ exe: "C:\tools\juling.exe" }], "two mounts must not race two servers onto one port");
     const cached = await service.dashboard?.();
     assert.equal(cached?.url, "http://127.0.0.1:3847/#/overview?range=all");
     assert.equal(spawned.length, 1, "a resolved endpoint is reused");
@@ -204,6 +208,7 @@ describe("createOmpUsageService", () => {
     const service = createOmpUsageService({
       locateOmp: async () => undefined,
       probeDashboard: async () => false,
+      probePortOccupied: async () => false,
       now: () => NOW,
     });
     const result = await service.dashboard?.();
@@ -215,9 +220,10 @@ describe("createOmpUsageService", () => {
   test("dashboard gives up after the startup deadline instead of hanging the page", async () => {
     let clock = NOW;
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\tools\omp.exe",
+      locateOmp: async () => "C:\tools\juling.exe",
       spawnDashboard: () => undefined,
       probeDashboard: async () => false,
+      probePortOccupied: async () => false,
       delay: async () => {
         clock += 1_000;
       },
@@ -233,11 +239,12 @@ describe("createOmpUsageService", () => {
     let live = true;
     const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     const service = createOmpUsageService({
-      locateOmp: async () => "C:\tools\omp.exe",
+      locateOmp: async () => "C:\tools\juling.exe",
       spawnDashboard: (exe, options) => {
         spawned.push({ exe, ...(options === undefined ? {} : { options }) });
       },
       probeDashboard: async () => live,
+      probePortOccupied: async () => false,
       delay: async () => undefined,
       now: (() => {
         let t = NOW;
@@ -261,7 +268,7 @@ describe("createOmpUsageService", () => {
     const service = createOmpUsageService({
       locateOmp: async () => {
         locates += 1;
-        return "C:\tools\omp.exe";
+        return "C:\tools\juling.exe";
       },
       exec: async () => {
         execs += 1;
@@ -298,7 +305,7 @@ describe("createOmpUsageService", () => {
     const service = createOmpUsageService({
       locateOmp: async () => {
         locates += 1;
-        return "C:\tools\omp.exe";
+        return "C:\tools\juling.exe";
       },
       exec: async () => {
         execs += 1;
@@ -315,5 +322,91 @@ describe("createOmpUsageService", () => {
     await Promise.all([first, second]);
     assert.equal(execs, 1, "one omp stats spawn for overlapping polls");
     assert.equal(locates, 1, "the in-flight poll answers without another Runtime lookup");
+  });
+});
+
+describe("dashboard page identity", () => {
+  test("only the Harness dashboard markup counts as ours", () => {
+    assert.equal(isOwnDashboardHtml("<title>Juling Harness · Stats</title>"), true);
+    assert.equal(isOwnDashboardHtml("<title>omp stats</title>"), false);
+  });
+});
+
+describe("stats dashboard identity and port fallback", () => {
+  test("a foreign dashboard on the default port is skipped for the next free one", async () => {
+    const spawned: Array<{ port?: number }> = [];
+    let own: number | undefined;
+    const service = createOmpUsageService({
+      locateOmp: async () => "C:\\tools\\juling.exe",
+      spawnDashboard: (_exe, options) => {
+        spawned.push(options ?? {});
+        own = options?.port ?? 3847;
+      },
+      probeDashboard: async (port) => port === own,
+      probePortOccupied: async (port) => port === 3847,
+      delay: async () => undefined,
+      now: (() => {
+        let t = NOW;
+        return () => (t += 10);
+      })(),
+      dashboardStartTimeoutMs: 5_000,
+    });
+    const result = await service.dashboard?.();
+    assert.ok(result);
+    assert.equal(result.available, true);
+    assert.equal(result.url, "http://127.0.0.1:3848/#/overview?range=all");
+    assert.deepEqual(spawned, [{ port: 3848 }], "the occupied default port must not be reused");
+  });
+
+  test("a Harness dashboard on a fallback port is reused without spawning", async () => {
+    const spawned: number[] = [];
+    const service = createOmpUsageService({
+      locateOmp: async () => "C:\\tools\\juling.exe",
+      spawnDashboard: (_exe, options) => {
+        spawned.push(options?.port ?? 3847);
+      },
+      probeDashboard: async (port) => port === 3849,
+      probePortOccupied: async () => false,
+      now: () => NOW,
+    });
+    const result = await service.dashboard?.();
+    assert.ok(result);
+    assert.equal(result.available, true);
+    assert.equal(result.url, "http://127.0.0.1:3849/#/overview?range=all");
+    assert.deepEqual(spawned, [], "a live Harness panel is reused regardless of port");
+  });
+
+  test("openDashboard opens the live fallback panel instead of the default port", async () => {
+    const opened: string[] = [];
+    const spawned: number[] = [];
+    const service = createOmpUsageService({
+      locateOmp: async () => "C:\\tools\\juling.exe",
+      spawnDashboard: (_exe, options) => {
+        spawned.push(options?.port ?? 3847);
+      },
+      openUrl: async (url) => {
+        opened.push(url);
+      },
+      probeDashboard: async (port) => port === 3850,
+      probePortOccupied: async () => false,
+      now: () => NOW,
+    });
+    await service.openDashboard();
+    assert.deepEqual(opened, ["http://127.0.0.1:3850/"]);
+    assert.deepEqual(spawned, []);
+  });
+
+  test("every dashboard port being taken reports an honest reason", async () => {
+    const service = createOmpUsageService({
+      locateOmp: async () => "C:\\tools\\juling.exe",
+      spawnDashboard: () => undefined,
+      probeDashboard: async () => false,
+      probePortOccupied: async () => true,
+      now: () => NOW,
+    });
+    const result = await service.dashboard?.();
+    assert.ok(result);
+    assert.equal(result.available, false);
+    assert.match(result.reason ?? "", /端口都被占用|ports are taken|stats dashboard port/i);
   });
 });

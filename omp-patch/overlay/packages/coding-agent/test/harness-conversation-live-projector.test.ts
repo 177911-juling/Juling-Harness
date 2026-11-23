@@ -166,11 +166,10 @@ test("a run that only background jobs can resume keeps its turn open into the re
 		projector.project({ type: "message_start", message: first });
 		projector.project({ type: "message_end", message: first });
 		projector.project({
-			type: "agent_end",
+			type: "agent_pause",
 			messages: [first],
-			isTerminal: false,
 			yielded: true,
-			awaitingAsyncWork: true,
+			awaiting: true,
 		});
 		expect(events.some(event => event.kind === "conversation.turn.completed")).toBe(false);
 		// The job result wakes the session: same logical turn, then a terminal end closes it.
@@ -620,6 +619,20 @@ describe("ConversationLiveProjector", () => {
 		expect(kinds(events)).toContain("conversation.turn.aborted");
 		expect(kinds(events)).not.toContain("conversation.turn.completed");
 		expect(events.some(event => event.kind === "conversation.message.delta" && event.delta === "lo")).toBe(false);
+		const note = {
+			role: "custom",
+			customType: "advisor",
+			display: true,
+			content: "Check before retrying.",
+			timestamp: 3,
+		} as const;
+		projector.project({ type: "message_start", message: note });
+		projector.project({ type: "message_end", message: note });
+		expect(events.at(-1)).toMatchObject({
+			kind: "conversation.message.completed",
+			turnId: "turn-1",
+			item: { role: "advisor", content: [{ type: "text", text: note.content }] },
+		});
 	});
 
 	test("provider error is carried on the completed message and strips the raw-http-request pointer", () => {
@@ -909,7 +922,7 @@ describe("ConversationLiveProjector", () => {
 		session.emit({ type: "agent_start" });
 		session.emit({ type: "message_start", message: first });
 		session.emit({ type: "message_end", message: first });
-		session.emit({ type: "agent_end", messages: [], isTerminal: false });
+		session.emit({ type: "agent_pause", messages: [], awaiting: false, yielded: false });
 		expect(events.some(event => event.kind === "conversation.turn.completed")).toBe(false);
 		session.emit({
 			type: "notice",

@@ -26,22 +26,36 @@ const execFileAsync = promisify(execFile);
 
 const OTHER_MODEL_ID = "其他";
 const TOP_MODEL_COUNT = 5;
+const DECISION_APIS = new Set([
+  "typesafe", "openrouter-decisions", "workers-ai-systemone", "openai-decisions",
+  "google-decisions", "liquid-systemone", "nace-systemone",
+]);
 const MODEL_ID_MAX = 64;
 const SYNC_THROTTLE_MS = 30_000;
 const SYNC_TIMEOUT_MS = 60_000;
 const YEAR_LOOKBACK_DAYS = 400;
 
-const DASHBOARD_URL = "http://127.0.0.1:3847/";
+/** Preferred dashboard port; upstream's default, shared with the OMP Studio build. */
+const DASHBOARD_PORT = 3847;
+/**
+ * Ports tried in order when the preferred one is held by another product. A
+ * machine that runs OMP Studio alongside Harness keeps `omp stats` on 3847, and
+ * that dashboard carries the same identity header while showing foreign data.
+ */
+const DASHBOARD_FALLBACK_PORTS: readonly number[] = [3848, 3849, 3850, 3851, 3852];
+const dashboardUrlOf = (port: number): string => `http://127.0.0.1:${port}/`;
 const DASHBOARD_PROBE_MS = 800;
 /**
  * Deep link the statistics page embeds. The native client routes on the URL
  * hash and defaults to `24h`, which shows an empty page for anyone who has not
  * run OMP today; `all` is the range that always has data in this profile.
  */
-const DASHBOARD_EMBED_URL = `${DASHBOARD_URL}#/overview?range=all`;
+const dashboardEmbedUrlOf = (port: number): string => `${dashboardUrlOf(port)}#/overview?range=all`;
 /** A cold dashboard parses session tails before it can answer, so poll past that. */
 const DASHBOARD_START_TIMEOUT_MS = 20_000;
 const DASHBOARD_POLL_MS = 250;
+/** Dashboard title the Harness fork ships; the identity check compares against it. */
+const DASHBOARD_OWN_TITLE_MARKER = "Juling Harness";
 
 const openOk = (): ConfigWriteResult => ({
   applied: true,
@@ -60,9 +74,12 @@ export interface OmpUsageAdapterOptions {
   readonly statsDbPath?: string;
   readonly locateOmp?: () => Promise<string | undefined>;
   readonly exec?: (exe: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
-  readonly spawnDashboard?: (exe: string, options?: { readonly open?: boolean }) => void;
+  readonly spawnDashboard?: (exe: string, options?: { readonly open?: boolean; readonly port?: number }) => void;
   readonly openUrl?: (url: string) => Promise<void>;
-  readonly probeDashboard?: () => Promise<boolean>;
+  /** `true` only when this port answers with the Harness dashboard, not a look-alike. */
+  readonly probeDashboard?: (port: number) => Promise<boolean>;
+  /** `true` when anything answers HTTP on the port; injected so tests stay offline. */
+  readonly probePortOccupied?: (port: number) => Promise<boolean>;
   readonly now?: () => number;
   readonly syncThrottleMs?: number;
   /** Injectable sleep so the startup poll runs instantly under test. */
@@ -168,8 +185,17 @@ export async function defaultLocateOmp(): Promise<string | undefined> {
  * canonical and pre-rebrand variable are set: runtimes that predate the
  * rebrand only read `OMP_STATS_NO_OPEN`.
  */
-function defaultSpawnDashboard(exe: string, options?: { readonly open?: boolean }): void {
-  const child = spawn(exe, ["stats"], {
+function defaultSpawnDashboard(
+  exe: string,
+  options?: { readonly open?: boolean; readonly port?: number },
+): void {
+  const args = ["stats"];
+  if (options?.port !== undefined && options.port !== DASHBOARD_PORT) {
+    // `juling stats` defaults to 3847; only pass the flag when we need another
+    // port because another dashboard already owns the default one.
+    args.push("--port", String(options.port));
+  }
+  const child = spawn(exe, args, {
     stdio: "ignore",
     windowsHide: true,
     ...(options?.open === true
@@ -181,18 +207,45 @@ function defaultSpawnDashboard(exe: string, options?: { readonly open?: boolean 
   child.unref();
 }
 
-async function defaultProbeDashboard(): Promise<boolean> {
+/** Whether the served dashboard page belongs to this fork. */
+export function isOwnDashboardHtml(html: string): boolean {
+  return html.includes(`<title>${DASHBOARD_OWN_TITLE_MARKER}`);
+}
+
+/**
+ * A live dashboard on this port must be *ours*. The identity header is shared
+ * with the upstream OMP Studio build, so a machine running both products would
+ * otherwise embed OMP Studio's panel — and its database — into this page.
+ */
+async function defaultProbeDashboard(port: number): Promise<boolean> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), DASHBOARD_PROBE_MS);
   try {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), DASHBOARD_PROBE_MS);
-    const response = await fetch("http://127.0.0.1:3847/api/stats/models", {
-      method: "GET",
-      signal: ac.signal,
-    });
-    clearTimeout(timer);
-    return response.ok && response.headers.get("x-omp-stats-dashboard") !== null;
+    const response = await fetch(dashboardUrlOf(port), { method: "GET", signal: ac.signal });
+    if (!response.ok || response.headers.get("x-omp-stats-dashboard") === null) return false;
+    return isOwnDashboardHtml(await response.text());
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Whether anything answers HTTP on this port, ours or not. Spawning onto an
+ * occupied port makes the dashboard fall back to an ephemeral one, which the
+ * statistics page cannot frame, so the caller picks a genuinely free port first.
+ */
+async function defaultProbePortOccupied(port: number): Promise<boolean> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), DASHBOARD_PROBE_MS);
+  try {
+    await fetch(dashboardUrlOf(port), { method: "GET", signal: ac.signal });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -262,11 +315,12 @@ async function readUsageDb(dbPath: string, nowMs: number): Promise<TokenUsageRea
     const todayStart = startOfLocalDay(nowMs);
     const yearStartDate = `${new Date(nowMs).getFullYear()}-01-01`;
 
+    const hasPurpose = db.prepare("PRAGMA table_info(messages)").all().some(column => column.name === "purpose");
     const dayRows = db
       .prepare(
         `SELECT timestamp AS timestamp, model AS model, total_tokens AS tokens
          FROM messages
-         WHERE timestamp >= ?`,
+         WHERE timestamp >= ?${hasPurpose ? " AND (purpose IS NULL OR purpose = 'discarded-turn')" : ""}`,
       )
       .all(cutoff) as Array<{ timestamp: number; model: string; tokens: number }>;
 
@@ -302,8 +356,31 @@ async function readUsageDb(dbPath: string, nowMs: number): Promise<TokenUsageRea
       .sort((left, right) => left[0].localeCompare(right[0]))
       .map(([date, totalTokens]) => ({ date, totalTokens }));
 
+    const sideChannels = hasPurpose ? db.prepare(
+      "SELECT purpose, api, provider, model, COUNT(*) AS requests, SUM(total_tokens) AS tokens FROM messages WHERE timestamp >= ? AND purpose IS NOT NULL AND purpose != 'discarded-turn' GROUP BY purpose, api, provider, model",
+    ).all(cutoff) : [];
+    const totals = new Map<string, NonNullable<TokenUsageReadModel["offTranscript"]>[number]>();
+    const decisions: NonNullable<TokenUsageReadModel["decisionModels"]>[number][] = [];
+    for (const row of sideChannels) {
+      const purpose = String(row.purpose);
+      const base = purpose.split(":")[0]!;
+      const kind = ["title", "title-fork", "title-drift"].includes(base) ? "title"
+        : ["job-caption", "job-widget", "task-completion-probe"].includes(base) ? "jobCaption"
+        : ["judge", "judge_batch"].includes(base) ? "judge"
+        : base === "cache-warm" ? "cacheWarming" : undefined;
+      const requests = Number(row.requests), tokens = Number(row.tokens);
+      if (kind) {
+        const previous = totals.get(kind);
+        totals.set(kind, { kind, requests: requests + (previous?.requests ?? 0), tokens: tokens + (previous?.tokens ?? 0) });
+      }
+      if (typeof row.api === "string" && DECISION_APIS.has(row.api)) {
+        decisions.push({ purpose: labelModel(purpose), provider: labelModel(String(row.provider)), model: labelModel(String(row.model)), requests, tokens });
+      }
+    }
     return {
       generatedAt: isoNow(nowMs),
+      offTranscript: [...totals.values()],
+      decisionModels: decisions.sort((a, b) => b.tokens - a.tokens).slice(0, 32),
       days,
       models: collapsed.models.map((id) => ({ id })),
       byModel: collapsed.byModel,
@@ -333,6 +410,7 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
   const spawnDashboard = options.spawnDashboard ?? defaultSpawnDashboard;
   const openUrl = options.openUrl;
   const probeDashboard = options.probeDashboard ?? defaultProbeDashboard;
+  const probeOccupied = options.probePortOccupied ?? defaultProbePortOccupied;
   const now = options.now ?? Date.now;
   const throttleMs = options.syncThrottleMs ?? SYNC_THROTTLE_MS;
   const delay = options.delay ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
@@ -342,18 +420,26 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
   let dashboardStarting: Promise<DashboardStart> | undefined;
 
   type DashboardStart = { readonly url: string } | { readonly reason: string };
+  const dashboardPorts = [DASHBOARD_PORT, ...DASHBOARD_FALLBACK_PORTS];
 
   /**
    * Resolve a dashboard endpoint, starting one when nothing answers. A page
    * mount and the homepage card can ask at the same time, so concurrent callers
    * share one spawn instead of racing two servers onto the same port.
+   *
+   * Ports are tried in order because 3847 belongs to the upstream product too:
+   * an OMP Studio dashboard there answers the shared identity header while
+   * serving a different database, so the probe also checks the title and moves
+   * to the next free port when it finds a foreign panel.
    */
   async function ensureDashboard(): Promise<DashboardStart> {
     // Always probe before answering: a panel that died after we first reached it
     // must not keep reporting "running" from a cached URL.
-    if (await probeDashboard()) {
-      dashboardUrl = DASHBOARD_EMBED_URL;
-      return { url: dashboardUrl };
+    for (const port of dashboardPorts) {
+      if (await probeDashboard(port)) {
+        dashboardUrl = dashboardEmbedUrlOf(port);
+        return { url: dashboardUrl };
+      }
     }
     dashboardUrl = undefined;
     if (dashboardStarting !== undefined) return dashboardStarting;
@@ -363,14 +449,23 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
         if (exe === undefined) {
           return { reason: "未找到 Juling Runtime，无法启动本机统计面板。" };
         }
-        spawnDashboard(exe);
+        // Pick the first port nobody is serving; an occupied one would make the
+        // freshly spawned server fall back to an ephemeral port we can't frame.
+        const freePort = (await Promise.all(dashboardPorts.map(async port => ({
+          port,
+          free: !(await probeOccupied(port)),
+        })))).find(entry => entry.free)?.port;
+        if (freePort === undefined) {
+          return { reason: hostText("本机统计面板端口都被占用，请关闭其他 Stats 服务后重试。", "Every stats dashboard port is taken; close the other Stats server and retry.") };
+        }
+        spawnDashboard(exe, freePort === DASHBOARD_PORT ? undefined : { port: freePort });
         const deadline = now() + startTimeoutMs;
         // The clock is the primary budget, but a stalled or non-advancing clock
         // must never spin this loop forever: bound the attempts as well.
         const maxPolls = Math.max(1, Math.ceil(startTimeoutMs / DASHBOARD_POLL_MS) + 4);
         for (let poll = 0; poll < maxPolls && now() < deadline; poll += 1) {
           await delay(DASHBOARD_POLL_MS);
-          if (await probeDashboard()) return { url: DASHBOARD_EMBED_URL };
+          if (await probeDashboard(freePort)) return { url: dashboardEmbedUrlOf(freePort) };
         }
         return { reason: hostText("本机统计面板未在预期时间内就绪，可稍后重试或在浏览器打开。", "The local stats dashboard did not become ready in time; retry shortly or open it in your browser.") };
       } catch {
@@ -465,18 +560,32 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
       if (exe === undefined) {
         throw { code: "UNAVAILABLE", message: "未找到 juling。安装 Juling 或将其加入 PATH 后再打开 Stats。" };
       }
-      try {
-        const live = await probeDashboard();
-        if (live && openUrl !== undefined) {
-          await openUrl(DASHBOARD_URL);
-          return openedOk();
+      const livePort = (await Promise.all(dashboardPorts.map(async port => ({
+        port,
+        live: await probeDashboard(port),
+      })))).find(entry => entry.live)?.port;
+      if (livePort !== undefined && openUrl !== undefined) {
+        try {
+          await openUrl(dashboardUrlOf(livePort));
+        } catch (error) {
+          throw { code: "UNAVAILABLE", message: error instanceof Error ? error.message : "打开 Juling Stats 失败" };
         }
-        // An explicit request to see the panel in a browser keeps `juling stats`
-        // opening one; only the embedded start suppresses it.
-        spawnDashboard(exe, { open: true });
+        return openedOk();
+      }
+      // An explicit request to see the panel in a browser keeps `juling stats`
+      // opening one; only the embedded start suppresses it. Start on a free
+      // port so a foreign dashboard is never opened as ours.
+      const freePort = (await Promise.all(dashboardPorts.map(async port => ({
+        port,
+        free: !(await probeOccupied(port)),
+      })))).find(entry => entry.free)?.port;
+      if (freePort === undefined) {
+        throw { code: "UNAVAILABLE", message: hostText("本机统计面板端口都被占用，请关闭其他 Stats 服务后重试。", "Every stats dashboard port is taken; close the other Stats server and retry.") };
+      }
+      try {
+        spawnDashboard(exe, freePort === DASHBOARD_PORT ? { open: true } : { open: true, port: freePort });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "打开 Juling Stats 失败";
-        throw { code: "UNAVAILABLE", message };
+        throw { code: "UNAVAILABLE", message: error instanceof Error ? error.message : "打开 Juling Stats 失败" };
       }
       return openOk();
     },

@@ -26,7 +26,7 @@ import { HarnessSessionPortabilityService } from "./session-portability-service"
 import { isSessionPortabilityKind, type SessionPortabilityOperation } from "../session-portability-protocol";
 import { HarnessFeatureSettingsService } from "./feature-settings-service";
 import { isFeatureSettingsKind, type FeatureSettingsOperation } from "../feature-settings-protocol";
-import { HarnessIdaDetailsService } from "./ida-details-service";
+import { HarnessDisassemblerService } from "./disassembler-service";
 import { HarnessSessionTitlesService } from "./session-titles-service";
 import { isSessionTitlesKind, type SessionTitlesOperation } from "../session-titles-protocol";
 import { HarnessPredictionService } from "./prediction-service";
@@ -48,7 +48,6 @@ import { isRatchetKind, type RatchetOperation } from "../ratchet-protocol";
 import { cfgLaunchEnabled } from "../../tools/settings";
 import { HarnessSessionGuiService } from "./session-gui-service";
 import { HarnessAgentBtwService } from "./agent-btw-service";
-import { HarnessIdaService } from "./ida-service";
 import { HarnessResourceService } from "./resource-service";
 import { HarnessSkillshareService } from "./skillshare-service";
 import { HarnessLiveAudioService } from "./live-audio-service";
@@ -66,7 +65,7 @@ import { HarnessComputerWorkspaceService } from "./computer-workspace-service";
 import { isComputerWorkspaceCommand, type ComputerWorkspaceCommand } from "../computer-workspace-protocol";
 import { isComputerObservationKind, type ComputerObservationOperation } from "../computer-observation-protocol";
 import { isBrowserObservationKind, type BrowserObservationOperation } from "../browser-observation-protocol";
-import { isIdaOperationKind, type HarnessIdaOperation } from "../ida-details-protocol";
+import { isDisassemblerKind, type DisassemblerOperation } from "../disassembler-protocol";
 import { isSessionOptionsKind, type SessionOptionsOperation } from "../session-options-protocol";
 import { type JudgmentOperation } from "../judgments-protocol";
 import { isRuntimeFeatureKind, type RuntimeFeatureOperation } from "../runtime-features-protocol";
@@ -79,9 +78,9 @@ import { HarnessAccountStatusService } from "./account-status-service";
 import * as path from "node:path";
 import { realpath } from "node:fs/promises";
 import { Encoding, countTokens } from "@oh-my-pi/pi-natives";
-import type { DaemonSnapshot } from "../../launch/protocol";
+import type { UnitSnapshot } from "../../daemon/protocol";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
-import { listServices, requestService, startService } from "../../launch/services";
+import { listServices, modeService, requestService, startService } from "../../launch/services";
 import type { AgentSession } from "../../session/agent-session";
 import type { HarnessServiceRow, WorkbenchOperation } from "../workbench-protocol";
 import { SessionControlError } from "./session-control-service";
@@ -108,11 +107,11 @@ function isMaintenanceOperation(operation: WorkbenchOperation): operation is Mai
 function isArchiveOperation(operation: WorkbenchOperation): operation is ArchiveOperation {
 	return isArchiveOperationKind(operation.kind);
 }
+function isDisassemblerOperation(operation: WorkbenchOperation): operation is DisassemblerOperation {
+	return isDisassemblerKind(operation.kind);
+}
 function isSessionOptionsOperation(operation: WorkbenchOperation): operation is SessionOptionsOperation {
 	return isSessionOptionsKind(operation.kind);
-}
-function isIdaOperation(operation: WorkbenchOperation): operation is HarnessIdaOperation {
-	return isIdaOperationKind(operation.kind);
 }
 function isBrowserObservationOperation(operation: WorkbenchOperation): operation is BrowserObservationOperation {
 	return isBrowserObservationKind(operation.kind);
@@ -135,21 +134,27 @@ function isRatchetOperation(operation: WorkbenchOperation): operation is Ratchet
 function isNativePreferenceOperation(operation: WorkbenchOperation): operation is NativePreferenceOperation {
 	return isNativePreferenceKind(operation.kind);
 }
-export function projectService(daemon: DaemonSnapshot): HarnessServiceRow {
+export function projectService(daemon: UnitSnapshot, sessionId?: string): HarnessServiceRow {
 	return {
-		name: daemon.name,
-		instanceId: daemon.id + ":" + daemon.startedAt,
+		name: daemon.key,
+		scope:
+			daemon.scope.kind === "project" && daemon.owner === sessionId && sessionId !== undefined
+				? "session"
+				: daemon.scope.kind,
+		instanceId: daemon.id + ":" + daemon.generation,
 		state: daemon.state,
 		startedAt: daemon.startedAt,
-		...(daemon.previewUrl === undefined ? {} : { previewUrl: daemon.previewUrl }),
-		...(daemon.pid === undefined ? {} : { pid: daemon.pid }),
-		...(daemon.readyAt === undefined ? {} : { readyAt: daemon.readyAt }),
-		...(daemon.exitedAt === undefined ? {} : { exitedAt: daemon.exitedAt }),
-		...(daemon.exitCode === undefined ? {} : { exitCode: daemon.exitCode }),
+		previewUrl: daemon.previewUrl,
+		pid: daemon.pids[0],
+		readyAt: daemon.readyAt,
+		exitedAt: daemon.exitedAt,
+		exitCode: daemon.exitCode,
 		restartCount: daemon.restartCount,
 		outputBytes: daemon.outputBytes,
 		...(daemon.owner === undefined ? {} : { ownerId: daemon.owner, ownerAgentId: daemon.owner }),
-		mode: daemon.detached ? "detached" : daemon.persist ? "persist" : "session",
+		mode:
+			daemon.policy.survive === "detached" ? "detached" : daemon.policy.hold === "persist" ? "persist" : "session",
+		manageable: daemon.kind === "proc" && daemon.scope.kind !== "global",
 	};
 }
 
@@ -174,7 +179,6 @@ export class HarnessWorkbenchService {
 	readonly evaluations: HarnessEvaluationWorkspaceService;
 	readonly ratchet: HarnessRatchetService;
 	readonly resources: HarnessResourceService;
-	readonly ida: HarnessIdaService;
 	readonly agentBtw: HarnessAgentBtwService;
 	readonly sessionGui: HarnessSessionGuiService;
 	readonly skillshare: HarnessSkillshareService;
@@ -192,7 +196,7 @@ export class HarnessWorkbenchService {
 	readonly accounts: HarnessAccountStatusService;
 	readonly annotations: HarnessAnnotationService;
 	readonly sessionOptions: HarnessSessionOptionsService;
-	readonly idaDetails: HarnessIdaDetailsService;
+	readonly disassembler: HarnessDisassemblerService;
 	readonly browserObservation: HarnessBrowserObservationService;
 	readonly managedBrowser: HarnessManagedBrowserService;
 	readonly computerObservation: HarnessComputerObservationService;
@@ -225,7 +229,6 @@ export class HarnessWorkbenchService {
 		this.skillshare = new HarnessSkillshareService(session);
 		this.sessionGui = new HarnessSessionGuiService(session);
 		this.agentBtw = new HarnessAgentBtwService(session);
-		this.ida = new HarnessIdaService(session);
 		this.resources = new HarnessResourceService(session);
 		this.accounts = new HarnessAccountStatusService(session);
 		this.judgments = new HarnessJudgmentService(session);
@@ -243,7 +246,7 @@ export class HarnessWorkbenchService {
 		this.media = new HarnessMediaService(session);
 		this.annotations = new HarnessAnnotationService(session);
 		this.sessionOptions = new HarnessSessionOptionsService(session);
-		this.idaDetails = new HarnessIdaDetailsService(session);
+		this.disassembler = new HarnessDisassemblerService(session);
 		this.browserObservation = new HarnessBrowserObservationService(session);
 		this.managedBrowser = new HarnessManagedBrowserService(session);
 		this.computerObservation = new HarnessComputerObservationService(session, undefined, this.computerWorkspace);
@@ -269,8 +272,7 @@ export class HarnessWorkbenchService {
 		void this.computerWorkspace.dispose().catch(() => {});
 		this.browserObservation.dispose();
 		this.managedBrowser.dispose();
-		this.idaDetails.dispose();
-		this.ida.dispose();
+		this.disassembler.dispose();
 		this.agentBtw.dispose();
 		this.skillshare.dispose();
 		this.accounts.dispose();
@@ -338,17 +340,9 @@ export class HarnessWorkbenchService {
 		if (operation.kind === "browser.webmcp.invoke") return this.managedBrowser.webMcpInvoke(operation);
 		if (operation.kind === "extensions.links.activate") return activateHarnessExtensionLink(this.session, operation);
 		if (isBrowserObservationOperation(operation)) return this.browserObservation.execute(operation);
-		if (isIdaOperation(operation)) return this.idaDetails.execute(operation);
+		if (isDisassemblerOperation(operation)) return this.disassembler.execute(operation);
 		if (isSessionOptionsOperation(operation)) return this.sessionOptions.execute(operation);
 		if (operation.kind === "resource.read") return this.resources.read(operation);
-		if (
-			operation.kind === "ida.status" ||
-			operation.kind === "ida.view" ||
-			operation.kind === "ida.prepare" ||
-			operation.kind === "ida.commit" ||
-			operation.kind === "ida.cancel"
-		)
-			return this.ida.execute(operation);
 		if (
 			operation.kind === "agent.btw.read" ||
 			operation.kind === "agent.btw.ask" ||
@@ -469,15 +463,18 @@ export class HarnessWorkbenchService {
 		const session = this.session.harnessToolSession;
 		if (!session) throw new SessionControlError("COMMAND_BLOCKED", "Service context is unavailable");
 		const enabled = cfgLaunchEnabled.get(session.settings);
-		if (operation.kind === "services.list")
-			return { enabled, services: (await listServices(session)).slice(0, 500).map(projectService) };
-		// An older broker silently ignores unknown fence fields. Never send it a GUI mutation.
-		const ping = await requestService(session, { op: "ping" });
-		if (ping.op !== "ping" || !ping.instanceFencing)
-			throw new SessionControlError(
-				"COMMAND_BLOCKED",
-				"This project broker needs to be restarted with the updated Runtime before controlling services",
-			);
+		if (operation.kind === "services.list") {
+			const [project, global] = await Promise.all([
+				listServices(session),
+				requestService(session, { op: "list", scope: { kind: "global" } }),
+			]);
+			return {
+				enabled,
+				services: [...project, ...global.units]
+					.slice(0, 500)
+					.map(unit => projectService(unit, this.session.sessionId)),
+			};
+		}
 		if (operation.kind === "services.start") {
 			const spec = operation.spec;
 			const root = await realpath(session.cwd);
@@ -492,9 +489,14 @@ export class HarnessWorkbenchService {
 				awaitReady: false,
 				...(spec.ready ? { ready: { ...spec.ready, timeout: spec.ready.timeoutMs / 1000 } } : {}),
 			});
-			return { service: projectService(result.daemon), readyTimedOut: result.readyTimedOut };
+			return { service: projectService(result.daemon, this.session.sessionId), readyTimedOut: result.readyTimedOut };
 		}
-		const named = { name: operation.name, expectedInstanceId: operation.instanceId };
+		const target = (await listServices(session)).find(
+			unit => unit.key === operation.name && projectService(unit).instanceId === operation.instanceId,
+		);
+		if (!target)
+			throw new SessionControlError("COMMAND_BLOCKED", "Service instance changed; refresh before trying again");
+		const named = { unit: target.id, generation: target.generation };
 		if (operation.kind === "services.logs") {
 			const result = await requestService(session, {
 				op: "logs",
@@ -504,28 +506,30 @@ export class HarnessWorkbenchService {
 				follow: false,
 				timeoutMs: 1000,
 				cursor: operation.cursor,
-				renderTerminalRows: true,
 			});
-			if (result.op !== "logs") throw new Error("Unexpected service logs response");
 			return {
 				instanceId: operation.instanceId,
-				text: sanitizeText(result.terminalRows?.join("\n") ?? result.text).slice(-65536),
+				text: sanitizeText(result.terminalOutput || result.text).slice(-65536),
 				cursor: result.cursor,
-				state: result.state,
+				state: result.unit.state,
 			};
 		}
-		const result = await requestService(
-			session,
-			operation.kind === "services.stop"
-				? { op: "stop", ...named, timeoutMs: 5000 }
-				: operation.kind === "services.restart"
-					? { op: "restart", ...named }
-					: operation.kind === "services.mode.set"
-						? { op: "mode", ...named, mode: operation.mode }
-						: { op: "send", ...named, data: operation.text },
-		);
-		if (!("daemon" in result)) throw new Error("Unexpected service response");
-		return { service: projectService(result.daemon) };
+		const unit =
+			operation.kind === "services.mode.set"
+				? await modeService(session, operation.name, operation.mode, undefined, named)
+				: (
+						await requestService(
+							session,
+							operation.kind === "services.stop"
+								? { op: "stop", ...named, timeoutMs: 5000 }
+								: operation.kind === "services.restart"
+									? { op: "restart", ...named }
+									: { op: "send", ...named, data: operation.text },
+						)
+					).unit;
+		if (operation.kind === "services.stop" && unit.generation !== named.generation)
+			throw new SessionControlError("COMMAND_BLOCKED", "Service instance changed; refresh before trying again");
+		return { service: projectService(unit, this.session.sessionId) };
 	}
 }
 
@@ -543,6 +547,7 @@ export function projectRuntimeModel(model: Model, includeExecution = false): Run
 		kind: model.kind ?? "chat",
 		image: model.input.includes("image"),
 		reasoning: model.reasoning,
+		snapcompactShape: model.snapcompactShape,
 		...(model.contextWindow === null ? {} : { contextWindow: model.contextWindow }),
 		...(model.maxTokens === null ? {} : { maxTokens: model.maxTokens }),
 		...(model.webSearch ? { webSearch: model.webSearch } : {}),

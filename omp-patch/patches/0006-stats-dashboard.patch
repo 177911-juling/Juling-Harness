@@ -167,7 +167,7 @@ index bf98a5b84a..0240107080 100644
  	return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
  }
 diff --git a/packages/stats/src/client/app/Shell.tsx b/packages/stats/src/client/app/Shell.tsx
-index 53f3d9519b..1bf14f957b 100644
+index 44d7626a01..1bf14f957b 100644
 --- a/packages/stats/src/client/app/Shell.tsx
 +++ b/packages/stats/src/client/app/Shell.tsx
 @@ -1,6 +1,8 @@
@@ -179,6 +179,15 @@ index 53f3d9519b..1bf14f957b 100644
  import { useLiveStatus } from "../data/live";
  import type { TimeRange } from "../types";
  import { Segmented } from "../ui";
+@@ -26,7 +28,7 @@ const RANGE_OPTIONS = TIME_RANGES.map((range, i) => ({
+ 
+ /**
+  * Fixed glass topbar + naked sidebar framing one inset content panel. Owns
+- * the global keyboard shortcuts: `1`–`8` pick a range, `g` then a letter jumps
++ * the global keyboard shortcuts: `1`–`6` pick a range, `g` then a letter jumps
+  * to a page.
+  */
+ export function Shell({ section, onSectionChange, range, onRangeChange, children }: ShellProps) {
 @@ -53,31 +55,27 @@ export function Shell({ section, onSectionChange, range, onRangeChange, children
  					data-variant="ghost"
  					data-icon="true"
@@ -234,7 +243,7 @@ index 53f3d9519b..1bf14f957b 100644
  				))}
  				<div className="sidebar-foot micro">
  					<span>
--						<span className="kbd">1</span>–<span className="kbd">6</span> range
+-						<span className="kbd">1</span>–<span className="kbd">8</span> range
 +						<span className="kbd">1</span>–<span className="kbd">6</span> {t("range", "时间范围")}
  					</span>
  					<span>
@@ -439,7 +448,7 @@ index ac3440d097..6a4ddd4049 100644
  
  /** Project folder as stored by ingest (`/work-pi/`), without the slashes. */
 diff --git a/packages/stats/src/client/data/range.ts b/packages/stats/src/client/data/range.ts
-index a792715d8c..eac540faf9 100644
+index c461a57fa0..f78dfa603b 100644
 --- a/packages/stats/src/client/data/range.ts
 +++ b/packages/stats/src/client/data/range.ts
 @@ -5,6 +5,7 @@
@@ -450,18 +459,22 @@ index a792715d8c..eac540faf9 100644
  import type { TimeRange } from "../types";
  
  const MINUTE_MS = 60 * 1000;
-@@ -23,12 +24,12 @@ export interface RangeMeta {
+@@ -23,14 +24,14 @@ export interface RangeMeta {
  }
  
  const RANGE_META: Record<TimeRange, RangeMeta> = {
 -	"1h": { label: "1h", windowLabel: "the last hour", spanMs: HOUR_MS, bucketMs: 5 * MINUTE_MS },
 -	"24h": { label: "24h", windowLabel: "the last 24 hours", spanMs: DAY_MS, bucketMs: HOUR_MS },
+-	"2d": { label: "2d", windowLabel: "the last 2 days", spanMs: 2 * DAY_MS, bucketMs: HOUR_MS },
+-	"3d": { label: "3d", windowLabel: "the last 3 days", spanMs: 3 * DAY_MS, bucketMs: HOUR_MS },
 -	"7d": { label: "7d", windowLabel: "the last 7 days", spanMs: 7 * DAY_MS, bucketMs: DAY_MS },
 -	"30d": { label: "30d", windowLabel: "the last 30 days", spanMs: 30 * DAY_MS, bucketMs: DAY_MS },
 -	"90d": { label: "90d", windowLabel: "the last 90 days", spanMs: 90 * DAY_MS, bucketMs: DAY_MS },
 -	all: { label: "All", windowLabel: "all time", spanMs: null, bucketMs: DAY_MS },
 +	"1h": { label: "1h", windowLabel: t("the last hour", "最近 1 小时"), spanMs: HOUR_MS, bucketMs: 5 * MINUTE_MS },
 +	"24h": { label: "24h", windowLabel: t("the last 24 hours", "最近 24 小时"), spanMs: DAY_MS, bucketMs: HOUR_MS },
++	"2d": { label: "2d", windowLabel: t("the last 2 days", "最近 2 天"), spanMs: 2 * DAY_MS, bucketMs: HOUR_MS },
++	"3d": { label: "3d", windowLabel: t("the last 3 days", "最近 3 天"), spanMs: 3 * DAY_MS, bucketMs: HOUR_MS },
 +	"7d": { label: "7d", windowLabel: t("the last 7 days", "最近 7 天"), spanMs: 7 * DAY_MS, bucketMs: DAY_MS },
 +	"30d": { label: "30d", windowLabel: t("the last 30 days", "最近 30 天"), spanMs: 30 * DAY_MS, bucketMs: DAY_MS },
 +	"90d": { label: "90d", windowLabel: t("the last 90 days", "最近 90 天"), spanMs: 90 * DAY_MS, bucketMs: DAY_MS },
@@ -469,7 +482,7 @@ index a792715d8c..eac540faf9 100644
  };
  
  const MAX_BUCKETS = 1500;
-@@ -42,14 +43,15 @@ export function rangeMeta(range: TimeRange): RangeMeta {
+@@ -44,14 +45,15 @@ export function rangeMeta(range: TimeRange): RangeMeta {
  
  /** Tick/tooltip label for a bucket start, precise enough for the bucket size. */
  export function formatBucket(timestamp: number, bucketMs: number): string {
@@ -515,18 +528,159 @@ index 69911bf78e..4195e5b24c 100644
  	return series;
  }
 diff --git a/packages/stats/src/client/data/view-models.ts b/packages/stats/src/client/data/view-models.ts
-index d68b7fb4e4..3d6b208fb8 100644
+index 59579833e7..3d6b208fb8 100644
 --- a/packages/stats/src/client/data/view-models.ts
 +++ b/packages/stats/src/client/data/view-models.ts
-@@ -7,6 +7,7 @@ import type {
+@@ -5,17 +5,14 @@ import type {
+ 	FolderStats,
+ 	MessageStats,
  	ModelPerformancePoint,
+-	SideChannelStats,
  	ToolUsageStats,
+-	UsageAttributionTotals,
  } from "../types";
+-import { buildColorLookup, modelKey, SERIES_COLORS } from "./colors";
 +import { t, zh } from "../i18n";
- import { modelKey } from "./colors";
++import { modelKey } from "./colors";
  import { isUnpricedMessage } from "./formatters";
  
-@@ -319,6 +320,23 @@ export function buildToolRows(tools: ToolUsageStats[]): ToolRowView[] {
+-/** Fixed display order of the agent types in a token share. */
++/** Fixed display order for the agent-token-share breakdown. */
+ const AGENT_TYPE_ORDER: AgentType[] = ["main", "subagent", "advisor"];
+-/** Palette hues left to side-channel categories beside agent segments: the agent types wear the first three. */
+-const BESIDE_AGENT_COLORS = SERIES_COLORS.slice(3);
+ 
+ export interface ConversationTokenStats {
+ 	totalInputTokens: number;
+@@ -29,98 +26,50 @@ export function sumConversationTokens(stats: ConversationTokenStats): number {
+ 	return stats.totalInputTokens + stats.totalOutputTokens + stats.totalCacheReadTokens + stats.totalCacheWriteTokens;
+ }
+ 
+-/** What a token-share segment counts: an agent type's conversation turns, or the calls of one side-channel category. */
+-export type TokenShareSource = { kind: "agent"; agentType: AgentType } | { kind: "sideChannel"; category: string };
+-
+-export type TokenShareSegment = TokenShareSource & {
+-	/** Unique within its view. */
+-	key: string;
++export interface AgentTokenSegment {
++	agentType: AgentType;
+ 	/** input + output + cache read + cache write — the displayed denominator. */
+ 	tokens: number;
+ 	requests: number;
+ 	cost: number;
+-	/** Fraction (0-1) of the view's total tokens. */
++	/** Fraction (0-1) of total tokens across all present agent types. */
+ 	share: number;
+-};
++}
+ 
+-export interface TokenShareView {
++export interface AgentTokenShareView {
+ 	totalTokens: number;
+ 	totalCost: number;
+-	segments: TokenShareSegment[];
+-	/** Side-channel category -> color, ranked by tokens within this view so its largest categories never share a hue. */
+-	categoryColors: Map<string, string>;
++	segments: AgentTokenSegment[];
+ }
+ 
+-/** A group's amounts; `share` is settled by {@link shareView} once the view's total is known. */
+-function segmentAmounts(stat: UsageAttributionTotals) {
+-	return { tokens: sumConversationTokens(stat), requests: stat.totalRequests, cost: stat.totalCost, share: 0 };
+-}
+-
+-/** One segment per agent type present in the data, ordered main -> subagents -> advisor. */
+-function agentSegments(stats: readonly AgentTypeStats[]): TokenShareSegment[] {
++/**
++ * Build the "token usage by agent" breakdown: one segment per agent type that
++ * appears in the data, ordered main -> subagents -> advisor, each carrying its
++ * token total and share of the grand total. Token counts use the same four
++ * conversation-token buckets as the overview total so the two views reconcile.
++ */
++export function buildAgentTokenShare(stats: AgentTypeStats[]): AgentTokenShareView {
+ 	const byType = new Map<AgentType, AgentTypeStats>();
+ 	for (const stat of stats) byType.set(stat.agentType, stat);
+-	const segments: TokenShareSegment[] = [];
+-	for (const agentType of AGENT_TYPE_ORDER) {
+-		const stat = byType.get(agentType);
+-		if (stat) segments.push({ kind: "agent", agentType, key: `agent:${agentType}`, ...segmentAmounts(stat) });
+-	}
+-	return segments;
+-}
+-
+-/** One segment per category served by decision models (`decision`) or by language models, largest first. */
+-function sideChannelSegments(stats: readonly SideChannelStats[], decision: boolean): TokenShareSegment[] {
+-	const segments: Extract<TokenShareSegment, { kind: "sideChannel" }>[] = [];
+-	for (const stat of stats) {
+-		if (stat.decision !== decision) continue;
+-		segments.push({
+-			kind: "sideChannel",
+-			category: stat.category,
+-			key: `side:${stat.category}`,
+-			...segmentAmounts(stat),
+-		});
+-	}
+-	return segments.sort((a, b) => b.tokens - a.tokens || a.category.localeCompare(b.category));
+-}
+ 
+-/** Settle each segment's share of the view's tokens and color the view's categories from `palette`. */
+-function shareView(segments: TokenShareSegment[], palette: readonly string[]): TokenShareView {
+-	let totalTokens = 0;
+-	let totalCost = 0;
+-	const categories: { key: string; weight: number }[] = [];
+-	for (const segment of segments) {
+-		totalTokens += segment.tokens;
+-		totalCost += segment.cost;
+-		if (segment.kind === "sideChannel") categories.push({ key: segment.category, weight: segment.tokens });
+-	}
+-	if (totalTokens > 0) {
+-		for (const segment of segments) segment.share = segment.tokens / totalTokens;
+-	}
+-	return { totalTokens, totalCost, segments, categoryColors: buildColorLookup(categories, palette) };
+-}
++	const present = AGENT_TYPE_ORDER.map(type => byType.get(type)).filter(
++		(stat): stat is AgentTypeStats => stat !== undefined,
++	);
++	const totalTokens = present.reduce((sum, stat) => sum + sumConversationTokens(stat), 0);
++	const totalCost = present.reduce((sum, stat) => sum + stat.totalCost, 0);
+ 
+-/**
+- * Build the "token usage by agent" breakdown: the conversation turns of each
+- * agent type present in the data, ordered main -> subagents -> advisor, then
+- * the side channels that ran on a language model, one segment per category,
+- * largest first. Shares are over all of them. Side channels served by decision
+- * models are left out: see {@link buildDecisionModelShare}. Token counts use
+- * the same four conversation-token buckets as the overview total.
+- */
+-export function buildUsageTokenShare(
+-	byAgentType: readonly AgentTypeStats[],
+-	bySideChannel: readonly SideChannelStats[],
+-): TokenShareView {
+-	return shareView([...agentSegments(byAgentType), ...sideChannelSegments(bySideChannel, false)], BESIDE_AGENT_COLORS);
+-}
++	const segments = present.map(stat => {
++		const tokens = sumConversationTokens(stat);
++		return {
++			agentType: stat.agentType,
++			tokens,
++			requests: stat.totalRequests,
++			cost: stat.totalCost,
++			share: totalTokens > 0 ? tokens / totalTokens : 0,
++		};
++	});
+ 
+-/**
+- * Build the breakdown of decision-model usage: one segment per side-channel
+- * category served by a decision model, largest first, each with its share of
+- * all decision-model tokens. No segments when no decision model was called.
+- */
+-export function buildDecisionModelShare(bySideChannel: readonly SideChannelStats[]): TokenShareView {
+-	return shareView(sideChannelSegments(bySideChannel, true), SERIES_COLORS);
++	return { totalTokens, totalCost, segments };
+ }
+ 
+ /** API-equivalent cost split by billing component. */
+@@ -371,6 +320,23 @@ export function buildToolRows(tools: ToolUsageStats[]): ToolRowView[] {
  	}));
  }
  
@@ -550,7 +704,7 @@ index d68b7fb4e4..3d6b208fb8 100644
  export type RequestStatus = "ok" | "aborted" | "failed";
  
  /** Outcome of one request: cancellations abort; provider/transport errors fail. */
-@@ -403,7 +421,7 @@ const HTTP_STATUS_RE = /^[1-5]\d\d$/;
+@@ -455,7 +421,7 @@ const HTTP_STATUS_RE = /^[1-5]\d\d$/;
   * codes kept), truncated.
   */
  export function errorSignature(message: string | null): string {
@@ -1911,7 +2065,7 @@ index 29bd339491..00e434fc88 100644
  		</Card>
  	);
 diff --git a/packages/stats/src/client/routes/GainRoute.tsx b/packages/stats/src/client/routes/GainRoute.tsx
-index 0a31d5bc16..06cd424615 100644
+index 2f7860841c..d0dbf0abcd 100644
 --- a/packages/stats/src/client/routes/GainRoute.tsx
 +++ b/packages/stats/src/client/routes/GainRoute.tsx
 @@ -5,6 +5,7 @@ import { formatBytes, formatCompact, formatInteger, formatPercent } from "../dat
@@ -1922,7 +2076,27 @@ index 0a31d5bc16..06cd424615 100644
  import type { GainSource, GainSourceTotals, TimeRange } from "../types";
  import {
  	Card,
-@@ -75,10 +76,10 @@ export function GainRoute({ active, range }: GainRouteProps) {
+@@ -27,8 +28,8 @@ export interface GainRouteProps {
+ const DAY_MS = 86_400_000;
+ 
+ const SOURCE_LABEL: Record<GainSource, string> = {
+-	snapcompact: "Snapcompact imaged tool results",
+-	compaction: "Snapcompact compaction (context freed)",
++	snapcompact: t("Snapcompact imaged tool results", "Snapcompact 图片工具结果"),
++	compaction: t("Snapcompact compaction (context freed)", "Snapcompact 压缩（释放上下文）"),
+ };
+ 
+ /** The server buckets gain by local calendar day (`YYYY-MM-DD`). */
+@@ -56,7 +57,7 @@ export function GainRoute({ active, range }: GainRouteProps) {
+ 			points.map(p => p.timestamp),
+ 			DAY_MS,
+ 		);
+-		const daily = densify(points, buckets, p => p.total);
++		const daily = densify(points, buckets, p => p.snapcompact);
+ 		let running = 0;
+ 		const cumulative = daily.map(v => (running += v));
+ 		return { buckets, daily, cumulative };
+@@ -78,10 +79,10 @@ export function GainRoute({ active, range }: GainRouteProps) {
  	const scope = project ? ` for ${project}` : "";
  
  	const chartSeries: ChartSeries[] = [
@@ -1935,12 +2109,12 @@ index 0a31d5bc16..06cd424615 100644
  			color: "var(--chart-secondary)",
  			values: series.cumulative,
  			kind: "line",
-@@ -89,18 +90,23 @@ export function GainRoute({ active, range }: GainRouteProps) {
+@@ -92,18 +93,23 @@ export function GainRoute({ active, range }: GainRouteProps) {
  	return (
  		<div className="page">
  			<PageHeader
 -				title="Gain"
--				description={`Tokens snapcompact kept out of context${scope} in ${meta.windowLabel}.`}
+-				description={`Context snapcompact freed by compacting, and tokens it saved by imaging tool results${scope}, in ${meta.windowLabel}.`}
 +				title={t("Gain", "收益")}
 +				description={t(
 +					`Tokens snapcompact kept out of context${scope} in ${meta.windowLabel}.`,
@@ -1963,7 +2137,7 @@ index 0a31d5bc16..06cd424615 100644
  							{projectOptions.map(p => (
  								<option key={p} value={p}>
  									{p}
-@@ -118,11 +124,19 @@ export function GainRoute({ active, range }: GainRouteProps) {
+@@ -121,11 +127,19 @@ export function GainRoute({ active, range }: GainRouteProps) {
  				empty={
  					<Card>
  						<EmptyState
@@ -1976,7 +2150,7 @@ index 0a31d5bc16..06cd424615 100644
 +							)}
  							hint={
  								range === "all"
--									? "Savings appear here once snapcompact compacts tool output."
+-									? "Savings appear here once snapcompact compacts the context or images tool output."
 -									: "Try a longer range."
 +									? t(
 +											"Savings appear here once snapcompact compacts tool output.",
@@ -1986,7 +2160,7 @@ index 0a31d5bc16..06cd424615 100644
  							}
  						/>
  					</Card>
-@@ -133,31 +147,38 @@ export function GainRoute({ active, range }: GainRouteProps) {
+@@ -136,31 +150,38 @@ export function GainRoute({ active, range }: GainRouteProps) {
  						<div data-stale={gain.stale}>
  							<StatGrid min={180}>
  								<Stat
@@ -2035,7 +2209,7 @@ index 0a31d5bc16..06cd424615 100644
  							actions={<Legend items={chartSeries.map(s => ({ key: s.key, label: s.label, color: s.color }))} />}
  							stale={gain.stale}
  						>
-@@ -171,7 +192,13 @@ export function GainRoute({ active, range }: GainRouteProps) {
+@@ -174,7 +195,13 @@ export function GainRoute({ active, range }: GainRouteProps) {
  							/>
  						</Card>
  
@@ -2050,7 +2224,7 @@ index 0a31d5bc16..06cd424615 100644
  							<Table rows={sourceRows} rowKey={row => row.source} columns={SOURCE_COLUMNS} />
  						</Card>
  					</>
-@@ -184,13 +211,13 @@ export function GainRoute({ active, range }: GainRouteProps) {
+@@ -187,13 +214,13 @@ export function GainRoute({ active, range }: GainRouteProps) {
  const SOURCE_COLUMNS: Column<SourceRow>[] = [
  	{
  		key: "source",
@@ -2066,7 +2240,7 @@ index 0a31d5bc16..06cd424615 100644
  		align: "right",
  		sort: row => row.savedTokens,
  		render: row => (
-@@ -201,28 +228,28 @@ const SOURCE_COLUMNS: Column<SourceRow>[] = [
+@@ -204,28 +231,28 @@ const SOURCE_COLUMNS: Column<SourceRow>[] = [
  	},
  	{
  		key: "share",
@@ -2500,18 +2674,34 @@ index 1b30d57950..15f2ca456d 100644
  
  function sumValues(values: readonly (number | null)[]): number {
 diff --git a/packages/stats/src/client/routes/OverviewRoute.tsx b/packages/stats/src/client/routes/OverviewRoute.tsx
-index bb0ee960c4..7690db6f3d 100644
+index cf183ca849..7690db6f3d 100644
 --- a/packages/stats/src/client/routes/OverviewRoute.tsx
 +++ b/packages/stats/src/client/routes/OverviewRoute.tsx
-@@ -17,6 +17,7 @@ import { useQuery } from "../data/query";
+@@ -2,7 +2,6 @@ import { ArrowRight } from "lucide-react";
+ import { useMemo, useState } from "react";
+ import { getOverviewStats, getRecentRequests } from "../api";
+ import { Legend, ShareBar, TimeChart } from "../charts";
+-import { OTHER_COLOR } from "../data/colors";
+ import {
+ 	formatCompact,
+ 	formatDurationMs,
+@@ -17,13 +16,8 @@ import {
+ import { useQuery } from "../data/query";
  import { bucketAxis, rangeMeta } from "../data/range";
  import { densify } from "../data/series";
- import { buildAgentTokenShare, sumConversationTokens } from "../data/view-models";
+-import {
+-	buildDecisionModelShare,
+-	buildUsageTokenShare,
+-	sumConversationTokens,
+-	type TokenShareSegment,
+-	type TokenShareView,
+-} from "../data/view-models";
++import { buildAgentTokenShare, sumConversationTokens } from "../data/view-models";
 +import { t } from "../i18n";
  import type { AgentType, MessageStats, TimeRange } from "../types";
  import {
  	Badge,
-@@ -42,12 +43,16 @@ export interface OverviewRouteProps {
+@@ -49,12 +43,16 @@ export interface OverviewRouteProps {
  type ActivityMetric = "requests" | "tokens" | "cost";
  
  const ACTIVITY_OPTIONS = [
@@ -2532,7 +2722,7 @@ index bb0ee960c4..7690db6f3d 100644
  const AGENT_COLOR: Record<AgentType, string> = {
  	main: "var(--chart-primary)",
  	subagent: "var(--chart-secondary)",
-@@ -55,10 +60,10 @@ const AGENT_COLOR: Record<AgentType, string> = {
+@@ -62,10 +60,10 @@ const AGENT_COLOR: Record<AgentType, string> = {
  };
  
  const TOKEN_MIX = [
@@ -2547,7 +2737,19 @@ index bb0ee960c4..7690db6f3d 100644
  ] as const;
  
  export function OverviewRoute({ active, range, onRequestClick }: OverviewRouteProps) {
-@@ -86,73 +91,128 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+@@ -90,85 +88,131 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+ 		};
+ 	}, [overview.data, range]);
+ 
+-	const attribution = useMemo(() => {
+-		const data = overview.data;
+-		if (!data) return null;
+-		return {
+-			usage: buildUsageTokenShare(data.byAgentType, data.bySideChannel),
+-			decisions: buildDecisionModelShare(data.bySideChannel),
+-		};
+-	}, [overview.data]);
+-
  	const chartSeries =
  		metric === "requests"
  			? [
@@ -2702,7 +2904,7 @@ index bb0ee960c4..7690db6f3d 100644
  						</StatGrid>
  					</div>
  				)}
-@@ -161,8 +221,14 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+@@ -177,8 +221,14 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
  			<div className="grid grid-main-side">
  				<Card
  					index={1}
@@ -2719,7 +2921,7 @@ index bb0ee960c4..7690db6f3d 100644
  					actions={<Segmented size="sm" options={ACTIVITY_OPTIONS} value={metric} onChange={setMetric} />}
  					stale={overview.stale}
  				>
-@@ -179,7 +245,12 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+@@ -195,9 +245,14 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
  					</QueryView>
  				</Card>
  
@@ -2731,9 +2933,17 @@ index bb0ee960c4..7690db6f3d 100644
 +					stale={overview.stale}
 +				>
  					<QueryView query={overview} skeleton={<ChartSkeleton height={260} />}>
- 						{({ overall, byAgentType }) => {
+-						{({ overall }) => {
++						{({ overall, byAgentType }) => {
  							const mix = {
-@@ -194,25 +265,25 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+ 								input: overall.totalInputTokens,
+ 								cacheRead: overall.totalCacheReadTokens,
+@@ -205,34 +260,57 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+ 								output: overall.totalOutputTokens,
+ 							};
+ 							const total = sumConversationTokens(overall);
++							const agents = buildAgentTokenShare(byAgentType);
+ 							return (
  								<div className="stack" style={{ gap: 18 }}>
  									<div className="stack" style={{ gap: 10 }}>
  										<ShareBar
@@ -2763,26 +2973,64 @@ index bb0ee960c4..7690db6f3d 100644
  											}))}
  										/>
  									</div>
- 									<div className="stack" style={{ gap: 10 }}>
- 										<div className="section-label" style={{ marginBottom: 0 }}>
--											By agent
+-									{attribution && (
+-										<div className="stack" style={{ gap: 10 }}>
+-											<div className="section-label" style={{ marginBottom: 0 }}>
+-												By source
+-											</div>
+-											<ShareBreakdown view={attribution.usage} />
++									<div className="stack" style={{ gap: 10 }}>
++										<div className="section-label" style={{ marginBottom: 0 }}>
 +											{t("By agent", "按代理")}
  										</div>
- 										<ShareBar
- 											segments={agents.segments.map(s => ({
-@@ -227,7 +298,9 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
- 												<span className="row">
- 													<span className="swatch" style={{ background: AGENT_COLOR[s.agentType] }} />
- 													{AGENT_LABEL[s.agentType]}
--													<span className="dim num">{formatInteger(s.requests)} req</span>
+-									)}
++										<ShareBar
++											segments={agents.segments.map(s => ({
++												key: s.agentType,
++												label: AGENT_LABEL[s.agentType],
++												value: s.tokens,
++												color: AGENT_COLOR[s.agentType],
++											}))}
++										/>
++										{agents.segments.map(s => (
++											<div key={s.agentType} className="row" style={{ justifyContent: "space-between" }}>
++												<span className="row">
++													<span className="swatch" style={{ background: AGENT_COLOR[s.agentType] }} />
++													{AGENT_LABEL[s.agentType]}
 +													<span className="dim num">
 +														{t(`${formatInteger(s.requests)} req`, `${formatInteger(s.requests)} 次请求`)}
 +													</span>
- 												</span>
- 												<span className="row">
- 													<span className="dim num">{formatCompact(s.tokens)}</span>
-@@ -249,13 +322,13 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
- 				index={3}
++												</span>
++												<span className="row">
++													<span className="dim num">{formatCompact(s.tokens)}</span>
++													<span className="num" style={{ minWidth: 48, textAlign: "right" }}>
++														{formatPercent(s.share)}
++													</span>
++												</span>
++											</div>
++										))}
++									</div>
+ 								</div>
+ 							);
+ 						}}
+@@ -240,28 +318,17 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+ 				</Card>
+ 			</div>
+ 
+-			{attribution && attribution.decisions.segments.length > 0 && (
+-				<Card
+-					index={3}
+-					title="Decision models"
+-					description="Where decision-model tokens went, by use case"
+-					stale={overview.stale}
+-				>
+-					<ShareBreakdown view={attribution.decisions} wide />
+-				</Card>
+-			)}
+-
+ 			<Card
+-				index={4}
++				index={3}
  				title={
  					<>
 -						<Dot tone="live" pulse /> Latest requests
@@ -2798,7 +3046,59 @@ index bb0ee960c4..7690db6f3d 100644
  					</a>
  				}
  				flush
-@@ -279,37 +352,41 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+@@ -282,89 +349,44 @@ export function OverviewRoute({ active, range, onRequestClick }: OverviewRoutePr
+ 	);
+ }
+ 
+-function segmentLabel(segment: TokenShareSegment): string {
+-	if (segment.kind === "agent") return AGENT_LABEL[segment.agentType];
+-	return segment.category.charAt(0).toUpperCase() + segment.category.slice(1);
+-}
+-
+-function segmentColor(segment: TokenShareSegment, colors: ReadonlyMap<string, string>): string {
+-	if (segment.kind === "agent") return AGENT_COLOR[segment.agentType];
+-	return colors.get(segment.category) ?? OTHER_COLOR;
+-}
+-
+-/**
+- * A share bar over one row per segment: swatch, label, requests, tokens, percent of the bar.
+- * `wide` lays the rows out in columns, for a card that spans the page.
+- */
+-function ShareBreakdown({ view, wide = false }: { view: TokenShareView; wide?: boolean }) {
+-	const { segments, categoryColors } = view;
+-	return (
+-		<div className="stack" style={{ gap: 10 }}>
+-			<ShareBar
+-				segments={segments.map(s => ({
+-					key: s.key,
+-					label: segmentLabel(s),
+-					value: s.tokens,
+-					color: segmentColor(s, categoryColors),
+-				}))}
+-			/>
+-			<div className={wide ? "grid grid-3" : "stack"} style={{ gap: wide ? "10px 28px" : 10 }}>
+-				{segments.map(s => (
+-					<div key={s.key} className="row" style={{ justifyContent: "space-between" }}>
+-						<span className="row" style={{ minWidth: 0 }}>
+-							<span className="swatch" style={{ background: segmentColor(s, categoryColors) }} />
+-							<span className="truncate">{segmentLabel(s)}</span>
+-							<span className="dim num" style={{ flexShrink: 0 }}>
+-								{formatInteger(s.requests)} req
+-							</span>
+-						</span>
+-						<span className="row" style={{ flexShrink: 0 }}>
+-							<span className="dim num">{formatCompact(s.tokens)}</span>
+-							<span className="num" style={{ minWidth: 48, textAlign: "right" }}>
+-								{formatPercent(s.share)}
+-							</span>
+-						</span>
+-					</div>
+-				))}
+-			</div>
+-		</div>
+-	);
+-}
+-
  const REQUEST_COLUMNS = [
  	{
  		key: "model",

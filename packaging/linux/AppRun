@@ -7,4 +7,4 @@ export PATH="$APPDIR${PATH:+:$PATH}"
 export XDG_DATA_DIRS="$APPDIR/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}:/usr/local/share:/usr/share"
 export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-exec "$APPDIR/omp-studio" "$@"
+exec "$APPDIR/juling-harness" "$@"

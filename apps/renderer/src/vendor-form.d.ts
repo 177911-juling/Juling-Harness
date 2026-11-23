@@ -28,4 +28,18 @@ declare module "@oh-my-pi/pi-tui/html-form/data" {
 		field: InteractionFormField,
 		value: FormAnswerValue | undefined,
 	): string | undefined;
+	export interface FormAnswer {
+		readonly name: string;
+		readonly question: string;
+		readonly answer: string;
+	}
+	/** Answers of every named field, in form order, with option values shown as labels. */
+	export function formAnswers(
+		form: {
+			readonly fields: readonly InteractionFormField[];
+			readonly sections?: readonly unknown[];
+			readonly hidden?: unknown;
+		},
+		data: Record<string, FormAnswerValue>,
+	): FormAnswer[];
 }

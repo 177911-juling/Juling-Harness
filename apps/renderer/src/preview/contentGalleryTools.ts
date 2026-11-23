@@ -56,8 +56,8 @@ export function getContentGalleryVariants(zh = isZh()): readonly Card[] {
     { name: "Write", path: "docs/check-result.json", created: false, content: { passed: true, checks: ["types", "render"] }, encoding: "UTF-8" },
     { name: "Grep", pattern: "obsoleteTheme", path: "components", matches: [], matchCount: 0, fileCount: 0 },
     { name: "Glob", pattern: "missing/**/*.tsx", files: [] },
-    { name: "Bash", cmd: "npm run typecheck", cwd: demoPath("omp-web"), exit: 2, status: "error", output: "\u001b[33m> tsc --noEmit\u001b[0m\ncomponents/MermaidBlock.tsx(147,7): error TS2322\nType 'string' is not assignable to type 'MermaidTheme'.\n", dur: "1.24s" },
-    { name: "Bash", cmd: "npm run check -- --only renderer", cwd: demoPath("omp-web"), exit: 0, output: "Preparing 10%\rPreparing 100%\n" + Array.from({ length: 80 }, (_, i) => `${String(i + 1).padStart(2, "0")} PASS conversation/check-${i + 1}.test.tsx`).join("\n") + "\n\u001b[32m80 suites passed\u001b[0m", meta: { truncation: { elidedBytes: 12000, elidedLines: 120, artifactId: "gallery-full-output" } } },
+    { name: "Bash", cmd: "npm run typecheck", cwd: demoPath("juling-harness"), exit: 2, status: "error", output: "\u001b[33m> tsc --noEmit\u001b[0m\ncomponents/MermaidBlock.tsx(147,7): error TS2322\nType 'string' is not assignable to type 'MermaidTheme'.\n", dur: "1.24s" },
+    { name: "Bash", cmd: "npm run check -- --only renderer", cwd: demoPath("juling-harness"), exit: 0, output: "Preparing 10%\rPreparing 100%\n" + Array.from({ length: 80 }, (_, i) => `${String(i + 1).padStart(2, "0")} PASS conversation/check-${i + 1}.test.tsx`).join("\n") + "\n\u001b[32m80 suites passed\u001b[0m", meta: { truncation: { elidedBytes: 12000, elidedLines: 120, artifactId: "gallery-full-output" } } },
     { name: "LSP", action: "references", refs: [{ file: "components/MermaidBlock.tsx", line: 147, text: "theme: getCodeTheme()," }, { file: "hooks/useCodeTheme.ts", line: 8, text: "export function getCodeTheme(): MermaidTheme {" }] },
     { name: "Eval", lang: "javascript", cells: [
       { code: "print(results)", status: "ok", stdout: zh ? "检查表\n结构化摘要\nMarkdown 报告" : "Checklist\nStructured summary\nMarkdown report", views: [
@@ -83,7 +83,7 @@ export function getContentGalleryVariants(zh = isZh()): readonly Card[] {
     { name: "Resolve", action: "discard", reason: zh ? "丢弃旧主题强制转换，保留原返回类型。" : "Discard legacy theme cast and preserve the original return type." },
     { name: "mcp__github_get_release", args: { repo: "agegr/pi-web", tag: "v0.8.1" }, output: { name: "v0.8.1", assets: [{ name: "notes.md", size: 2400 }], published: true } },
     { name: "read", path: "xd://read", xdev: { tool: "read", args: { path: "components/MermaidBlock.tsx" }, inner: { preview: ["const theme = getCodeTheme();"], lines: 1 }, result: "const theme = getCodeTheme();" } },
-    { name: "read", path: "xd://powershell", xdev: { tool: "powershell", args: { cmd: "Get-Location" }, inner: { cwd: demoPath("omp-web"), output: demoPath("omp-web"), exit: 0 } } },
+    { name: "read", path: "xd://powershell", xdev: { tool: "powershell", args: { cmd: "Get-Location" }, inner: { cwd: demoPath("juling-harness"), output: demoPath("juling-harness"), exit: 0 } } },
   ];
 }
 

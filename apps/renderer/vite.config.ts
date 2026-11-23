@@ -12,7 +12,7 @@ import react from "@vitejs/plugin-react";
 // any source there replaces the `default-src` fallback.
 // Vite dev still needs HMR.
 const PACKAGED_RENDERER_CSP =
-  "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: omp-artifact: omp-file:; media-src 'self' blob: omp-artifact: omp-file:; font-src 'self' data:; connect-src 'self' omp-artifact: omp-file:; frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847; object-src 'none'; base-uri 'self'; form-action 'self'";
+  "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: omp-artifact: omp-file:; media-src 'self' blob: omp-artifact: omp-file:; font-src 'self' data:; connect-src 'self' omp-artifact: omp-file:; frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847 http://127.0.0.1:3848 http://127.0.0.1:3849 http://127.0.0.1:3850 http://127.0.0.1:3851 http://127.0.0.1:3852; object-src 'none'; base-uri 'self'; form-action 'self'";
 
 function packagedCspPlugin() {
   return {
@@ -52,13 +52,15 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      input: { index: fileURLToPath(new URL("./index.html", import.meta.url)), graphic: fileURLToPath(new URL("./graphic-preview.html", import.meta.url)) },
+      input: {
+        index: fileURLToPath(new URL("./index.html", import.meta.url)),
+        graphic: fileURLToPath(new URL("./graphic-preview.html", import.meta.url)),
+        mobile: fileURLToPath(new URL("./mobile.html", import.meta.url)),
+      },
       output: {
         onlyExplicitManualChunks: true,
-        // Keep the entry under the 500 kB warning: React, xterm, and the
-        // Harness client stay on their own cacheable vendor chunks.
-        // Mermaid is only imported lazily for fenced "mermaid" blocks, so its
-        // whole dependency tree rides its own chunk instead of inflating vendor.
+        // Keep the large, independently loaded engines cacheable. Rollup can
+        // then place their other dependencies with the entries that use them.
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
           if (id.includes("/three/") || id.includes("\\three\\")) return "three";
@@ -96,7 +98,6 @@ export default defineConfig({
           if (mermaidPackages.some((name) => pkg.startsWith(name))) return "mermaid";
           if (id.includes("@juling-harness")) return "harness-client";
           if (/node_modules[/\\](?:react-dom|react|scheduler)[/\\]/.test(id)) return "react";
-          return "vendor";
         },
       },
     },

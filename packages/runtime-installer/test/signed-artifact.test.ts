@@ -38,7 +38,7 @@ async function writeSignature(
 async function createValidArtifact(parent: string, version = "v1", content = "omp-v1"): Promise<string> {
   const directory = join(parent, `artifact-${version}`);
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "omp.exe"), content);
+  await writeFile(join(directory, "juling.exe"), content);
   const manifest = `${JSON.stringify({
     runtimeVersion: version,
     upstreamVersion: "0.0.0",
@@ -49,7 +49,7 @@ async function createValidArtifact(parent: string, version = "v1", content = "om
     capabilityHash: "capability-fixture",
     commandManifestHash: "command-fixture",
     platform: "win32-x64",
-    entrypoint: "omp.exe",
+    entrypoint: "juling.exe",
     channel: "stable",
   })}\n`;
   await writeFile(join(directory, "runtime-manifest.json"), manifest);
@@ -57,7 +57,7 @@ async function createValidArtifact(parent: string, version = "v1", content = "om
   const manifestDigest = createHash("sha256").update(manifest).digest("hex");
   const checksums = `${JSON.stringify({
     algorithm: "sha256",
-    files: { "omp.exe": digest, "runtime-manifest.json": manifestDigest },
+    files: { "juling.exe": digest, "runtime-manifest.json": manifestDigest },
   })}\n`;
   await writeFile(join(directory, "checksums.json"), checksums);
   await writeSignature(directory, manifest, checksums);
@@ -105,9 +105,9 @@ test("verifySignedArtifact verifies a large artifact and detects a changed final
   const result = await verifySignedArtifact(options);
 
   assert.equal(result.manifest.runtimeVersion, "v1");
-  assert.ok(result.checksums.files["omp.exe"]);
-  await writeFile(join(artifactDir, "omp.exe"), content.slice(0, -1) + "!");
-  await assert.rejects(verifySignedArtifact(options), /Checksum mismatch for omp.exe/u);
+  assert.ok(result.checksums.files["juling.exe"]);
+  await writeFile(join(artifactDir, "juling.exe"), content.slice(0, -1) + "!");
+  await assert.rejects(verifySignedArtifact(options), /Checksum mismatch for juling.exe/u);
 });
 
 test("verifySignedArtifact rejects signature mismatch", async () => {
@@ -177,7 +177,7 @@ test("verifySignedArtifact rejects when checksums miss requireCovered files", as
   const temporary = await mkdtemp(join(tmpdir(), "omp-signed-miss-req-"));
   const artifactDir = await createValidArtifact(temporary);
   const manifest = await readFile(join(artifactDir, "runtime-manifest.json"), "utf8");
-  const checksums = `${JSON.stringify({ algorithm: "sha256", files: { "omp.exe": "0".repeat(64) } })}\n`;
+  const checksums = `${JSON.stringify({ algorithm: "sha256", files: { "juling.exe": "0".repeat(64) } })}\n`;
   await writeFile(join(artifactDir, "checksums.json"), checksums);
   await writeSignature(artifactDir, manifest, checksums);
 
@@ -220,7 +220,7 @@ test("verifySignedArtifact rejects symbolic links in artifact directory", async 
   const temporary = await mkdtemp(join(tmpdir(), "omp-signed-symlink-"));
   const artifactDir = await createValidArtifact(temporary);
   try {
-    await symlink(join(artifactDir, "omp.exe"), join(artifactDir, "omp-symlink.exe"));
+    await symlink(join(artifactDir, "juling.exe"), join(artifactDir, "omp-symlink.exe"));
   } catch {
     return; // Skip on platforms where unprivileged symlinks cannot be created
   }
@@ -246,7 +246,7 @@ test("verifySignedArtifact rejects checksum paths that escape artifact", async (
     algorithm: "sha256",
     files: {
       "runtime-manifest.json": createHash("sha256").update(manifest).digest("hex"),
-      "omp.exe": createHash("sha256").update("omp-v1").digest("hex"),
+      "juling.exe": createHash("sha256").update("omp-v1").digest("hex"),
       "../escaped.txt": "0".repeat(64),
     },
   })}\n`;
@@ -269,7 +269,7 @@ test("verifySignedArtifact rejects checksum paths that escape artifact", async (
 test("verifySignedArtifact rejects file checksum mismatch", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "omp-signed-file-mismatch-"));
   const artifactDir = await createValidArtifact(temporary);
-  await writeFile(join(artifactDir, "omp.exe"), "tampered-content");
+  await writeFile(join(artifactDir, "juling.exe"), "tampered-content");
 
   await assert.rejects(
     () =>
@@ -280,7 +280,7 @@ test("verifySignedArtifact rejects file checksum mismatch", async () => {
         requireCovered: (m) => ["runtime-manifest.json", m.entrypoint],
         trustedKeys,
       }),
-    /Checksum mismatch for omp\.exe/u,
+    /Checksum mismatch for juling\.exe/u,
   );
 });
 
@@ -293,13 +293,13 @@ test("installVerifiedArtifact atomically installs and leaves no staging artifact
     sourceDirectory: artifactDir,
     versionsDirectory: versionsDir,
     version: "v1",
-    requireFile: "omp.exe",
+    requireFile: "juling.exe",
   });
 
   const installedFiles = await readdir(versionsDir);
   assert.deepEqual(installedFiles, ["v1"]);
   const v1Files = await readdir(join(versionsDir, "v1"));
-  assert.ok(v1Files.includes("omp.exe"));
+  assert.ok(v1Files.includes("juling.exe"));
   assert.ok(v1Files.includes("runtime-manifest.json"));
 });
 
@@ -334,7 +334,7 @@ test("installVerifiedArtifact refuses to overwrite already installed version", a
     sourceDirectory: artifactDir,
     versionsDirectory: versionsDir,
     version: "v1",
-    requireFile: "omp.exe",
+    requireFile: "juling.exe",
   });
 
   await assert.rejects(
@@ -343,7 +343,7 @@ test("installVerifiedArtifact refuses to overwrite already installed version", a
         sourceDirectory: artifactDir,
         versionsDirectory: versionsDir,
         version: "v1",
-        requireFile: "omp.exe",
+        requireFile: "juling.exe",
       }),
     /Runtime v1 is already installed/u,
   );
@@ -354,10 +354,10 @@ test("installVerifiedArtifact verifies the copied staging tree before publishing
   const source = await createValidArtifact(temporary);
   const versions = join(temporary, "versions");
   await assert.rejects(() => installVerifiedArtifact({
-    sourceDirectory: source, versionsDirectory: versions, version: "v1", requireFile: "omp.exe",
+    sourceDirectory: source, versionsDirectory: versions, version: "v1", requireFile: "juling.exe",
     verifyStaging: async (directory) => {
       assert.notEqual(directory, source);
-      await writeFile(join(directory, "omp.exe"), "corrupted-copy");
+      await writeFile(join(directory, "juling.exe"), "corrupted-copy");
       await verifySignedArtifact({ directory, layout: RUNTIME_ARTIFACT_LAYOUT, parseManifest: parseRuntimeInstallationManifest, requireCovered: (manifest) => ["runtime-manifest.json", manifest.entrypoint], trustedKeys });
     },
   }), /Checksum mismatch/u);
@@ -372,7 +372,7 @@ test("failed repair publication restores the original directory", async () => {
   await mkdir(installed, { recursive: true });
   await writeFile(join(installed, "original.txt"), "preserve me");
   await assert.rejects(() => installVerifiedArtifact({
-    sourceDirectory: source, versionsDirectory: versions, version: "v1", requireFile: "omp.exe",
+    sourceDirectory: source, versionsDirectory: versions, version: "v1", requireFile: "juling.exe",
     replaceExisting: { beforeReplace: async () => undefined },
     // Model staging disappearing between verification and the final rename.
     verifyStaging: async (directory) => { await rm(directory, { recursive: true }); },

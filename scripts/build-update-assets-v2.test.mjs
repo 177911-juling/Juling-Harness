@@ -16,7 +16,7 @@ const hash = b => createHash("sha256").update(b).digest("hex");
 async function fixture(channel = "stable", runtimeVersion = "18.0.0-harness.1", exeBytes = "signed-runtime", platform = "win32-x64") {
   const root = await mkdtemp(join(tmpdir(), "omp-v2-release-")), runtimeDir = join(root, "runtime");
   await mkdir(runtimeDir);
-  const entrypoint = platform.startsWith("win32-") ? "omp.exe" : "omp";
+  const entrypoint = platform.startsWith("win32-") ? "juling.exe" : "omp";
   const exe = Buffer.from(exeBytes), manifest = Buffer.from(JSON.stringify({ runtimeVersion, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "harness.1", harnessProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform, entrypoint, channel }));
   const sums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { [entrypoint]: hash(exe), "runtime-manifest.json": hash(manifest) } }));
   const payload = Buffer.concat([manifest, Buffer.from("\0"), sums]);
@@ -74,7 +74,7 @@ test("Runtime-only release has no installer and uses independent tag/sequence", 
 });
 test("legacy migration feed is readable by v1 and remains immutable after first migration", async () => {
   const options = await fixture(), result = await buildUpdateAssetsV2(options);
-  const old = { schema: 1, sequence: 5, generatedAt: "2026-09-17T00:00:00Z", repo: "owner/repo", app: { version: "0.1.5", setup: result.manifest.app.file }, runtime: { runtimeVersion: "18.0.0-harness.1", channel: "stable", platform: "win32-x64", entrypoint: "omp.exe", minAppVersion: "0.1.5", harnessProtocol: { min: 1, max: 1 }, files: ["omp.exe", "runtime-manifest.json", "checksums.json", "runtime-signature.json"].map(name => ({ name, url: `https://github.com/owner/repo/releases/download/v0.1.5/${name}`, size: 1, sha256: "a".repeat(64) })) } };
+  const old = { schema: 1, sequence: 5, generatedAt: "2026-09-17T00:00:00Z", repo: "owner/repo", app: { version: "0.1.5", setup: result.manifest.app.file }, runtime: { runtimeVersion: "18.0.0-harness.1", channel: "stable", platform: "win32-x64", entrypoint: "juling.exe", minAppVersion: "0.1.5", harnessProtocol: { min: 1, max: 1 }, files: ["juling.exe", "runtime-manifest.json", "checksums.json", "runtime-signature.json"].map(name => ({ name, url: `https://github.com/owner/repo/releases/download/v0.1.5/${name}`, size: 1, sha256: "a".repeat(64) })) } };
   const bytes = Buffer.from(JSON.stringify(old)), previousPath = join(options.root, "update-index.json");
   await writeFile(previousPath, bytes);
   await writeFile(join(options.root, "update-index.sig.json"), JSON.stringify({ algorithm: "ed25519", keyId, payloadSha256: hash(bytes), signature: sign(null, bytes, signingKey).toString("base64url") }));

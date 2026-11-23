@@ -670,7 +670,13 @@ body > .dock-host-layer > .dock-panel-content .context-card { color: var(--cocoo
 .app-rail.is-collapsed .app-rail-handle {
   margin-left: 0;
   border-radius: 0 var(--r-4) var(--r-4) 0;
+  /* 收起态常显：rail 是唯一导航面（二级页页头不再复制入口），只剩靠近才出现的
+     手柄时，用户找不到把「工作台 / 首页 / … / 设置」拉回来的入口。展开态仍按
+     指针靠近显示，避免这条边缘挡侧栏的点击。 */
+  opacity: 0.55;
+  pointer-events: auto;
 }
+.app-rail.is-collapsed .app-rail-handle:is(:hover, :focus-visible, .is-near) { opacity: 1; }
 .app-rail-handle .icon { transition: transform var(--dur-slow) var(--ease-nav); }
 .app-rail.is-collapsed .app-rail-handle .icon { transform: rotate(180deg); }
 .app-rail-top {

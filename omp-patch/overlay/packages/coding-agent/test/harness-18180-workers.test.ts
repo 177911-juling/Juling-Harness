@@ -216,7 +216,6 @@ test("nine concurrent Harness agents reach native workers and retain conversatio
 		parentAgentId: MAIN_AGENT_ID,
 		taskDepth: 0,
 		modelOverride: "harness-test/model",
-		structured: false,
 		settings,
 		authStorage: auth,
 		modelRegistry: registry,

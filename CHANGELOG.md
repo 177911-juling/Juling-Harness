@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 新建对话欢迎区「活动轨迹」标题前的 π 图标去掉，只保留标题文字。
+
+## [1.1.0] - 2026-11-22
+
+### Added
+
+- 合入 OMP Studio 0.2.5–0.2.8：WSL 2 工作区、手机访问、统一反汇编工作台、Plan 源码/预览编辑、会话本地文件与日志浮窗、Ask 折叠与 BTW、会话 ID 引用、已归档批量删除、活动图标与 Advisor 批次折叠、`.xlsm`/`.xlsb`/`.ods` 与 `.docm`/`.pptm` 预览、SSH 准备与传输校验。
+- 模型目录随上游更新到 6,303 条，收录 Kiro、Modal、Bifrost 供应商定义；模型参数新增压缩形态。
+
+### Changed
+
+- 桌面与全部 workspace 包版本统一为 `1.1.0`，上游基线为 OMP Studio 0.2.8。
+- 内置 Runtime 升级到 **OMP 19.0.1**（`19.0.1-harness.7`）；上行目录改为 `disasm`/`ghidra`/`daemon`/`irc`，供应商与平台检测表随上游重排。
+- 移除上游已删除的 Seance 入口；IDA 面板并入统一反汇编器（`disassembler.*` 设置）。
+
+### Fixed
+
+- 会话行归属、文件路径链接、Advisor 顺序与来源、表格选区、Office 转换竞态、批量删除跳过已取消归档等上游修复随版合入。
+
+## [1.0.1] - 2026-11-20
+
+### Added
+
+- Release workflow supports artifact-only client builds without publishing a release.
+
+### Changed
+
+- 新建对话欢迎区顶部的 π 图标替换为应用 Logo。
+
 ## [1.0.0] - 2026-11-20
 
 ### Added
@@ -611,7 +642,9 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 Juling Harness 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/177911-juling/juling-harness/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/177911-juling/juling-harness/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/177911-juling/juling-harness/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/177911-juling/juling-harness/compare/v0.2.4...v1.0.0
 [0.2.4]: https://github.com/177911-juling/juling-harness/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/177911-juling/juling-harness/compare/v0.2.2...v0.2.3
 [0.2.0]: https://github.com/177911-juling/juling-harness/compare/v0.1.17...v0.2.0

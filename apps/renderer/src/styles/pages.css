@@ -1249,23 +1249,3 @@ details.diag-advanced .da-body { padding: 0 var(--sp-14) var(--sp-12); }
 .stats-fallback-detail { font-size: var(--fs-12); color: var(--text-3); max-width: 46ch; line-height: 1.6; }
 .stats-fallback-actions { display: flex; gap: var(--sp-8); margin-top: var(--sp-4); }
 
-/* 预览模式：不伪造内嵌，只给演示汇总。 */
-.stats-demo-note { font-size: var(--fs-12); color: var(--text-3); line-height: 1.6; padding: var(--sp-16) var(--sp-24) 0; }
-.stats-demo {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-12);
-  margin: var(--sp-16) var(--sp-24) var(--sp-24);
-}
-.stats-demo-cell {
-  display: flex; flex-direction: column; gap: 4px;
-  padding: var(--sp-16) var(--sp-20);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  background: var(--surface);
-  box-shadow: var(--shadow-1);
-}
-.stats-demo-cell .l {
-  font-family: var(--font-ui);
-  font-size: var(--fs-11); color: var(--text-3);
-  letter-spacing: 0; text-transform: none;
-}
-.stats-demo-cell .v { font-family: var(--font-ui); font-size: var(--fs-18); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; color: var(--text); }

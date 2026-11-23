@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SessionHistoryEntry, SessionHistoryReadModel, HarnessClient, TokenUsageReadModel } from "@juling-harness/client-contract";
-import { Icon } from "../icons";
+import { APP_ICON_SRC, Icon } from "../icons";
 import { useI18n } from "../i18n";
 import type { Locale } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -121,16 +121,15 @@ export function ConversationEmpty({
   return (
     <div className="convo-empty" role="region" aria-labelledby="ceGreet">
       <div className="ce-hero">
-        <svg className="ce-pi ce-anim" style={{ ["--beat" as string]: 0 }} viewBox="0 0 321 309" aria-hidden="true">
-          <defs>
-            <linearGradient id="piStroke" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stopColor="var(--aurora-2)" stopOpacity=".95" />
-              <stop offset=".55" stopColor="var(--aurora-1)" stopOpacity=".85" />
-              <stop offset="1" stopColor="var(--aurora-3)" stopOpacity=".8" />
-            </linearGradient>
-          </defs>
-          <path className="ce-pi-glyph" d="M20 20 H301 V79 H231 V289 H173 V79 H116 V219 H58 V79 H20 Z" />
-        </svg>
+        <img
+          className="ce-pi ce-anim"
+          style={{ ["--beat" as string]: 0 }}
+          src={APP_ICON_SRC}
+          width={72}
+          height={72}
+          alt=""
+          draggable={false}
+        />
         <h1 className="ce-greet ce-anim" style={{ ["--beat" as string]: 3 }} id="ceGreet">{greet}</h1>
         <p className="ce-sub ce-anim" style={{ ["--beat" as string]: 4 }}>
           {preview && marks
@@ -143,7 +142,7 @@ export function ConversationEmpty({
 
       <section className="ce-heat" aria-labelledby="ceHeatH">
         <div className="ce-heat-head ce-anim" style={{ ["--beat" as string]: 6 }}>
-          <h2 id="ceHeatH"><span className="ce-heat-pi" aria-hidden="true">π</span>{t("home.activityHeatmap")}{preview && marks ? <span className="chip purple xs">{t("common.demo")}</span> : null}</h2>
+          <h2 id="ceHeatH">{t("home.activityHeatmap")}{preview && marks ? <span className="chip purple xs">{t("common.demo")}</span> : null}</h2>
           <span className="ce-heat-stats">
             {usageReason
               ? usageReason

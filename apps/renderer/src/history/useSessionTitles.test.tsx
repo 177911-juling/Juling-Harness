@@ -94,7 +94,7 @@ it("keeps old Runtime and preview title display free of real queries", () => {
       <PreviewModeProvider switchEnabled>
         <Panel client={client} id="s" />
         <SessionTitleMark
-          row={previewSessionTitle("s", "跟踪上游 pi-web 更新到 juling-web")}
+          row={previewSessionTitle("s", "跟踪上游 pi-web 更新到 juling-harness")}
           title="Changed title"
         />
       </PreviewModeProvider>
@@ -121,7 +121,7 @@ it("shows a saved native title's emoji and code only once across language change
 it("retains separate metadata cards for legacy and preview titles without an embedded card", () => {
   const title = "Repair a test workspace";
   const row: SessionTitleRow = { sessionId: "legacy", state: "available", title, source: "auto", card: { emoji: "🛠️", code: "FIX" } };
-  const previewTitle = "跟踪上游 pi-web 更新到 omp-web";
+  const previewTitle = "跟踪上游 pi-web 更新到 juling-harness";
   const mounted = render(<I18nProvider forcedLanguage="zh">
     <SessionTitleMark row={row} title={title} /><span>{title}</span>
     <SessionTitleMark row={previewSessionTitle("preview", previewTitle)} title={previewTitle} />

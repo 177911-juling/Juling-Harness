@@ -4,12 +4,18 @@ export const REMOTE_CHANNELS = {
   openContext: "juling-harness:remote:open-context", closeContext: "juling-harness:remote:close-context",
   installRuntime: "juling-harness:remote:install-runtime",
   approve: "juling-harness:remote:approve", retryNetwork: "juling-harness:remote:retry-network",
+  wslDistributions: "juling-harness:remote:wsl-distributions", ensureWsl: "juling-harness:remote:ensure-wsl",
   list: "juling-harness:remote:list", save: "juling-harness:remote:save", remove: "juling-harness:remote:remove", connect: "juling-harness:remote:connect", disconnect: "juling-harness:remote:disconnect", select: "juling-harness:remote:select",
   bootstrap: "juling-harness:remote:bootstrap", query: "juling-harness:remote:query", command: "juling-harness:remote:command", directories: "juling-harness:remote:directories", register: "juling-harness:remote:register", event: "juling-harness:remote:event", changed: "juling-harness:remote:changed",
 } as const;
 export type RemoteNetworkMode = "remote-first" | "remote-only" | "local-only";
 export type RemotePreparationStage = "probe" | "confirmation" | "download" | "upload" | "install" | "verify" | "configure" | "connect";
+export type RemoteTargetKind = "ssh" | "wsl";
+export interface WslDistribution { name: string; version: 1 | 2; running: boolean; isDefault: boolean; }
+export interface WslInventory { available: boolean; distributions: WslDistribution[]; }
+export function targetNoun(profile?: { kind?: RemoteTargetKind }): "SSH" | "WSL" { return profile?.kind === "wsl" ? "WSL" : "SSH"; }
 export interface RemoteConnectionProfile {
+  kind?: RemoteTargetKind; distro?: string;
   id: string; name: string; host: string; user?: string; port?: number;
   /** Detected information retained for display; never a user-supplied requirement. */
   platform?: "linux" | "win32" | "darwin";
@@ -41,6 +47,8 @@ export interface RemoteConnectionStatus {
 export interface RemoteInventory { profiles: RemoteConnectionProfile[]; statuses: RemoteConnectionStatus[]; activeId?: string | null; }
 export interface RemoteDirectoryList { path: string; parent: string; directories: { name: string; path: string }[]; }
 export interface RemoteApi {
+  wslDistributions?(): Promise<WslInventory>;
+  ensureWsl?(distro: string): Promise<RemoteConnectionProfile>;
   list(): Promise<RemoteInventory>;
   save(profile: Omit<RemoteConnectionProfile, "id"> & { id?: string }): Promise<RemoteConnectionProfile>;
   remove(id: string): Promise<void>;

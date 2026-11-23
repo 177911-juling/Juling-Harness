@@ -495,7 +495,7 @@
 
   /* ---------- 诊断中心 ---------- */
   D.diagnostics = {
-    ompPath: 'C:\\Users\\snowpear\\AppData\\Local\\Programs\\omp\\omp.exe',
+    ompPath: 'C:\\Users\\snowpear\\AppData\\Local\\Programs\\omp\\juling.exe',
     version: 'v0.82.1', rpc: 'omp-rpc/2.1', bridge: 'connected · pid 21480',
     processes: [
       { name: 'omp bridge', pid: 21480, role: 'Bridge', mem: '84 MB' },

@@ -39,7 +39,7 @@ async function writeSignature(directory: string, manifest: string, checksums: st
 async function artifact(parent: string, version: string, content = `omp-${version}`): Promise<string> {
   const directory = join(parent, `artifact-${version}`);
   await mkdir(directory);
-  await writeFile(join(directory, "omp.exe"), content);
+  await writeFile(join(directory, "juling.exe"), content);
   const manifest = `${JSON.stringify({
     runtimeVersion: version,
     upstreamVersion: "0.0.0",
@@ -50,14 +50,14 @@ async function artifact(parent: string, version: string, content = `omp-${versio
     capabilityHash: "capability-fixture",
     commandManifestHash: "command-fixture",
     platform: "win32-x64",
-    entrypoint: "omp.exe",
+    entrypoint: "juling.exe",
     channel: "stable",
   })}\n`;
   await writeFile(join(directory, "runtime-manifest.json"), manifest);
   const checksums = `${JSON.stringify({
     algorithm: "sha256",
     files: {
-      "omp.exe": createHash("sha256").update(content).digest("hex"),
+      "juling.exe": createHash("sha256").update(content).digest("hex"),
       "runtime-manifest.json": createHash("sha256").update(manifest).digest("hex"),
     },
   })}\n`;
@@ -75,7 +75,7 @@ async function installedRuntime(
   const installer = runtimeInstaller(root, options);
   await installer.install(await artifact(parent, "v1", content));
   await installer.activate("v1", { selfCheck: passingSelfCheck });
-  return { installer, entrypoint: join(root, "versions", "v1", "omp.exe") };
+  return { installer, entrypoint: join(root, "versions", "v1", "juling.exe") };
 }
 
 test("currentManifest publishes the signed entrypoint digest for the execution boundary", async () => {
@@ -132,8 +132,8 @@ test("an entrypoint whose bytes changed is hashed again and rejected", async () 
     assert.equal(installer.verificationStats().contentHashes, 1);
 
     // Same length, so only the modification time can reveal the replacement.
-    await writeFile(join(temporary, "installed", "versions", "v1", "omp.exe"), "B".repeat(content.length));
-    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
+    await writeFile(join(temporary, "installed", "versions", "v1", "juling.exe"), "B".repeat(content.length));
+    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for juling\.exe/u);
     assert.equal(installer.verificationStats().contentHashes, 2);
   } finally {
     await rm(temporary, { recursive: true, force: true });
@@ -169,7 +169,7 @@ test("evidence older than the trust window is re-hashed even when the stat ident
     assert.equal(installer.verificationStats().contentHashes, 1);
 
     clock.now += 2_000;
-    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
+    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for juling\.exe/u);
     assert.equal(installer.verificationStats().contentHashes, 2);
   } finally {
     await rm(temporary, { recursive: true, force: true });
@@ -229,8 +229,8 @@ test("a failed verification is never recorded", async () => {
   try {
     const { installer, entrypoint } = await installedRuntime(temporary);
     await writeFile(entrypoint, "tampered-before-first-lookup");
-    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
-    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
+    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for juling\.exe/u);
+    await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for juling\.exe/u);
     const stats = installer.verificationStats();
     assert.equal(stats.contentHashes, 2);
     assert.equal(stats.cacheHits, 0);

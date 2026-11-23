@@ -8,7 +8,7 @@
      ========================================================================== */
 
   const ENV_CHECKS_OK = [
-    { id: 'cli', label: 'OMP CLI', status: 'ok', value: 'C:\\Users\\the_snowpear\\.bun\\bin\\omp.exe', detail: '通过 PATH 找到' },
+    { id: 'cli', label: 'OMP CLI', status: 'ok', value: 'C:\\Users\\the_snowpear\\.bun\\bin\\juling.exe', detail: '通过 PATH 找到' },
     { id: 'version', label: 'OMP 版本', status: 'ok', value: '0.8.4', detail: '满足最低要求 0.8.0' },
     { id: 'rpc', label: 'RPC 协议', status: 'ok', value: 'v3', detail: 'Bridge 支持 v2–v3' },
     { id: 'capability', label: 'Capability', status: 'ok', value: '14 / 14 可用', detail: 'preview, browser, screenshot, dom, mcp, skills, plugins, hooks, subagent, checkpoint, compact, fork, handoff, telemetry' },
@@ -24,7 +24,7 @@
   ];
 
   const ENV_CHECKS_FAIL = [
-    { id: 'cli', label: 'OMP CLI', status: 'ok', value: 'C:\\Users\\the_snowpear\\.bun\\bin\\omp.exe', detail: '通过 PATH 找到' },
+    { id: 'cli', label: 'OMP CLI', status: 'ok', value: 'C:\\Users\\the_snowpear\\.bun\\bin\\juling.exe', detail: '通过 PATH 找到' },
     {
       id: 'version', label: 'OMP 版本', status: 'warn', value: '0.7.2',
       detail: '低于最低要求 0.8.0。Capability 探测与 Checkpoint 恢复不可用。',
@@ -69,7 +69,7 @@
 
   const DIAGNOSTICS = {
     basic: {
-      ompPath: 'C:\\Users\\the_snowpear\\.bun\\bin\\omp.exe',
+      ompPath: 'C:\\Users\\the_snowpear\\.bun\\bin\\juling.exe',
       ompVersion: '0.8.4',
       rpcVersion: 'v3',
       bridgeStatus: 'connected',
