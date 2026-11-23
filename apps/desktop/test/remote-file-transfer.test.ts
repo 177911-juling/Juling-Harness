@@ -3,7 +3,7 @@ import test from "node:test";
 import { REMOTE_UPLOAD_TIMING, hasUploadStalled, remoteUploadRoutes, runUploadFallback, scpLegacyArguments, scpRemotePath, sftpArguments, sftpQuote, sftpRemotePath } from "../src/remote/file-transfer.js";
 import { RemoteConnectionError } from "../src/remote/errors.js";
 
-const connection = { host: "deskserver", user: "the_snowpear", port: 2222, authMode: "agent" as const };
+const connection = { host: "deskserver", user: "177911-juling", port: 2222, authMode: "agent" as const };
 
 test("Windows configuration uploads prefer SFTP and retain SCP as the fallback", () => {
   assert.deepEqual(remoteUploadRoutes("win32", "ssh"), ["sftp", "scp-legacy"]);
@@ -12,15 +12,15 @@ test("Windows configuration uploads prefer SFTP and retain SCP as the fallback",
 });
 
 test("SFTP and legacy SCP arguments preserve SSH connection options", () => {
-  assert.deepEqual(sftpArguments(connection), ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-P", "2222", "-b", "-", "the_snowpear@deskserver"]);
-  assert.deepEqual(scpLegacyArguments(connection, "C:\\tmp\\package.zip", "C:\\Users\\the_snowpear\\AppData\\Local\\juling-harness\\remote\\package.zip", "win32").slice(-2), ["C:\\tmp\\package.zip", "the_snowpear@deskserver:'C:/Users/the_snowpear/AppData/Local/juling-harness/remote/package.zip'"]);
+  assert.deepEqual(sftpArguments(connection), ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-P", "2222", "-b", "-", "177911-juling@deskserver"]);
+  assert.deepEqual(scpLegacyArguments(connection, "C:\\tmp\\package.zip", "C:\\Users\\177911-juling\\AppData\\Local\\juling-harness\\remote\\package.zip", "win32").slice(-2), ["C:\\tmp\\package.zip", "177911-juling@deskserver:'C:/Users/177911-juling/AppData/Local/juling-harness/remote/package.zip'"]);
 });
 
 test("password-mode transfer arguments retain password-only SSH options", () => {
   const passwordConnection = { ...connection, authMode: "password" as const };
   const args = sftpArguments(passwordConnection);
   assert.equal(args[1], "BatchMode=no");
-  assert.deepEqual(args.slice(-3), ["-b", "-", "the_snowpear@deskserver"]);
+  assert.deepEqual(args.slice(-3), ["-b", "-", "177911-juling@deskserver"]);
   assert.ok(args.includes("PreferredAuthentications=password"));
   assert.ok(args.includes("KbdInteractiveAuthentication=no"));
 });

@@ -56,7 +56,7 @@ an individual is officially representing the community in public spaces.
 
 Report incidents to the maintainers via a
 [private GitHub security advisory](https://github.com/177911-juling/juling-harness/security/advisories/new)
-or by contacting [@the-snowpear](https://github.com/the-snowpear). All complaints
+or by contacting [@177911-juling](https://github.com/177911-juling). All complaints
 will be reviewed and investigated promptly and fairly.
 
 All project maintainers are obligated to respect the privacy and security of the

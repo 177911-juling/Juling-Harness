@@ -466,7 +466,7 @@ export const PREVIEW_GIT_LOG = {
       oid: "dddddddddddddddddddddddddddddddddddddddd",
       parents: [],
       subject: "Initial commit",
-      authorName: "thesnowpear",
+      authorName: "177911-juling",
       authorDate: "2026-08-01T08:00:00Z",
       relation: "common" as const,
       refs: [],

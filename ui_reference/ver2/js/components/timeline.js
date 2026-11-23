@@ -142,7 +142,7 @@
       return h('div', { class: 'msg-user' },
         h('div', { class: 'msg-user-header' },
           h('span', { class: 'msg-user-avatar' }, 'N'),
-          h('span', { class: 'msg-user-name' }, 'the_snowpear'),
+          h('span', { class: 'msg-user-name' }, '177911-juling'),
           h('span', { class: 'msg-user-time' }, ev.time),
         ),
         h('div', { class: 'msg-user-body md' }, ...md(ev.text)),

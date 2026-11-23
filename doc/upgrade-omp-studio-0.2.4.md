@@ -147,7 +147,7 @@
 6. **投影脚本已知缺陷（重要）**
    上次升级用的临时投影脚本（`%TEMP%\omp-up\project.mjs`，可能已被系统清理）只处理固定扩展名。0.2.4 新增的
    `packaging/linux/omp-deb-update`（无扩展名）与 `scripts/linux-deb-update-integration.py`（`.py` 不在表里）
-   会保留上游身份：`REPO = "the-snowpear/omp-studio"`、`Package: omp-studio`、
+   会保留上游身份：上游仓库地址、`Package: omp-studio`、
    签名域 `omp-studio-update-v2`。而 `publish-update-release.mjs` 已投影为
    `juling-harness-update-v2` —— **不修就会导致 deb 更新全链路验签失败**。
    同类历史遗留：`packaging/linux/AppRun`、`packaging/nsis/custom.nsh`、`packaging/installer-host/InstallerHost.cs`、

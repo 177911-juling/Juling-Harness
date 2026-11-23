@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "main": "./dist/src/main.js",
-  "author": "snowpear",
+  "author": "177911-juling",
   "description": "Juling Harness desktop shell (Electron Main) for Windows, macOS and Linux",
   "scripts": {
     "dev": "electron .",

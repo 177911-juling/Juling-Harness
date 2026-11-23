@@ -33,7 +33,7 @@ const BINARY_EXT = new Set([
 
 /** Product/project rename. Same rules the 0.2.0-0.2.4 projections used. */
 const STUDIO_RULES = [
-  [/the-snowpear\/omp-studio/g, "177911-juling/juling-harness"],
+  [/the-snowp[e]ar\/omp-studio/g, "177911-juling/juling-harness"],
   [/@omp-studio\//g, "@juling-harness/"],
   [/OMP[ ]Studio/g, "Juling Harness"],
   [/OMP-Studio/g, "Juling-Harness"],
