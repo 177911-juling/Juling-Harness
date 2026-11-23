@@ -11,7 +11,7 @@
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | Phase 0 冻结 | ✅ | 提交待处理改动；创建 `upgrade/0.2.8` 分支与 `pre-0.2.8-20261122` 回滚标签 |
-| Phase 1 投影 | ✅ | `scripts/project-omp-studio.mjs` 固化；`upstream/omp-studio-0.2.8` 分支 |
+| Phase 1 投影 | ✅ | `scripts/project-upstream.mjs` 固化；`upstream/omp-studio-0.2.8` 分支 |
 | Phase 2 合并 | ✅ | 140 个重叠文件；82 个冲突按域解决 |
 | Phase 3 Runtime | ✅ | vendor 切到 `f40f335…`（OMP 19.0.1）；overlay 312 文件三方合并；0001–0004 取上游、0005/0006 重放；`series.json` = `19.0.1-harness.7` |
 | Phase 4 i18n/预览/文档 | ✅ | 六语补齐 0.2.8 新增键；文档与版本号更新到 `1.1.0` |
@@ -370,7 +370,7 @@ npm run check -- --fast            # 确认基线绿
 
 ### Phase 1：生成 0.2.8 投影分支
 
-1. 把投影脚本固化到仓库 `scripts/project-omp-studio.mjs`（不再放临时目录），并修正已知缺陷：
+1. 把投影脚本固化到仓库 `scripts/project-upstream.mjs`（不再放临时目录），并修正已知缺陷：
    - 文本扩展名补齐 `.py`、`.cs`、`.nsh`、`.ps1`、`.sh`、`.cmd`、`.jsonc`；
    - 无扩展名但无 NUL 的文件按文本处理（`packaging/linux/omp-deb-update`、`AppRun`）；
    - 统一 LF；
@@ -557,7 +557,7 @@ npm run runtime:verify-source
 ### 6.7 是否把投影脚本入库
 
 建议：**是**。本次分析用的投影脚本目前只在临时目录（上次升级也踩过）。固化到
-`scripts/project-omp-studio.mjs` 并纳入检查，下一次升级不再重新造轮子。
+`scripts/project-upstream.mjs` 并纳入检查，下一次升级不再重新造轮子。
 
 ### 6.8 Linux AppRun
 
