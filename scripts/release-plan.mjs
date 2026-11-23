@@ -10,7 +10,7 @@ const runners = [
   { target: "linux-x64", os: "ubuntu-24.04" },
   { target: "linux-arm64", os: "ubuntu-24.04-arm" },
   { target: "darwin-x64", os: "macos-15-intel" },
-  { target: "darwin-arm64", os: "macos-15" },
+  { target: "darwin-arm64", os: "macos-latest" },
 ];
 
 export function releasePlan({ kind = "desktop", arch = "both", includeMacos = false, includeLinux = true, platforms } = {}) {
