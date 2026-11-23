@@ -89,7 +89,7 @@ export function previewGalleryItems(zh = isZh()): readonly ConversationItem[] {
   ];
 }
 
-/** omp-web upstream sync: realistic project turn used for workbench preview conversation. */
+/** juling-harness upstream sync: realistic project turn used for workbench preview conversation. */
 function buildStoryCards(zh: boolean): readonly { readonly [key: string]: JsonValue }[] {
   return [
     {
@@ -101,8 +101,8 @@ function buildStoryCards(zh: boolean): readonly { readonly [key: string]: JsonVa
         ? "先核对 package.json 钉住的上游版本，再扫 docs 里现有同步说明。本地 Harness Bridge 和会话目录不要写回 pi-web。"
         : "Check the pinned upstream version in package.json first, then scan docs for existing sync notes. Keep Harness Bridge and the session directory out of pi-web.",
       full: zh
-        ? "目标：把 pi-web v0.8.1 合进 omp-web。\n保留 packages/harness-bridge 与 ~/.omp/agent/sessions。\n文档落到 docs/UPSTREAM-SYNC.md，README 加入口。"
-        : "Goal: merge pi-web v0.8.1 into omp-web.\nPreserve packages/harness-bridge and ~/.omp/agent/sessions.\nWrite docs to docs/UPSTREAM-SYNC.md and add a link in README.",
+        ? "目标：把 pi-web v0.8.1 合进 juling-harness。\n保留 packages/harness-bridge 与 ~/.omp/agent/sessions。\n文档落到 docs/UPSTREAM-SYNC.md，README 加入口。"
+        : "Goal: merge pi-web v0.8.1 into juling-harness.\nPreserve packages/harness-bridge and ~/.omp/agent/sessions.\nWrite docs to docs/UPSTREAM-SYNC.md and add a link in README.",
     },
     {
       kind: "read",
@@ -116,7 +116,7 @@ function buildStoryCards(zh: boolean): readonly { readonly [key: string]: JsonVa
       offset: 1,
       preview: [
         "{",
-        "  \"name\": \"omp-web\",",
+        "  \"name\": \"juling-harness\",",
         "  \"version\": \"0.8.0\",",
         "  \"dependencies\": {",
         "    \"@earendil-works/pi-web\": \"0.8.0\"",
@@ -259,14 +259,45 @@ export function getPreviewConvoItems(zh = isZh()): readonly ConversationItem[] {
       content: [{
         type: "text",
         text: zh
-          ? "用 /skill:upstream-sync 把上游 pi-web v0.8.1 同步进 omp-web。保留本地 Harness Bridge 和会话目录，不要写回 pi-web 路径。先读 @docs/ 和 @package.json，再出文档。"
-          : "Run /skill:upstream-sync to merge pi-web v0.8.1 into omp-web. Keep local Harness Bridge and session paths intact without writing back to pi-web paths. Read @docs/ and @package.json first, then update the docs.",
+          ? "用 /skill:upstream-sync 把上游 pi-web v0.8.1 同步进 juling-harness。保留本地 Harness Bridge 和会话目录，不要写回 pi-web 路径。先读 @docs/ 和 @package.json，再出文档。"
+          : "Run /skill:upstream-sync to merge pi-web v0.8.1 into juling-harness. Keep local Harness Bridge and session paths intact without writing back to pi-web paths. Read @docs/ and @package.json first, then update the docs.",
       }],
     },
     {
       kind: "message",
-      itemId: "preview-assistant-1",
+      itemId: "preview-advisor-1",
       parentId: "preview-user-1",
+      createdAt: at(3),
+      role: "advisor",
+      content: [{ type: "text", advisor: "upstream-sync", severity: "concern", text: zh
+        ? "请核对同步后的 Harness Bridge 路径，再运行类型检查。"
+        : "Check the Harness Bridge path after the sync, then run the type check." }],
+    },
+    {
+      kind: "message",
+      itemId: "preview-advisor-batch",
+      parentId: "preview-advisor-1",
+      createdAt: at(3),
+      role: "advisor",
+      content: [
+        { type: "text", advisor: "upstream-sync", severity: "concern", text: zh
+          ? "同步完成后，确认本地 Harness Bridge 能力仍可正常调用。"
+          : "After syncing, confirm the local Harness Bridge capabilities still work." },
+        { type: "text", advisor: "docs", severity: "nit", text: zh
+          ? "同步文档里的复查命令应与 package.json 保持一致。"
+          : "Keep the verification commands in the sync notes aligned with package.json." },
+        { type: "text", advisor: "upstream-sync", severity: "concern", text: zh
+          ? "回放历史会话，核对同步前后的消息顺序。"
+          : "Replay a historical session and compare message ordering before and after the sync." },
+        { type: "text", advisor: "docs", text: zh
+          ? "在同步记录中注明已经验证的平台。"
+          : "Record the platforms actually verified in the sync notes." },
+      ],
+    },
+    {
+      kind: "message",
+      itemId: "preview-assistant-1",
+      parentId: "preview-advisor-batch",
       createdAt: at(4),
       role: "assistant",
       content: [
@@ -297,6 +328,21 @@ export function getPreviewConvoItems(zh = isZh()): readonly ConversationItem[] {
             "- [x] Update sync notes and README\n- [x] Verify local paths\n- [ ] Recheck type errors\n- [ ] Confirm zoom interaction",
           ]).join("\n\n"),
         },
+      ],
+    },
+    {
+      kind: "message",
+      itemId: "preview-advisor-blocker",
+      parentId: "preview-assistant-1",
+      createdAt: at(5),
+      role: "advisor",
+      content: [
+        { type: "text", advisor: "upstream-sync", severity: "blocker", text: zh
+          ? "类型检查仍未通过，完成修复前不要将本次同步标记为已验收。"
+          : "The type check is still failing. Fix it before marking this sync as verified." },
+        { type: "text", advisor: "upstream-sync", severity: "concern", text: zh
+          ? "修复后重新检查全屏缩放，并将结果补入同步记录。"
+          : "Recheck fullscreen zoom after the fix and add the result to the sync notes." },
       ],
     },
   ];
@@ -429,7 +475,7 @@ export function getPreviewConvoLive(zh = isZh()): readonly ConversationRuntimeEv
       messageId: "preview-live-assistant",
       toolCallId: "preview-bash-live",
       toolName: "Bash",
-      arguments: { command: "npm run typecheck", cwd: "D:/Project/omp-web" },
+      arguments: { command: "npm run typecheck", cwd: "D:/Project/juling-harness" },
       startedAt: at(21),
     },
     {

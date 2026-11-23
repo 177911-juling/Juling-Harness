@@ -615,7 +615,7 @@
     if (!$('#envList')) return;
     let ok = true;
     const checks = [
-      ['OMP CLI', 'C:\\Users\\snowpear\\AppData\\Local\\Programs\\omp\\omp.exe', true],
+      ['OMP CLI', 'C:\\Users\\snowpear\\AppData\\Local\\Programs\\omp\\juling.exe', true],
       ['OMP 版本', 'v0.82.1（要求 ≥ v0.80.0）', true],
       ['RPC 协议', 'omp-rpc/2.1 · 握手成功', true],
       ['Capability', '14 项已协商（agent.run / fs.write / preview.dom …）', true],

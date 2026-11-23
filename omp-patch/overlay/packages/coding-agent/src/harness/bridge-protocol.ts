@@ -246,6 +246,7 @@ export type HarnessRemoteInteractionRequest =
 			title: string;
 			placeholder?: string;
 			secret?: boolean;
+			riskAcknowledgement?: boolean;
 	  }
 	| {
 			kind: "editor";
@@ -381,6 +382,8 @@ export interface HarnessEventEnvelope {
 }
 
 export interface HarnessSessionTelemetry {
+	offTranscript?: Array<{ kind: "title" | "jobCaption" | "judge" | "cacheWarming"; requests: number; tokens: number }>;
+	decisionModels?: Array<{ purpose: string; provider: string; model: string; requests: number; tokens: number }>;
 	treeCost?: number;
 	budget?: { warnCost: number | null; maxCost: number | null; limitReached: boolean };
 	editRejections?: Record<string, number>;
@@ -464,6 +467,8 @@ export interface HarnessOperatorStateSnapshot {
 	sessionTitleSource?: "user" | "auto";
 	isStreaming: boolean;
 	isCompacting: boolean;
+	compactionMode?: "normal" | "handoff";
+	hintCompression?: { skills: number; mcp: number };
 	activeMode: "normal" | "plan" | "goal" | "vibe";
 	approvalMode: "always-ask" | "always-ask-cached" | "write" | "yolo";
 	plan?: { status: "off" | "active" | "paused" | "review"; planReference?: string; title?: string; body?: string };
@@ -1336,74 +1341,108 @@ export function encodeHarnessFrame(frameId: string, runtimeEpoch: number, body: 
 	return frame;
 }
 
+const EMPTY_FRAME_BUFFER = Buffer.alloc(0);
+
 export class HarnessFrameDecoder {
-	#buffer = Buffer.alloc(0);
+	#buffer: Buffer = EMPTY_FRAME_BUFFER;
+	#used = 0;
 	#failed = false;
 
 	push(chunk: Uint8Array): DecodedHarnessFrame[] {
 		if (this.#failed) throw new HarnessFrameError("Decoder closed after protocol error");
 		const frames: DecodedHarnessFrame[] = [];
+		const view = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
 		let offset = 0;
-		while (offset < chunk.byteLength || this.#buffer.byteLength >= LENGTH_PREFIX_BYTES) {
-			if (this.#buffer.byteLength < LENGTH_PREFIX_BYTES) {
-				const count = Math.min(LENGTH_PREFIX_BYTES - this.#buffer.byteLength, chunk.byteLength - offset);
-				if (count <= 0) break;
-				this.#buffer = Buffer.concat([this.#buffer, Buffer.from(chunk.subarray(offset, offset + count))]);
-				offset += count;
-				if (this.#buffer.byteLength < LENGTH_PREFIX_BYTES) break;
-			}
-			const payloadLength = this.#buffer.readUInt32BE(0);
-			if (payloadLength > DEFAULT_MAX_CONTROL_FRAME_BYTES || payloadLength < LENGTH_PREFIX_BYTES) {
-				this.#fail("Invalid frame length");
-			}
-			const frameLength = LENGTH_PREFIX_BYTES + payloadLength;
-			if (this.#buffer.byteLength < frameLength && offset < chunk.byteLength) {
-				const count = Math.min(frameLength - this.#buffer.byteLength, chunk.byteLength - offset);
-				this.#buffer = Buffer.concat([this.#buffer, Buffer.from(chunk.subarray(offset, offset + count))]);
-				offset += count;
-			}
-			if (this.#buffer.byteLength < frameLength) break;
-			try {
-				const payload = this.#buffer.subarray(LENGTH_PREFIX_BYTES, frameLength);
-				const headerLength = payload.readUInt32BE(0);
-				if (headerLength <= 0 || headerLength > payloadLength - LENGTH_PREFIX_BYTES) {
-					throw new HarnessFrameError("Invalid frame header length");
+		while (offset < view.length) {
+			const available = view.length - offset;
+			if (this.#used === 0 && available >= LENGTH_PREFIX_BYTES) {
+				const length = this.#frameLength(view.readUInt32BE(offset));
+				if (available < length) {
+					this.#append(view.subarray(offset), length);
+					break;
 				}
-				const header = record(
-					JSON.parse(payload.subarray(LENGTH_PREFIX_BYTES, LENGTH_PREFIX_BYTES + headerLength).toString("utf8")),
-				);
-				exactKeys(header, ["protocol", "version", "frameId", "runtimeEpoch", "bodyLength"]);
-				if (
-					header.protocol !== HARNESS_PROTOCOL_NAME ||
-					header.version !== HARNESS_PROTOCOL_VERSION ||
-					!nonEmptyString(header.frameId) ||
-					!Number.isSafeInteger(header.runtimeEpoch) ||
-					(header.runtimeEpoch as number) < 0 ||
-					!Number.isSafeInteger(header.bodyLength) ||
-					(header.bodyLength as number) < 0
-				) {
-					throw new HarnessFrameError("Invalid frame header");
-				}
-				const bodyBytes = payload.subarray(LENGTH_PREFIX_BYTES + headerLength);
-				if (bodyBytes.byteLength !== header.bodyLength) throw new HarnessFrameError("Frame body length mismatch");
-				frames.push({
-					header: header as unknown as DecodedHarnessFrame["header"],
-					body: JSON.parse(bodyBytes.toString("utf8")) as unknown,
-				});
-			} catch (error) {
-				this.#failed = true;
-				this.#buffer = Buffer.alloc(0);
-				if (error instanceof HarnessFrameError) throw error;
-				throw new HarnessFrameError("Malformed frame");
+				frames.push(this.#decodePayload(view.subarray(offset + LENGTH_PREFIX_BYTES, offset + length)));
+				offset += length;
+				continue;
 			}
-			this.#buffer = Buffer.alloc(0);
+
+			if (this.#used < LENGTH_PREFIX_BYTES) {
+				const count = Math.min(LENGTH_PREFIX_BYTES - this.#used, available);
+				this.#append(view.subarray(offset, offset + count), LENGTH_PREFIX_BYTES);
+				offset += count;
+				if (this.#used < LENGTH_PREFIX_BYTES) break;
+			}
+			const length = this.#frameLength(this.#buffer.readUInt32BE(0));
+			const count = Math.min(length - this.#used, view.length - offset);
+			this.#append(view.subarray(offset, offset + count), length);
+			offset += count;
+			if (this.#used < length) break;
+			frames.push(this.#decodePayload(this.#buffer.subarray(LENGTH_PREFIX_BYTES, length)));
+			this.#buffer = EMPTY_FRAME_BUFFER;
+			this.#used = 0;
 		}
 		return frames;
 	}
 
+	#frameLength(payloadLength: number): number {
+		if (payloadLength > DEFAULT_MAX_CONTROL_FRAME_BYTES || payloadLength < LENGTH_PREFIX_BYTES) {
+			this.#fail("Invalid frame length");
+		}
+		return LENGTH_PREFIX_BYTES + payloadLength;
+	}
+
+	// Partial frames own only the bytes received so far. Growing geometrically
+	// avoids copying the entire prefix on every pipe or socket read.
+	#append(fragment: Buffer, limit: number): void {
+		const needed = this.#used + fragment.length;
+		if (needed > this.#buffer.length) {
+			const capacity = Math.min(limit, Math.max(needed, this.#buffer.length * 2));
+			const next = Buffer.allocUnsafe(capacity);
+			this.#buffer.copy(next, 0, 0, this.#used);
+			this.#buffer = next;
+		}
+		fragment.copy(this.#buffer, this.#used);
+		this.#used = needed;
+	}
+
+	#decodePayload(payload: Buffer): DecodedHarnessFrame {
+		try {
+			const headerLength = payload.readUInt32BE(0);
+			if (headerLength <= 0 || headerLength > payload.length - LENGTH_PREFIX_BYTES) {
+				throw new HarnessFrameError("Invalid frame header length");
+			}
+			const header = record(
+				JSON.parse(payload.subarray(LENGTH_PREFIX_BYTES, LENGTH_PREFIX_BYTES + headerLength).toString("utf8")),
+			);
+			exactKeys(header, ["protocol", "version", "frameId", "runtimeEpoch", "bodyLength"]);
+			if (
+				header.protocol !== HARNESS_PROTOCOL_NAME ||
+				header.version !== HARNESS_PROTOCOL_VERSION ||
+				!nonEmptyString(header.frameId) ||
+				!Number.isSafeInteger(header.runtimeEpoch) ||
+				(header.runtimeEpoch as number) < 0 ||
+				!Number.isSafeInteger(header.bodyLength) ||
+				(header.bodyLength as number) < 0
+			) {
+				throw new HarnessFrameError("Invalid frame header");
+			}
+			const bodyBytes = payload.subarray(LENGTH_PREFIX_BYTES + headerLength);
+			if (bodyBytes.byteLength !== header.bodyLength) throw new HarnessFrameError("Frame body length mismatch");
+			return {
+				header: header as unknown as DecodedHarnessFrame["header"],
+				body: JSON.parse(bodyBytes.toString("utf8")) as unknown,
+			};
+		} catch (error) {
+			this.#failed = true;
+			this.#buffer = EMPTY_FRAME_BUFFER;
+			if (error instanceof HarnessFrameError) throw error;
+			throw new HarnessFrameError("Malformed frame");
+		}
+	}
+
 	#fail(message: string): never {
 		this.#failed = true;
-		this.#buffer = Buffer.alloc(0);
+		this.#buffer = EMPTY_FRAME_BUFFER;
 		throw new HarnessFrameError(message);
 	}
 }

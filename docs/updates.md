@@ -2,7 +2,7 @@
 
 Juling Harness 在应用内检查、验签、准备并安装桌面与 Runtime 更新，覆盖 Windows、macOS 和 Linux。桌面更新包括 Electron、Main、Renderer、preload 与原生模块；Runtime 可以独立更新，保留 Stable / Canary 通道。两者共用签名发现、差分下载和持久化事务，桌面更新在用户主动重启后安装，Runtime 更新则在校验通过后激活。
 
-更新器只信任签名清单和工件摘要。镜像、CDN 和 GitHub Release 都只是传输位置，不能改变信任来源。下载失败的版本不会覆盖当前安装，缺少可验证旧版本时也不会伪造回滚入口。当前 1.0.0 的 Windows、macOS 与 Linux 客户端使用同一套 v2 更新协议。
+更新器只信任签名清单和工件摘要。镜像、CDN 和 GitHub Release 都只是传输位置，不能改变信任来源。下载失败的版本不会覆盖当前安装，缺少可验证旧版本时也不会伪造回滚入口。当前 1.0.1 的 Windows、macOS 与 Linux 客户端使用同一套 v2 更新协议。
 
 ## 更新范围与通道
 

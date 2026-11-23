@@ -150,7 +150,7 @@ try{
  const invoke=(name,input={})=>command(name,{sessionId:session.sessionId,...input});
  if(process.env.OMP_E2E_WORKTREE_ONLY!=='1'){
  const caps=await query('capabilities.get');
- for(const id of ['ida.status','resource.read','session.queue.list','session.queue.ack','session.tier.get','session.skills.list','agent.btw.read'])if(!caps.capabilities.some(c=>c.id===id&&c.grade!=='unavailable'))throw Error('Missing '+id);
+ for(const id of ['disassembler.status','resource.read','session.queue.list','session.queue.ack','session.tier.get','session.skills.list','agent.btw.read'])if(!caps.capabilities.some(c=>c.id===id&&c.grade!=='unavailable'))throw Error('Missing '+id);
  report.checks.push('signed managed Runtime handshake and capability negotiation');
  for(const id of ['preferences.features.get','accounts.pool.options','models.compaction.preview','session.portability.prepare','maintenance.compression.scan','worktrees.session.create','mode.plan.review.details','composer.predictions'])if(!caps.capabilities.some(c=>c.id===id&&c.grade!=='unavailable'))throw Error('Missing new capability '+id);
  const featureSettings=(await invoke('preferences.features.get')).result;
@@ -176,7 +176,7 @@ try{
  if(recovered.imported?.workspaceId!==imported.workspaceId)throw Error('Import result was not recoverable after refresh');
  await invoke('session.portability.anonymize',{targetSessionId:transferSessionId});
  report.checks.push('native archive export, private desktop transfer, collision-preserving import, recoverable result and anonymous export');
- for(const name of ['ida.status','session.queue.list','session.tier.get','session.skills.list']){const value=await invoke(name);if(name==='ida.status')report.ida=value;report.checks.push(name);}
+ for(const name of ['disassembler.status','session.queue.list','session.tier.get','session.skills.list']){const value=await invoke(name);if(name==='disassembler.status')report.disassembler=value;report.checks.push(name);}
  await invoke('resource.read',{uri:'omp://'});
  const prediction=await query('prediction.query',{sessionId:session.sessionId,version:1,before:'',prefix:'unsent-verification'});
  if(prediction.version!==1)throw Error('Prediction version mismatch');
@@ -217,9 +217,9 @@ try{
   }
   if(route==='evaluation')await page.locator('#evaluation-judgment').click();
   if(route==='capabilities'){
-   await page.locator('#capTab-ida').click();
-   await page.getByRole('heading',{name:/IDA/}).waitFor();
-   if(preview){await page.getByRole('button',{name:/修改数据库|Edit database/}).click();await page.getByRole('combobox',{name:/IDA 操作|IDA action/}).click();await page.getByRole('option',{name:/保存数据库|Save database/}).click();await page.getByRole('button',{name:/^检查操作$|^Review operation$/}).click();await page.getByRole('dialog',{name:/确认 IDA 操作|Confirm IDA operation/}).waitFor();await page.getByRole('dialog',{name:/确认 IDA 操作|Confirm IDA operation/}).getByRole('button',{name:/^返回$|^Back$/}).click();}
+   await page.locator('#capTab-disassembler').click();
+   await page.getByRole('heading',{name:/Disassembler|反汇编/}).waitFor();
+   if(preview){await page.getByRole('button',{name:/数据库视图与编辑|Database views and edits/}).click();await page.getByRole('combobox',{name:/IDA 数据库|IDA database/}).selectOption({index:1});await page.getByRole('button',{name:/^检查操作$|^Review operation$/}).click();await page.getByRole('alertdialog').waitFor();await page.getByRole('alertdialog').getByRole('button',{name:/^返回$|^Back$/}).click();}
   }
   await capture((preview?'preview-':'real-')+route);report.checks.push((preview?'preview':'real')+' '+route);
  }

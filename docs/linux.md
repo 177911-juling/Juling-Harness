@@ -2,7 +2,7 @@
 
 Juling Harness 为 Linux x64 桌面提供原生客户端，包含 Electron 工作台、类型化 Harness Bridge、内置签名 OMP Runtime 与原生 PTY。发布格式为 deb 和 AppImage：Ubuntu、Debian 用户使用 deb 获得系统集成与 apt 管理的升级；需要便携运行时使用 AppImage。安装后不需要 Node、npm、Bun 或 Rust，项目本身用到的 Git、编译器和语言工具仍由用户安装。
 
-当前 1.0.0 的 Linux 客户端以 Ubuntu 24.04、glibc 2.39 和 AVX2 x64 处理器为基线，支持应用内验签、差分下载与重启更新。deb 更新经 polkit 授权后由 apt 安装，失败时尝试恢复上一版本；AppImage 在原地替换文件，新版启动失败时换回旧文件。Runtime 更新与应用更新共用签名发现和兼容性检查。
+当前 1.0.1 的 Linux 客户端以 Ubuntu 24.04、glibc 2.39 和 AVX2 x64 处理器为基线，支持应用内验签、差分下载与重启更新。deb 更新经 polkit 授权后由 apt 安装，失败时尝试恢复上一版本；AppImage 在原地替换文件，新版启动失败时换回旧文件。Runtime 更新与应用更新共用签名发现和兼容性检查。
 
 ## 系统要求
 
@@ -164,7 +164,7 @@ OMP_PREVIEW_DATA=1 npm run preview
 
 ### 连接本机 Runtime
 
-另需 Bun 和 Rust 工具链；版本以 `omp-patch/upstream.json`、vendor 的 `rust-toolchain.toml` 及 [Runtime 开发说明](../omp-patch/README.md) 为准。当前 OMP 18.20.2 使用 Bun 1.4.4。请在与目标架构一致的 Linux 机器上构建：
+另需 Bun 和 Rust 工具链；版本以 `omp-patch/upstream.json`、vendor 的 `rust-toolchain.toml` 及 [Runtime 开发说明](../omp-patch/README.md) 为准。当前 OMP 19.0.1 使用 Bun 1.4.4。请在与目标架构一致的 Linux 机器上构建：
 
 ```bash
 npm run omp:install-deps

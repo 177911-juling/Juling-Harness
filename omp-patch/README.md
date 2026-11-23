@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The Runtime pin is `can1357/oh-my-pi` `v18.20.2` at commit `7c49c11aa5bbaf3f418406583096168ad5b8c6dc`. The current Harness revision is recorded in `patches/series.json`; this release line continues at `18.20.2-harness.11`. See the [18.20.2 migration report](../docs/migrations/omp-18.20.2.md) for interface changes and validation; the previous [18.19.0 migration report](../docs/migrations/omp-18.19.0.md) retains the earlier development revisions.
+The Runtime pin is `can1357/oh-my-pi` `v19.0.1` at commit `f40f335845f0b136453d12fec8d6057011082766`. The current Harness revision is recorded in `patches/series.json`; this release line continues at `19.0.1-harness.7`. See the [19.0.1 migration report](../docs/migrations/omp-19.0.1.md) for interface changes and validation; the previous [18.20.2 migration report](../docs/migrations/omp-18.20.2.md) retains the earlier development revisions.
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Harness repository.
 
@@ -36,7 +36,17 @@ The overlay is ordinary tracked source in this repository. Editing it is an ordi
 
 ## Windows build toolchain
 
-The v18.18.0 Windows bytecode bundle uses the upstream-pinned Bun **1.4.4**, including its certificate/Brotli fixes. Set `BUN_EXE` to a separately installed 1.4.4 executable before building; the global Bun installation need not change. Use the upstream-pinned Rust `nightly-2026-10-06` toolchain. Release signing uses the existing GitHub Environment; the isolated local `canary` test artifact is not a release identity and is not installed automatically.
+The v19.0.1 Windows bytecode bundle uses the upstream-pinned Bun **1.4.4**, including its certificate/Brotli fixes. Set `BUN_EXE` to a separately installed 1.4.4 executable before building; the global Bun installation need not change. Use the upstream-pinned Rust `nightly-2026-11-08` toolchain. Release signing uses the existing GitHub Environment; the isolated local `canary` test artifact is not a release identity and is not installed automatically.
+
+A Windows host build only emits the ISA variant of the build machine (usually `-modern`), while the binary embeds the shipped baseline addon as well. After changing the Runtime pin, refresh `packages/natives/native/pi_natives.win32-x64-baseline.node` from the matching published package before `omp:build:host`:
+
+```powershell
+npm pack @oh-my-pi/pi-natives-win32-x64@<upstream-version>
+tar -xzf oh-my-pi-pi-natives-win32-x64-<upstream-version>.tgz
+copy package\pi_natives.win32-x64-baseline.node omp-patch\vendor\oh-my-pi\packages\natives\native\
+```
+
+Otherwise the embed step fails with a `PI_NATIVES_VERSION_STAMP` mismatch. The file is gitignored; it is a local build input, not a committed artifact.
 
 ## Working loop
 

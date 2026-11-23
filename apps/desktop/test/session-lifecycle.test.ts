@@ -912,10 +912,9 @@ test("session.archive on a streaming resident session resolves in memory, aborts
       requestId: "req-archive-streaming" as CommandRequestId,
     });
     assert.equal(result.status, "accepted");
-    // Verified abort invoke was dispatched
-    const abortInvoke = live.invokes.find((req) => req.operation.kind === "core.abort");
-    assert.notEqual(abortInvoke, undefined);
-    // Verified session was switched off
+    // The archive runs after acceptance; wait for the abort and the switch-off.
+    await waitUntil(() => live.invokes.some((req) => req.operation?.kind === "core.abort"));
+    await waitUntil(() => switches.some((sw) => sw.kind === "fresh"));
     assert.equal(switches.some((sw) => sw.kind === "fresh"), true);
   }, { catalog: [], streaming: true });
 });

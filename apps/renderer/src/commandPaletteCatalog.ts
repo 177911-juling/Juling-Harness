@@ -24,6 +24,7 @@ export type PaletteAction =
   | { kind: "selectProject"; id: string; name: string }
   | { kind: "previewProject"; id: string }
   | { kind: "toggleSidebar" }
+  | { kind: "toggleRail" }
   | { kind: "toggleBottom" }
   | { kind: "toggleSide" }
   | { kind: "openSkills" }
@@ -166,6 +167,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
         ] as const).map(([operation, label]): PaletteItem => ({ id: `dock-${operation}`, icon: "layout", label, keywords: "dock layout 停靠 布局", action: { kind: "dock" as const, operation } })),
         { id: "open-file-browser", icon: "drive", label: "fileBrowser.open", keywords: "open file browser 打开文件浏览器 磁盘 全机 文件夹", action: { kind: "dock", operation: "file-browser" } },
         { id: "toggle-sidebar", icon: "layout", label: "palette.toggleSidebar", hint: formatShortcut(SHORTCUTS.toggleSidebar, "hint"), keywords: `sidebar 侧栏 切换侧栏 ${shortcutSearchText(SHORTCUTS.toggleSidebar)}`, action: { kind: "toggleSidebar" } },
+        { id: "toggle-rail", icon: "workbench", label: "menu.toggleRail", keywords: "navigation rail nav 主导航 导航 显示导航 收起导航 工作台 首页 设置", action: { kind: "toggleRail" } },
         { id: "toggle-bottom", icon: "rows", label: "palette.toggleBottom", hint: formatShortcut(SHORTCUTS.toggleBottomPanel, "hint"), keywords: `bottom panel 底部面板 切换底部面板 ${shortcutSearchText(SHORTCUTS.toggleBottomPanel)}`, action: { kind: "toggleBottom" } },
         { id: "toggle-side", icon: "panel", label: "palette.toggleSide", keywords: "right panel 右侧面板 切换右侧面板", action: { kind: "toggleSide" } },
         { id: "open-terminal", icon: "terminal", label: "palette.openTerminal", keywords: "terminal 终端 打开终端", action: { kind: "openBottom", tab: "terminal" } },

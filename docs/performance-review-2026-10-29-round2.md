@@ -35,7 +35,7 @@
 **「首屏体积 / 懒加载 / Runtime 后置」这三件结构性欠账已经收敛（首屏 JS 实测 2.36 MB、页面级懒加载完成、窗口不再等 Runtime）；现在真正决定体验与低配可用性的是另外三条：**
 
 1. **空闲 CPU 的 91% 是一条 `text-shadow` 无限动画**（实测 2.87% → 0.25%）；
-2. **每次启动、以及运行期每 30 秒，都要对 173.8 MB 的 `omp.exe` 做全文件 `sha256` + 验签**（启动 3–5 次、`usage.get` 1 次/30 s）；
+2. **每次启动、以及运行期每 30 秒，都要对 173.8 MB 的 `juling.exe` 做全文件 `sha256` + 验签**（启动 3–5 次、`usage.get` 1 次/30 s）；
 3. **每条流式事件克隆 2 次整包 operator 快照**（重快照会话 ≈10% Main 单核 + 32 MB/s 垃圾），叠加 `conversation.open` 双投递，构成「流式之外」最大的常量成本。
 
 再加上**低配/软件合成路径完全没有探测与降级**（`--disable-gpu` 实测总 CPU +62%），以及**击键路径一次按键重渲 58 处 state 的 AppShell**（6× 降速下 17.6 ms/字符），构成了第二轮的五项 P0。
@@ -104,7 +104,7 @@
 **读法（重要）**：
 
 - **好消息**：`deferredRuntime` 生效，**窗口不再等 Runtime**，打包形态窗口 **0.86–1.03 s** 就能出现（第一轮观察到的 17.2 s 是「整条后端就绪」口径，不是窗口口径）。
-- **坏消息**：**managed Runtime 就绪仍在 ~18–20 s 量级**（本机、隔离 profile）：首启 `seed`（拷贝 219 MB 载荷 + 跑一次 `omp.exe` smoke test）约 8.4 s；二次启动仍观察到 2.9 s 的 seed 与 19.6 s 的 resolve。
+- **坏消息**：**managed Runtime 就绪仍在 ~18–20 s 量级**（本机、隔离 profile）：首启 `seed`（拷贝 219 MB 载荷 + 跑一次 `juling.exe` smoke test）约 8.4 s；二次启动仍观察到 2.9 s 的 seed 与 19.6 s 的 resolve。
 - **归因与保留**：本形态没有真实安装记录（隔离 profile），`seed` 是否在真实安装态重复执行、`resolve` 的 19.6 s 里有多少是「冷文件缓存 + Defender 扫描 173.8 MB ×3–5 次」尚不能完全拆分；**这一项需要在真实安装机复测**（§9 局限）。但它与 §6 的「每次启动 3–5 次全文件哈希 + 探针」机理一致，方向可信。
 - **对产品的含义**：窗口快了，但用户在「窗口已出现、Runtime 还在转」的十几秒里看到的是一个**连接中界面**（本机实测 `showsConnecting=true`）。这十几秒的「半可用」比「先白屏再出窗」更容易被感知为故障，需要 §8 的「分段就绪 + 轻量骨架 + 阶段文案」。
 
@@ -207,7 +207,7 @@
 
 ### 3.3 Runtime 段：探针 + 验签是启动后半段的主要成本
 
-- **探针**：`runtime.probe` 每次 resolve 都起一次 `omp.exe`，本机 probe stderr 从 `cli:load:launch:start` 到 `:done` **≈1.2 s**（打包实测日志，`r2-packaged2` run2）；打包/播种路径另有一次 `smoke-test`（`runtime.self_check`）。
+- **探针**：`runtime.probe` 每次 resolve 都起一次 `juling.exe`，本机 probe stderr 从 `cli:load:launch:start` 到 `:done` **≈1.2 s**（打包实测日志，`r2-packaged2` run2）；打包/播种路径另有一次 `smoke-test`（`runtime.self_check`）。
 - **哈希**：`resolveRuntime` 在 probe 前后各 `fingerprintExecutable` 一次（`runtime-resolver.ts:319/359`），`currentManifest()` 再对 entrypoint 做一次 `verifyFileChecksums`（`installer.ts:363`），`host-backend.resolve` 又调 `currentManifest()`（`host-backend.ts:46`）。**一次 resolve = 3 次 173.8 MB 读了**；打包态叠加 update coordinator 与 `usage.get` 的同类调用，第一轮与本轮都观察到**每次启动 3–5 次**。
 - **块大小**：本机快盘 sha256 173.8 MB ≈ 90 ms；**HDD 顺序读 100–150 MB/s + Defender 实时扫描**，单次 1.2–1.8 s，5 次即 **6–9 s**——这是低配机启动不可用的主要来源之一。
 

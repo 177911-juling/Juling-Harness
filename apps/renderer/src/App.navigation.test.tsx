@@ -90,6 +90,23 @@ it("blocks secondary navigation and forward when model configuration is dirty", 
   expect(document.querySelector("#pageBody")?.getAttribute("data-route")).toBe("home");
 });
 
+it("restores a collapsed primary navigation from the View menu", async () => {
+  await mount();
+  const railClass = () => document.querySelector<HTMLElement>(".app-rail")!.className;
+  expect(railClass()).not.toContain("is-collapsed");
+  const toggleRail = () => {
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Toggle Primary Navigation" }));
+  };
+  toggleRail();
+  await waitFor(() => expect(railClass()).toContain("is-collapsed"));
+  // The rail is the only navigation surface: collapsing it must leave a reachable way back.
+  expect(screen.getByRole("button", { name: "Show navigation" })).toBeTruthy();
+  toggleRail();
+  await waitFor(() => expect(railClass()).not.toContain("is-collapsed"));
+  expect(screen.getByRole("button", { name: "Collapse navigation" })).toBeTruthy();
+});
+
 it("inserts prepared text after returning from media without losing the current draft", async () => {
   await mount();
   const editor = document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]')!;

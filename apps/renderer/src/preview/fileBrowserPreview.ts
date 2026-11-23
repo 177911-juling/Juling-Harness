@@ -1,8 +1,8 @@
 /**
  * 文件浏览器的演示文件系统（预览模式专用）。
  *
- * 故事与侧栏一致：项目在 `demoPath()` 下（omp-web、pi-web、mermaid worktree），
- * omp-web 的内容直接取 `PREVIEW_FILE_TREE`；其余是一台普通开发机的盘符、主目录、
+ * 故事与侧栏一致：项目在 `demoPath()` 下（juling-harness、pi-web、mermaid worktree），
+ * juling-harness 的内容直接取 `PREVIEW_FILE_TREE`；其余是一台普通开发机的盘符、主目录、
  * 下载与系统目录。写操作（新建文件夹 / 重命名 / 移到回收站）只改这份内存树，
  * 不调用 Host。演示路径、容量与时间都不是 Host 真相。
  */
@@ -55,7 +55,7 @@ function tools(): Node[] {
   const omp = fromPreviewTree(PREVIEW_FILE_TREE);
   omp.push(dir(".worktrees", [dir("mermaid", fromPreviewTree(PREVIEW_FILE_TREE.slice(3, 7)))], { hidden: true }));
   return [
-    dir("omp-web", omp, { age: 12 * MIN }),
+    dir("juling-harness", omp, { age: 12 * MIN }),
     dir("pi-web", [dir("src", [file("index.ts", 4 * KB, 1 * DAY)]), file("package.json", 2 * KB, 1 * DAY), file("README.md", 6 * KB, 8 * DAY)], { age: 1 * DAY }),
     dir("scratch", [file("notes.md", 1 * KB, 3 * HOUR)], { age: 3 * HOUR }),
   ];
@@ -119,7 +119,7 @@ function volumes(platform: "win32" | "darwin"): Volume[] {
 const TEXT_SAMPLE: Record<string, string> = {
   md: "# 笔记\n\n- 文件浏览器可以看到整台电脑\n- 双击文件夹进入，Backspace 返回上一级\n\n```ts\nconst place = \"此电脑\";\n```\n",
   yml: "providers:\n  anthropic:\n    models:\n      - id: claude-fable-5-2\n        roles: [default, plan]\n  openai:\n    baseUrl: https://api.openai.com/v1\n",
-  json: "{\n  \"name\": \"omp-web\",\n  \"private\": true,\n  \"scripts\": {\n    \"check\": \"node scripts/check.mjs\"\n  }\n}\n",
+  json: "{\n  \"name\": \"juling-harness\",\n  \"private\": true,\n  \"scripts\": {\n    \"check\": \"node scripts/check.mjs\"\n  }\n}\n",
   csv: "Model,Requests,Tokens\nClaude,128,52400\nGPT,96,41800\nGemini,64,28700\n",
   txt: "1. 回复 pi-web 上游 issue\n2. 整理 0.2.1 发布说明\n3. 周五前看完 spec-v3.pdf\n",
 };

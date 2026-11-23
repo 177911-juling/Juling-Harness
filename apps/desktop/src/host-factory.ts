@@ -38,7 +38,7 @@ import { chmod, lstat, mkdir, open, readFile, rm, unlink, writeFile, type FileHa
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import { app, dialog, shell } from "electron";
+import { BrowserWindow, app, dialog, shell } from "electron";
 
 import type { ArchId, WorkspaceId } from "@juling-harness/client-contract";
 import type { RuntimePreference } from "@juling-harness/harness-protocol";
@@ -199,10 +199,19 @@ function productionWorkspaceRegistryPath(): string {
 /** Production system directory picker; `undefined` = user cancelled. */
 function createProductionPickDirectory(): () => Promise<string | undefined> {
   return async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openDirectory", "createDirectory"],
-      title: desktopText("打开本地文件夹", "Open Local Folder"),
-    });
+    // An ownerless dialog can open behind the app window or on another
+ // monitor — the user sees the create-project dialog "flash" and nothing else.
+ // Always parent it to a visible window of this app.
+    const owner = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows().find(window => window.isVisible());
+    const result = owner === undefined
+      ? await dialog.showOpenDialog({
+          properties: ["openDirectory", "createDirectory"],
+          title: desktopText("打开本地文件夹", "Open Local Folder"),
+        })
+      : await dialog.showOpenDialog(owner, {
+          properties: ["openDirectory", "createDirectory"],
+          title: desktopText("打开本地文件夹", "Open Local Folder"),
+        });
     if (result.canceled || result.filePaths[0] === undefined) {
       return undefined;
     }
@@ -660,6 +669,7 @@ export function createProductionHostFactory(options?: {
         await ensureRegistry();
         return registry.get(workspaceId)?.canonicalPath;
       },
+      async () => { await ensureRegistry(); return registry.list(); },
     ),
     ...(options?.openUrl === undefined ? {} : { openUrl: options.openUrl }),
     ...(options?.revealDirectory === undefined ? {} : { revealDirectory: options.revealDirectory }),

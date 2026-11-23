@@ -361,6 +361,11 @@ export interface HostCatalogEntry {
 export interface HostSessionCatalogProvider {
   /** Omit workspaceId to retain the active-workspace compatibility path. */
   list(input?: { readonly workspaceId?: WorkspaceId }): HostCatalogEntry[] | Promise<HostCatalogEntry[]>;
+  locate?(sessionId: string): Promise<readonly {
+    readonly workspaceId: WorkspaceId;
+    readonly workspaceName: string;
+    readonly entry: HostCatalogEntry;
+  }[]>;
 }
 
 /** Runtime-independent persistent transcript reader owned by the Host/Broker. */
@@ -576,6 +581,8 @@ export interface HostWorkspaceFileService {
   inspect?(input: import("@juling-harness/client-contract").WorkspaceFileTarget): Promise<import("@juling-harness/client-contract").WorkspaceFileInfo>;
   readText?(input: import("@juling-harness/client-contract").WorkspaceFileTarget): Promise<import("@juling-harness/client-contract").WorkspaceFileText>;
   readChunk?(input: import("@juling-harness/client-contract").WorkspaceFileChunkInput): Promise<import("@juling-harness/client-contract").WorkspaceFileChunk>;
+  /** Classifies path-like transcript text; paths it cannot classify are omitted from the result. */
+  resolveAll?(input: import("@juling-harness/client-contract").WorkspacePathResolveInput): Promise<readonly import("@juling-harness/client-contract").WorkspacePathResolution[]>;
   writeText?(input: import("@juling-harness/client-contract").WorkspaceFileWrite): Promise<import("@juling-harness/client-contract").WorkspaceFileSaveResult>;
   get(input: { readonly workspaceId: WorkspaceId; readonly path?: string }): WorkspaceFileTreeReadModel | Promise<WorkspaceFileTreeReadModel>;
   createFile(input: { readonly workspaceId: WorkspaceId; readonly path: string }): WorkspaceFileMutationResult | Promise<WorkspaceFileMutationResult>;
@@ -589,6 +596,8 @@ export interface HostSystemFileService {
   inspect(input: import("@juling-harness/client-contract").SystemFileTarget): Promise<import("@juling-harness/client-contract").SystemFileInfo>;
   readText(input: import("@juling-harness/client-contract").SystemFileTarget): Promise<import("@juling-harness/client-contract").SystemFileText>;
   readChunk(input: import("@juling-harness/client-contract").SystemFileChunkInput): Promise<import("@juling-harness/client-contract").WorkspaceFileChunk>;
+  /** Absolute-path counterpart of {@link HostWorkspaceFileService.resolveAll}; unclassifiable paths are skipped. */
+  resolveAll?(input: Omit<import("@juling-harness/client-contract").WorkspacePathResolveInput, "workspaceId">): Promise<readonly import("@juling-harness/client-contract").WorkspacePathResolution[]>;
   writeText(input: import("@juling-harness/client-contract").SystemFileWrite): Promise<import("@juling-harness/client-contract").SystemFileSaveResult>;
   createDirectory(input: { readonly parent: string; readonly name: string }): Promise<import("@juling-harness/client-contract").SystemFileMutationResult>;
   rename(input: { readonly path: string; readonly name: string }): Promise<import("@juling-harness/client-contract").SystemFileMutationResult>;
@@ -727,6 +736,7 @@ export interface HostSemanticCommandService {
    * record (telemetry, thread binding, session lease, pin entry).
    */
   delete?(input: { readonly threadId: ThreadId; readonly deleteManagedArtifacts?: boolean }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  deleteArchived?(input: { readonly threadId: ThreadId }): ConfigWriteResult | Promise<ConfigWriteResult>;
 }
 
 /** Default diagnostics factory: real timestamps and random opaque entry ids. */

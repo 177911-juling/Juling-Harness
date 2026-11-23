@@ -80,4 +80,4 @@
 - vendor：`bun run check:tools`（lint / 格式）与全部包 `check:types` 通过；`omp:verify:patches` 使用的 101 个测试文件全部通过；`ci:test:smoke` 通过。
 - 根目录：`npm run check`（构建 + 核心回归）通过；渲染端完整 vitest 135 个文件 / 775 个测试通过；host-client-api 215 个测试通过；`scripts/runtime-artifact.test.mjs` 19 个测试通过。
 - 新增行为测试：审批答复映射、`approveTool` 优先级、作业树分组、widget 六种块、`awaitingAsyncWork` 不关闭回合、MCP 进度到达工具卡、Eval 表格视图、MCP 退出删除 `auth` 块、新原生偏好往返。
-- **未验证**：未编译签名 `omp.exe`，未在桌面会话中实际点验审批记住、OAuth 浏览器回调、Seance 与作业 widget。
+- **未验证**：未编译签名 `juling.exe`，未在桌面会话中实际点验审批记住、OAuth 浏览器回调、Seance 与作业 widget。

@@ -14,6 +14,7 @@ export type EnvironmentRepository = {
 export type EnvironmentTarget = {
   readonly name?: string | undefined;
   readonly remote: boolean;
+  readonly kind?: "local" | "ssh" | "wsl";
 };
 
 export type EnvironmentRuntimeStatus = "connected" | "connecting" | "disconnected" | "unavailable";
@@ -91,7 +92,7 @@ function runtimeTipKey(status: EnvironmentRuntimeStatus): string | undefined {
 /**
  * Parent folder of a workspace root, for the address beside the project name.
  * The name is the leaf, so the address stays complementary instead of
- * repeating it: `D:/Project/omp-web` -> `D:/Project`, `/home/me/app` ->
+ * repeating it: `D:/Project/juling-harness` -> `D:/Project`, `/home/me/app` ->
  * `/home/me`, `D:/app` -> `D:/`, `/app` -> `/`.
  */
 export function parentAddress(root: string): string | undefined {
@@ -119,7 +120,7 @@ export function buildEnvironmentCard(input: EnvironmentCardInput, t: Environment
   const environmentTip = runtimeTipKey(input.runtimeStatus);
 
   const machine: EnvironmentCardView["machine"] = {
-    label: target.remote ? t("environment.remote", { name: target.name ?? "SSH" }) : t("environment.local"),
+    label: target.remote ? t(target.kind === "wsl" ? "environment.remoteWsl" : "environment.remote", { name: target.name ?? "SSH" }) : t("environment.local"),
     dot: runtimeDot(input.runtimeStatus),
     ...(environmentTip === undefined ? {} : { tip: t(environmentTip) }),
   };
